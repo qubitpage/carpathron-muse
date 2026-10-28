@@ -1,0 +1,48 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+const fs = require('fs'), os = require('os'), path = require('path');
+const fake = require('./fake-meta');
+const { startServer } = require('../backend/server');
+const { chromium } = require(process.env.PW || 'playwright');
+(async () => {
+  const out = process.argv[2];
+  await fake.start(18711);
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-ui-'));
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-uiws-'));
+  fs.writeFileSync(path.join(ws, 'README.md'), '# demo');
+  fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ apiKey: 'test-key', apiBase: 'http://127.0.0.1:18711/v1', engine: 'api', workspace: ws, port: 18712 }));
+  const srv = await startServer({ dataDir, log: () => {} });
+  const b = await chromium.launch({ args: ['--ignore-certificate-errors'] });
+  const p = await b.newPage({ viewport: { width: 1360, height: 860 } });
+  const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+  await p.goto(`https://localhost:18712/?t=${srv.token}`);
+  await p.waitForTimeout(800);
+  await p.screenshot({ path: `${out}/s1-empty.png` });
+  await p.fill('#input', 'Hi! Please remember my name is Mihai and I build robots');
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(900);
+  await p.fill('#input', 'write hello file');
+  await p.keyboard.press('Enter');
+  await p.waitForSelector('.approval .btn.primary');
+  await p.waitForTimeout(300);
+  await p.screenshot({ path: `${out}/s2-approval.png` });
+  await p.click('.approval .btn.primary');
+  await p.waitForTimeout(900);
+  await p.click('details.fold.tool summary');
+  await p.waitForTimeout(200);
+  await p.screenshot({ path: `${out}/s3-done.png` });
+  await p.fill('#input', '/');
+  await p.waitForTimeout(200);
+  await p.screenshot({ path: `${out}/s4-slash.png` });
+  await p.fill('#input', '');
+  for (const v of ['memory', 'projects', 'robot', 'activity', 'settings']) {
+    await p.click(`#nav button[data-view="${v}"]`);
+    await p.waitForTimeout(700);
+    await p.screenshot({ path: `${out}/v-${v}.png`, fullPage: false });
+  }
+  const m = await b.newPage({ viewport: { width: 390, height: 800 }, isMobile: true });
+  await m.goto(`https://localhost:18712/?t=${srv.token}`);
+  await m.waitForTimeout(800);
+  await m.screenshot({ path: `${out}/m-phone.png` });
+  console.log('errors:', JSON.stringify(errs));
+  await b.close(); await srv.close(); process.exit(0);
+})().catch((e) => { console.error(e); process.exit(1); });

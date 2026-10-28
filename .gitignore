@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+.godot/
+apps/quest-avatar/build/
+*.keystore
+*.jks
+*.apk
+*.aar
+*.jar
+.env

@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Muse Carpathron</title>
+  <link rel="icon" href="icon.png">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <img src="icon.png" alt="" class="logo">
+        <div class="brand-text"><b>Muse Carpathron</b><span>powered by Meta Muse</span></div>
+        <button class="icon-btn only-mobile" id="btnCloseSide" title="Close">✕</button>
+      </div>
+      <button class="new-chat" id="btnNewChat"><span>＋</span> New chat</button>
+      <div class="search"><input id="search" placeholder="Search chats…" autocomplete="off"></div>
+      <nav class="nav" id="nav">
+        <button data-view="projects"><i>▦</i> Projects</button>
+        <button data-view="memory"><i>◎</i> Memory</button>
+        <button data-view="skills"><i>/</i> Skills</button>
+        <button data-view="robot"><i>⚙</i> Robot</button>
+        <button data-view="activity"><i>⇅</i> Activity</button>
+        <button data-view="settings"><i>☰</i> Settings</button>
+      </nav>
+      <div class="chat-list" id="chatList"></div>
+      <div class="side-foot" id="sideFoot"></div>
+    </aside>
+
+    <main class="main">
+      <button class="icon-btn only-mobile mobile-menu" id="btnMenuAll" title="Menu">☰</button>
+      <!-- CHAT -->
+      <section class="view" id="view-chat">
+        <header class="chat-head">
+          <button class="icon-btn only-mobile" id="btnOpenSide" title="Menu">☰</button>
+          <div class="title-wrap">
+            <input class="chat-title" id="chatTitle" value="New chat" spellcheck="false">
+            <div class="chips">
+              <button class="chip" id="chipFolder" title="Attached folder — the agent works here">📁 <span>workspace</span></button>
+              <button class="chip" id="chipProject" title="Project">▦ <span>No project</span></button>
+            </div>
+          </div>
+          <div class="head-controls">
+            <select id="selEngine" title="Engine">
+              <option value="muse">Meta account (Muse Code)</option>
+              <option value="api">Meta API key</option>
+            </select>
+            <select id="selModel" title="Model"></select>
+            <div class="seg" id="segMode" title="Approval mode">
+              <button data-mode="ask" title="Ask before changing files, running commands or moving the robot">Ask</button>
+              <button data-mode="auto" title="Do everything without asking">Auto</button>
+              <button data-mode="plan" title="Read-only: research and plan">Plan</button>
+            </div>
+          </div>
+        </header>
+        <div class="messages" id="messages"></div>
+        <div class="composer-wrap">
+          <div class="slash" id="slash" hidden></div>
+          <div class="attachments" id="attachments"></div>
+          <form class="composer" id="composer">
+            <button type="button" class="icon-btn" id="btnAttach" title="Attach files">📎</button>
+            <input type="file" id="fileInput" multiple hidden>
+            <textarea id="input" rows="1" placeholder="Message Muse Carpathron…  (type / for skills)"></textarea>
+            <button type="submit" class="send" id="btnSend" title="Send (Enter)">↑</button>
+            <button type="button" class="send stop" id="btnStop" title="Stop" hidden>■</button>
+          </form>
+          <div class="composer-hint" id="hint">Enter to send · Shift+Enter new line · Muse can make mistakes — check important work.</div>
+        </div>
+      </section>
+
+      <!-- PROJECTS -->
+      <section class="view page" id="view-projects" hidden>
+        <div class="page-head"><h1>Projects</h1><button class="btn primary" id="btnNewProject">＋ New project</button></div>
+        <p class="muted">A project keeps its own instructions and knowledge files. Small projects are read in full; big ones are searched (RAG) so only the relevant passages are used.</p>
+        <div class="cards" id="projectList"></div>
+        <div class="project-detail" id="projectDetail" hidden></div>
+      </section>
+
+      <!-- MEMORY -->
+      <section class="view page" id="view-memory" hidden>
+        <div class="page-head"><h1>Memory</h1>
+          <label class="toggle"><input type="checkbox" id="autoMemory"> <span>Learn automatically from chats</span></label>
+        </div>
+        <p class="muted">What Muse Carpathron remembers about you across all chats. It is used in every new conversation. You can add, edit or delete anything.</p>
+        <form class="row" id="memForm"><input id="memInput" placeholder="Add something to remember, e.g. “I live in Romania and prefer short answers”"><button class="btn primary">Add</button></form>
+        <div class="list" id="memList"></div>
+        <button class="btn danger subtle" id="btnMemClear">Delete all memory</button>
+      </section>
+
+      <!-- SKILLS -->
+      <section class="view page" id="view-skills" hidden>
+        <div class="page-head"><h1>Skills</h1><button class="btn primary" id="btnNewSkill">＋ New skill</button></div>
+        <p class="muted">Saved workflows. Type <code>/name</code> in a chat to use one (e.g. <code>/review src</code>). Built-in: <code>/remember</code>, <code>/new</code>.</p>
+        <div class="list" id="skillList"></div>
+        <form class="skill-form" id="skillForm" hidden>
+          <label>Name <input id="skName" placeholder="e.g. weekly-report"></label>
+          <label>Description <input id="skDesc" placeholder="One line"></label>
+          <label>Instructions <textarea id="skBody" rows="8"></textarea></label>
+          <div class="row"><button class="btn primary">Save skill</button><button type="button" class="btn" id="skCancel">Cancel</button></div>
+        </form>
+      </section>
+
+      <!-- ROBOT -->
+      <section class="view page" id="view-robot" hidden>
+        <div class="page-head"><h1>Baby Carpathron</h1><span class="pill" id="robotPill">…</span></div>
+        <div class="robot-grid">
+          <div class="card">
+            <div class="pad" id="pad">
+              <button data-dir="fl">↖</button><button data-dir="f">▲</button><button data-dir="fr">↗</button>
+              <button data-dir="l">⟲</button><button class="stop" id="btnRobotStop">STOP</button><button data-dir="r">⟳</button>
+              <button data-dir="bl">↙</button><button data-dir="b">▼</button><button data-dir="br">↘</button>
+            </div>
+            <label class="speed"><span>Speed <b id="speedOut">100</b>%</span><input type="range" id="speed" min="20" max="100" step="5" value="100"></label>
+            <div class="motors">
+              <div class="motor"><span>L</span><div class="bar"><div id="barL"></div></div><em id="valL">0</em></div>
+              <div class="motor"><span>R</span><div class="bar"><div id="barR"></div></div><em id="valR">0</em></div>
+              <div class="muted small">source: <b id="motorSrc">idle</b> · keys W A S D · Space = stop</div>
+            </div>
+            <form class="row" id="carForm"><input id="carIp" placeholder="Car IP (empty = simulation)"><button class="btn">Save</button></form>
+            <button class="btn" id="btnFindCar" type="button">🔍 Find my car</button> <span class="muted small" id="findInfo"></span>
+          </div>
+          <div class="card" id="liveCard" hidden>
+            <h3>Live video from the car</h3>
+            <img id="carVideo" class="cam-preview" alt="car camera">
+            <label class="speed"><span>Headlight</span><input type="range" id="carLed" min="0" max="255" value="0"></label>
+          </div>
+          <div class="card">
+            <h3>Camera</h3>
+            <p class="muted small">With the Carpathron firmware the car's own camera is used automatically. Optional: another snapshot URL (phone IP-camera app). Otherwise this device's camera is used.</p>
+            <form class="row" id="camForm"><input id="camUrl" placeholder="http://192.168.1.60/capture  (empty = PC webcam)"><button class="btn">Save</button></form>
+            <label class="toggle" style="margin:6px 0 10px"><input type="checkbox" id="camOffer"> <span>Use <b>this device's</b> camera for robot photos (e.g. a phone mounted on the car — keep this page open)</span></label>
+            <button class="btn primary" id="btnPhoto">📷 Take photo</button>
+            <img id="camPreview" class="cam-preview" alt="" hidden>
+            <div class="muted small" id="camInfo"></div>
+          </div>
+          <div class="card" id="headCard">
+            <h3>Robot head &amp; room map</h3>
+            <p class="muted small">The camera is fixed to the car, so the car turns its body to look (like a robot), takes the photo and turns back. A room scan turns a full circle, photographs every side and draws a map.</p>
+            <div class="seg look-row">
+              <button data-look="left">👈 Look left</button><button data-look="back">🔄 Look behind</button><button data-look="right">Look right 👉</button>
+            </div>
+            <button class="btn primary wide" id="btnScan">🗺️ Scan the room</button>
+            <div class="muted small" id="scanInfo"></div>
+            <img id="mapImg" class="cam-preview" alt="room map" hidden>
+            <details class="small" style="margin-top:8px"><summary>Turn calibration</summary>
+              <p class="muted small">Time for one full circle at turn speed. Press <b>Test 360°</b>: the car should end facing exactly where it started. Turned too far → lower the time; not far enough → raise it.</p>
+              <form class="row" id="turnForm"><label class="small">Full turn (ms) <input id="turnMs" type="number" min="600" max="5000" step="50" style="width:90px"></label> <label class="small">Turn speed % <input id="turnSpeed" type="number" min="40" max="100" step="5" style="width:70px"></label><button class="btn">Save</button></form>
+              <button class="btn" id="btnTurnTest" type="button">↻ Test 360°</button> <button class="btn" id="btnTurn90" type="button">↻ Test 90°</button>
+            </details>
+          </div>
+          <div class="card sim-card">
+            <canvas id="sim"></canvas>
+            <div class="sim-label" id="simLabel">Simulation</div>
+            <button class="btn tiny" id="btnSimReset">Reset</button>
+          </div>
+          <div class="card" id="questCard">
+            <h3>Meta Quest 3S</h3>
+            <div class="seg" id="xrMode"><button data-mode="tank" class="on">Tank</button><button data-mode="arcade">Arcade</button></div>
+            <button class="btn primary wide xr-big" id="btnRobotEyes" disabled>👁 Robot eyes (VR) — see what the car sees</button>
+            <p class="muted small">You sit inside the robot: live video on a big screen, sticks drive, turn your head and the car turns with you. A/X stop · B photo · Y head steering on/off · trigger turbo · left grip look behind · both grips scan the room.</p>
+            <button class="btn wide xr-big" id="btnEnterXR" disabled>🕶 Passthrough drive (AR) — watch the real car</button>
+            <p class="muted small" id="xrNote">Open this app in the Quest browser to drive with the controllers.</p>
+            <div id="questPair" class="pairbox"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ACTIVITY -->
+      <section class="view page" id="view-activity" hidden>
+        <div class="page-head"><h1>Activity</h1></div>
+        <p class="muted">How it works: the app reads your folders and files <b>locally</b>, sends only what is needed with your prompt to Meta's model in the <b>cloud</b>, and then executes the returned actions (edits, commands, robot moves) <b>locally</b> on this PC. Here you can see each step.</p>
+        <div class="list activity" id="activityList"></div>
+        <details><summary>Technical log</summary><pre id="techLog"></pre></details>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view page" id="view-settings" hidden>
+        <div class="page-head"><h1>Settings</h1></div>
+        <div class="settings" id="settingsBody"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/vendor/marked.js"></script>
+  <script src="/vendor/purify.js"></script>
+  <script src="app.js"></script>
+  <script src="xr-robot.js"></script>
+  <script src="robot.js"></script>
+</body>
+</html>

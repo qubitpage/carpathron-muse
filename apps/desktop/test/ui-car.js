@@ -1,0 +1,20 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+const fs = require('fs'), os = require('os'), path = require('path');
+const { startServer } = require('../backend/server');
+const { chromium } = require(process.env.PW || 'playwright');
+(async () => {
+  const jpg = fs.readFileSync('/tmp/claude-0/cam.jpg');
+  const car = require('./fake-car').start(18780, 18781, jpg);
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-car-'));
+  fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ port: 18782, robot: { carIp: '127.0.0.1:18780' } }));
+  const srv = await startServer({ dataDir, log: () => {} });
+  const b = await chromium.launch({ args: ['--ignore-certificate-errors'] });
+  const p = await b.newPage({ viewport: { width: 1300, height: 900 } });
+  await p.goto(`https://localhost:18782/?t=${srv.token}`); await p.waitForTimeout(800);
+  await p.click('#nav button[data-view="robot"]'); await p.waitForTimeout(2500);
+  await p.keyboard.down('w'); await p.waitForTimeout(500);
+  await p.screenshot({ path: process.argv[2] + '/car-page.png' });
+  await p.keyboard.up('w');
+  console.log('drive cmds:', car.log.filter((x) => x.startsWith('/drive')).length, 'video:', await p.evaluate(() => document.querySelector('#carVideo').naturalWidth));
+  await b.close(); car.close(); await srv.close(); process.exit(0);
+})().catch((e) => { console.error(e); process.exit(1); });

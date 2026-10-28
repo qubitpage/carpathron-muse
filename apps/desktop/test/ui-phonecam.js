@@ -1,0 +1,20 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+const fs = require('fs'), os = require('os'), path = require('path');
+const { startServer } = require('../backend/server');
+const { chromium } = require(process.env.PW || 'playwright');
+(async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-pc-'));
+  fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ port: 18952 }));
+  const srv = await startServer({ dataDir, log: () => {} });
+  const b = await chromium.launch({ args: ['--ignore-certificate-errors', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
+  const ctx = await b.newContext({ viewport: { width: 390, height: 800 }, isMobile: true, permissions: ['camera'] });
+  const p = await ctx.newPage();
+  await p.goto(`https://localhost:18952/?t=${srv.token}`); await p.waitForTimeout(800);
+  await p.click('#btnMenuAll'); await p.click('#nav button[data-view="robot"]'); await p.waitForTimeout(400);
+  await p.check('#camOffer'); await p.waitForTimeout(2500);
+  const r = await fetch(`https://localhost:18952/api/camera/capture`, { method: 'POST', headers: { 'x-mc-token': srv.token, 'Content-Type': 'application/json' }, body: '{}' }).then((x) => x.json());
+  console.log('capture:', JSON.stringify(r));
+  await p.waitForTimeout(1500);
+  await p.screenshot({ path: process.argv[2] + '/phonecam.png', fullPage: true });
+  await b.close(); await srv.close(); process.exit(0);
+})().catch((e) => { console.error(e); process.exit(1); });

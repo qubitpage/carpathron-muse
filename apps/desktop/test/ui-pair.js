@@ -1,0 +1,23 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+const fs = require('fs'), os = require('os'), path = require('path');
+const { startServer } = require('../backend/server');
+const { chromium } = require(process.env.PW || 'playwright');
+(async () => {
+  const out = process.argv[2];
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-pair-'));
+  fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ port: 18992 }));
+  const srv = await startServer({ dataDir, log: () => {} });
+  const b = await chromium.launch({ args: ['--ignore-certificate-errors'] });
+  const pc = await b.newPage({ viewport: { width: 1250, height: 860 } });
+  await pc.goto(`https://localhost:18992/?t=${srv.token}`); await pc.waitForTimeout(700);
+  await pc.click('#nav button[data-view="robot"]'); await pc.waitForTimeout(1200);
+  await pc.locator('#questPair').scrollIntoViewIfNeeded();
+  await pc.screenshot({ path: `${out}/pair-pc.png` });
+  const pin = (await pc.textContent('#questPair .pin')).replace(/\s/g, '');
+  const q = await (await b.newContext({ viewport: { width: 900, height: 700 }, userAgent: 'Mozilla/5.0 OculusBrowser/40.0 Quest 3S' })).newPage();
+  await q.goto('https://localhost:18992/pair'); await q.waitForTimeout(400);
+  await q.screenshot({ path: `${out}/pair-quest.png` });
+  await q.fill('#pin', pin); await q.click('button'); await q.waitForTimeout(1500);
+  console.log('Quest after pairing ->', q.url(), '| app loaded:', !!(await q.$('#nav')));
+  await b.close(); await srv.close(); process.exit(0);
+})().catch((e) => { console.error(e); process.exit(1); });

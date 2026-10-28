@@ -191,7 +191,7 @@ accept the certificate warning once (*Advanced → Proceed*), type the **6-digit
    (create a free developer organisation if asked). Restart the headset.
 2. **Meta Quest Developer Hub** on the PC → connect the Quest with USB-C → in the headset accept
    **Allow USB debugging** (check *Always allow*; if you don't see it, look in the headset's Notifications).
-3. Developer Hub → Device manager → **Add build** → `CarpathronAvatar.apk`.
+3. Developer Hub → Device manager → **Add build** → `CarpathronAvatar-1.1.4.apk` (from [Releases](https://github.com/qubitpage/carpathron/releases/latest)).
 4. In the headset: **Library → filter (top right) → Unknown Sources → Carpathron Avatar**. Pin it if you like.
    The USB cable is only for installing.
 

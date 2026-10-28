@@ -21,8 +21,8 @@ Requires a Carpathron-compatible robot on the same Wi-Fi. Voice and AI features 
 **Input:** Touch controllers
 **Player modes:** Single user
 **Languages:** English
-**Privacy policy:** https://github.com/msrusu87/carpathron/blob/main/docs/PRIVACY.md
-**Website / support:** https://github.com/msrusu87/carpathron
+**Privacy policy:** https://github.com/qubitpage/carpathron/blob/main/docs/PRIVACY.md
+**Website / support:** https://github.com/qubitpage/carpathron
 
 **Permissions justification**
 - `android.permission.RECORD_AUDIO`: push-to-talk voice commands, only while the user holds the right grip.

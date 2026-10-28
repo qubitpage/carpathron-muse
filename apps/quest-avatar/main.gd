@@ -40,6 +40,8 @@ var test := {}             # automated test mode (desktop/headless): --test-host
 var muse: Node
 var demo: Node3D = null   # virtual robot when no real robot is on the Wi-Fi
 var demo_test := 0
+var shots_dir := ""   # --shots=DIR: store screenshots of the demo (desktop render)
+var shots_t0 := 0
 var rec_effect: AudioEffectRecord
 var recording := false
 var tts_voice := ""
@@ -61,6 +63,8 @@ func _ready() -> void:
 		if str(a).begins_with("--test-host="):
 			test = {"host": str(a).split("=")[1], "t0": Time.get_ticks_msec(), "step": 0}
 	for a in OS.get_cmdline_user_args() + OS.get_cmdline_args():
+		if str(a).begins_with("--shots="):
+			shots_dir = str(a).substr(8)
 		if str(a) == "--test-demo":
 			demo_test = Time.get_ticks_msec()
 		if str(a).begins_with("--test-muse="):
@@ -157,7 +161,7 @@ func _refresh_panel() -> void:
 	if l.found.size() > 1:
 		found = "\nRobots found: %d — press Menu to switch" % l.found.size()
 	panel.text = "CARPATHRON AVATAR · %s%s\n%s · head steering %s · A/X stop · B photo · Y head steering · trigger turbo · hold both grips: search again" % [who, found, "arcade (right stick)" if arcade else "tank (two sticks)", "ON" if head_steer else "off"]
-	info.text = l.note
+	info.text = "DEMO ROBOT · drive around the virtual room · Menu = search for your robot" if demo != null else l.note
 	if muse:
 		panel.text += "\n" + muse.status_text() + ("   🎤 listening..." if recording else "")
 		if muse.last_answer != "":
@@ -302,6 +306,8 @@ func _process(delta: float) -> void:
 			_ptt(rg)
 			if _pressed("LG", lg):
 				muse.ask("What do you see? Anything in the way?")
+	if shots_dir != "":
+		_shots()
 	if demo_test > 0:
 		var dt_ms := Time.get_ticks_msec() - demo_test
 		if demo != null and dt_ms < 40000:
@@ -353,7 +359,8 @@ func _process(delta: float) -> void:
 		return
 	prev["STOP"] = false
 	if demo != null:
-		demo.drive(int(round(l)), int(round(r2)))
+		if shots_dir == "":
+			demo.drive(int(round(l)), int(round(r2)))
 	else:
 		link.drive(int(round(l)), int(round(r2)))
 	screen_mat.albedo_color = Color(1, 1, 1) if link.online or test or demo != null else Color(0.45, 0.45, 0.45)
@@ -384,3 +391,32 @@ func _test_step() -> Array:
 		print("AVATAR_TEST ", JSON.stringify({"frames": link.frames, "online": link.online, "name": link.robot_name, "photo": link.last_photo, "tex": screen_mat.albedo_texture != null, "muse": muse.state, "answer": test.get("answer", ""), "voice": muse.last_answer}))
 		get_tree().quit()
 	return [Vector2.ZERO, Vector2.ZERO, false]
+
+
+# ---------------------------------------------------------------- store screenshots (desktop render of the demo)
+func _shots() -> void:
+	if demo == null:
+		_start_demo()
+		shots_t0 = Time.get_ticks_msec()
+		return
+	var t := Time.get_ticks_msec() - shots_t0
+	# scripted drive: forward, turn left, forward, turn right
+	var plan := [[0, 1500, 0, 0], [1500, 3200, 70, 70], [3200, 4300, -60, 60], [4300, 6000, 70, 70], [6000, 7600, 60, -60], [7600, 9000, 60, 60], [9000, 99999, 0, 0]]
+	for p in plan:
+		if t >= p[0] and t < p[1]:
+			demo.drive(p[2], p[3])
+	var marks := {1400: "1", 3100: "2", 4250: "3", 5900: "4", 8900: "5"}
+	for m in marks:
+		var key: String = "shot" + str(marks[m])
+		if t >= m and not test.has(key):
+			test[key] = true
+			if marks[m] == "4":
+				cam.position = Vector3(1.3, 2.0, 0.6); cam.look_at(Vector3(0, 1.4, -2.2))
+			else:
+				cam.position = Vector3(0, 1.45, 0.05); cam.rotation = Vector3.ZERO
+			await RenderingServer.frame_post_draw
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png(shots_dir + "/shot" + marks[m] + ".png")
+			print("SHOT ", marks[m])
+	if t > 9500:
+		get_tree().quit()

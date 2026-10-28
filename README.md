@@ -18,6 +18,16 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 | 🔌 **Carpathron Robot Protocol** | Small open HTTP protocol: any robot that speaks it works with every app | [`protocol/ROBOT-PROTOCOL.md`](protocol/ROBOT-PROTOCOL.md) |
 | 📘 **A-to-Z guide** | Setup, everyday use, best practices, troubleshooting | [`docs/GUIDE.md`](docs/GUIDE.md) |
 
+## ⬇️ Download
+
+| App | File | Install |
+|---|---|---|
+| 🧠 **Muse Carpathron** for Windows 10 / 11 / Server 2016+ | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron/releases/latest/download/Muse-Carpathron-Setup.exe) | Run it, click through the installer (if SmartScreen appears: *More info → Run anyway*) |
+| 🥽 **Carpathron Avatar** for Meta Quest 3 / 3S / Pro / 2 | [**CarpathronAvatar-1.1.4.apk**](https://github.com/qubitpage/carpathron/releases/latest/download/CarpathronAvatar-1.1.4.apk) | Developer Mode on the headset → drag the APK into Meta Quest Developer Hub → open it from *Library → Unknown Sources*. Store release on Meta Horizon is in review. |
+| 🚗 **Baby Carpathron** car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* — see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md) |
+
+All files are also on the [Releases page](https://github.com/qubitpage/carpathron/releases).
+
 ## How Meta Muse powers every app
 
 | Muse model / tool | Used for | Apps |
@@ -56,9 +66,9 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 ## Quick start
 
 1. **Car:** assemble the kit, flash [`firmware/carpathron_car`](firmware/carpathron_car) with Arduino IDE (esp32 core **2.0.12**), put it on your Wi-Fi ([CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md)).
-2. **PC:** install Muse Carpathron (Windows installer from Releases, or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
+2. **PC:** install Muse Carpathron ([Muse-Carpathron-Setup.exe](https://github.com/qubitpage/carpathron/releases/latest/download/Muse-Carpathron-Setup.exe), or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
 3. **Phone:** Settings → WhatsApp → scan the QR. Send `/help` or a voice note.
-4. **Quest 3S:** sideload `CarpathronAvatar.apk` (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
+4. **Quest 3S:** sideload `CarpathronAvatar-1.1.4.apk` (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
 
 The full walk-through is in the **[A-to-Z guide](docs/GUIDE.md)**.
 

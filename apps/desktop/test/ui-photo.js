@@ -7,7 +7,7 @@ const { chromium } = require(process.env.PW || 'playwright');
   const out = process.argv[2];
   await fake.start(18911);
   // real small JPEG from python-generated file
-  const jpg = fs.readFileSync('/tmp/claude-0/cam.jpg');
+  const jpg = fs.readFileSync(require('path').join(__dirname, 'sample.jpg'));
   const camSrv = require('http').createServer((q, r) => { r.writeHead(200, { 'Content-Type': 'image/jpeg' }); r.end(jpg); }).listen(18913);
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-ui3-'));
   fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ apiKey: 'test-key', apiBase: 'http://127.0.0.1:18911/v1', engine: 'api', port: 18912, mode: 'auto', robot: { cameraUrl: 'http://127.0.0.1:18913/capture' } }));

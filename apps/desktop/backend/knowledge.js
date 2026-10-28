@@ -166,7 +166,7 @@ class Projects {
     return entry;
   }
   search(id, query, k = 6) { return this.index(id).bm25.search(query, k); }
-  // Small projects fit fully into the prompt (like Claude Projects); big ones use retrieval.
+  // Small projects fit fully into the prompt (project knowledge); big ones use retrieval.
   fullTextIfSmall(id, limit = 24000) {
     const { meta, totalChars } = this.index(id);
     if (totalChars > limit) return null;

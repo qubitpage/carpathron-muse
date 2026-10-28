@@ -12,7 +12,7 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 
 | | What it is | Where |
 |---|---|---|
-| 🧠 **Muse Carpathron** | Windows desktop app: Claude-style chat + agent on **Meta Muse** (Muse Spark via the Meta Model API, or your Meta account via **Muse Code**), tools, MCP, sub-agents, RAG memory, projects, skills, WhatsApp remote, robot control, room mapping, browser VR | [`apps/desktop`](apps/desktop) |
+| 🧠 **Muse Carpathron** | Windows desktop app: chat + agent on **Meta Muse** (Muse Spark via the Meta Model API, or your Meta account via **Muse Code**), tools, MCP, sub-agents, RAG memory, projects, skills, WhatsApp remote, robot control, room mapping, browser VR | [`apps/desktop`](apps/desktop) |
 | 🥽 **Carpathron Avatar** | Native **Meta Quest** app (OpenXR, Godot): see through the robot's eyes, drive with the controllers, turn your head and the robot turns with you, talk to Muse | [`apps/quest-avatar`](apps/quest-avatar) |
 | 🚗 **Baby Carpathron firmware** | ESP32-CAM car (KUONGSHUN AD174 4WD kit): live video, drive, photo, Wi-Fi setup, RC-style control | [`firmware/carpathron_car`](firmware/carpathron_car) |
 | 🔌 **Carpathron Robot Protocol** | Small open HTTP protocol: any robot that speaks it works with every app | [`protocol/ROBOT-PROTOCOL.md`](protocol/ROBOT-PROTOCOL.md) |
@@ -20,13 +20,18 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 
 ## ⬇️ Download
 
-| App | File | Install |
-|---|---|---|
-| 🧠 **Muse Carpathron** for Windows 10 / 11 / Server 2016+ | [**downloads/windows**](downloads/windows) — 5 parts + `Install.bat` | Download the repo ZIP (green **Code** button), open `downloads/windows`, double-click **Install.bat** — it rebuilds and verifies `Muse-Carpathron-Setup.exe` and starts it. [Details](downloads/README.md) |
-| 🥽 **Carpathron Avatar** for Meta Quest 3 / 3S / Pro / 2 | [**CarpathronAvatar-1.1.4.apk**](downloads/quest/CarpathronAvatar-1.1.4.apk) | Developer Mode on the headset → drag the APK into Meta Quest Developer Hub → open it from *Library → Unknown Sources*. Store release on Meta Horizon is in review. |
-| 🚗 **Baby Carpathron** car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* — see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md) |
+<p align="center">
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/download/v1/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_(127_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.4.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
+</p>
 
-Step-by-step install notes: [downloads/README.md](downloads/README.md).
+| App | Download | How to install |
+|---|---|---|
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.3.0) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/download/v1/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
+| 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.4) | [**CarpathronAvatar-1.1.4.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. The Meta Horizon Store version is in review. |
+| 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
+
+All files of this version: **[Release v1](https://github.com/qubitpage/carpathron-muse/releases/tag/v1)** · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
 
 ## How Meta Muse powers every app
 
@@ -66,9 +71,9 @@ Step-by-step install notes: [downloads/README.md](downloads/README.md).
 ## Quick start
 
 1. **Car:** assemble the kit, flash [`firmware/carpathron_car`](firmware/carpathron_car) with Arduino IDE (esp32 core **2.0.12**), put it on your Wi-Fi ([CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md)).
-2. **PC:** install Muse Carpathron ([downloads/windows](downloads/windows) → `Install.bat`, or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
+2. **PC:** install Muse Carpathron ([Muse-Carpathron-Setup.exe](https://github.com/qubitpage/carpathron-muse/releases/download/v1/Muse-Carpathron-Setup.exe), or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
 3. **Phone:** Settings → WhatsApp → scan the QR. Send `/help` or a voice note.
-4. **Quest 3S:** sideload `CarpathronAvatar-1.1.4.apk` (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
+4. **Quest 3S:** sideload [`CarpathronAvatar-1.1.4.apk`](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk) (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
 
 The full walk-through is in the **[A-to-Z guide](docs/GUIDE.md)**.
 

@@ -3,7 +3,7 @@ const fs = require('fs'), os = require('os'), path = require('path');
 const { startServer } = require('../backend/server');
 const { chromium } = require(process.env.PW || 'playwright');
 (async () => {
-  const jpg = fs.readFileSync('/tmp/claude-0/cam.jpg');
+  const jpg = fs.readFileSync(require('path').join(__dirname, 'sample.jpg'));
   const car = require('./fake-car').start(18780, 18781, jpg);
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-car-'));
   fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ port: 18782, robot: { carIp: '127.0.0.1:18780' } }));

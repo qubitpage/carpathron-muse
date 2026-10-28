@@ -38,4 +38,4 @@ removing it in Muse Carpathron, and uninstall the apps to remove all local data.
 
 ## Contact
 
-Open an issue at https://github.com/qubitpage/carpathron/issues
+Open an issue at https://github.com/qubitpage/carpathron-muse/issues

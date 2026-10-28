@@ -436,7 +436,7 @@
     if (on) { if (!S.workStart) S.workStart = Date.now(); setStatus(S.statusText || 'Working…'); }
     else { S.workStart = 0; S.statusText = ''; $('#working')?.remove(); }
   }
-  // Claude-style live indicator: spinner + what it is doing + elapsed time
+  // Live activity indicator: spinner + what it is doing + elapsed time
   function setStatus(text) {
     if (!S.conv || !S.running.has(S.conv.id)) { $('#working')?.remove(); return; }
     if (text) S.statusText = text;

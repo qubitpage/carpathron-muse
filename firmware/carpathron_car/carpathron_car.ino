@@ -612,7 +612,7 @@ void burnFlashFuse() {
   esp_err_t e3 = esp_efuse_write_field_bit(FUSE_SDIO_FORCE);
   Serial.printf("[fixboot] write results: %d %d %d\n", e1, e2, e3);
   Serial.println(flashFuseSet() ? "[fixboot] DONE. Flash fixed at 3.3 V. The car now boots with all wires plugged in."
-                                : "[fixboot] Could not set it. Tell Claude the line above.");
+                                : "[fixboot] Could not set it. See the guide (Troubleshooting).");
 }
 
 // ---------------------------------------------------------------- USB Serial Monitor commands

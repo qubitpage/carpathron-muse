@@ -23,7 +23,9 @@ m = m.replace('<uses-feature android:glEsVersion', '''<uses-permission android:n
         <intent><action android:name="org.khronos.openxr.OpenXRApiLayerService"/></intent>
     </queries>
     <uses-feature android:glEsVersion''', 1)
-m = m.replace('<application ', '<application android:usesCleartextTraffic="true" ', 1)
+# Store security scan: no cleartext HTTP through Android's Java network stack. (The robot link uses Godot's own
+# native sockets, which this setting does not cover, so local robots keep working.)
+m = m.replace('<application ', '<application android:usesCleartextTraffic="false" ', 1)
 # Meta Horizon Store (VRC.Quest.Packaging): launch activity excluded from recents, release build not debuggable
 m = m.replace('android:excludeFromRecents="false"', 'android:excludeFromRecents="true"')
 m = m.replace(' android:debuggable="true"', '')
@@ -36,6 +38,8 @@ open(y, 'w').write(yt)
 m = m.replace('<category android:name="android.intent.category.LAUNCHER"/>', '''<category android:name="android.intent.category.LAUNCHER"/>
                 <category android:name="com.oculus.intent.category.VR"/>
                 <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD"/>''', 1)
+# VRC: focus aware (the app keeps running under the system menu and handles losing input focus)
+m = re.sub(r'(<activity [^>]*android:name="com\.godot\.game\.GodotApp"[^>]*>)', r'\1\n            <meta-data android:name="com.oculus.vr.focusaware" android:value="true"/>', m, count=1)
 m = m.replace('<meta-data android:name="org.godotengine.editor.version"', '''<meta-data android:name="com.oculus.supportedDevices" android:value="quest2|questpro|quest3|quest3s"/>
         <meta-data android:name="org.godotengine.editor.version"''', 1)
 open(p, 'w').write(m)

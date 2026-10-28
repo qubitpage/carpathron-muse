@@ -12,6 +12,7 @@ extends Node3D
 
 const RobotLink = preload("res://robot_link.gd")
 const MuseLink = preload("res://muse_link.gd")
+const DemoRobot = preload("res://demo_robot.gd")
 const DEAD := 0.15
 const TURN_MS_360 := 2400.0   # calibrated full turn of the car at TURN_SPEED (same setting as Muse Carpathron)
 const TURN_SPEED := 70.0
@@ -37,6 +38,8 @@ var robot_index := 0
 var grip_hold := 0.0
 var test := {}             # automated test mode (desktop/headless): --test-host=IP [--test-muse=IP:PORT]
 var muse: Node
+var demo: Node3D = null   # virtual robot when no real robot is on the Wi-Fi
+var demo_test := 0
 var rec_effect: AudioEffectRecord
 var recording := false
 var tts_voice := ""
@@ -48,7 +51,7 @@ func _ready() -> void:
 	_build_world()
 	link = RobotLink.new()
 	add_child(link)
-	link.frame.connect(func(t): screen_mat.albedo_texture = t)
+	link.frame.connect(func(t): if demo == null: screen_mat.albedo_texture = t)
 	link.changed.connect(_refresh_panel)
 	muse = MuseLink.new()
 	add_child(muse)
@@ -58,6 +61,8 @@ func _ready() -> void:
 		if str(a).begins_with("--test-host="):
 			test = {"host": str(a).split("=")[1], "t0": Time.get_ticks_msec(), "step": 0}
 	for a in OS.get_cmdline_user_args() + OS.get_cmdline_args():
+		if str(a) == "--test-demo":
+			demo_test = Time.get_ticks_msec()
 		if str(a).begins_with("--test-muse="):
 			cfg.set_value("muse", "pc", ""); cfg.set_value("muse", "token", "")
 			test["muse"] = str(a).split("=")[1]
@@ -144,7 +149,9 @@ func _build_world() -> void:
 func _refresh_panel() -> void:
 	var l = link
 	var who := "no robot yet"
-	if l.host != "":
+	if demo != null:
+		who = "DEMO ROBOT in a virtual room (no real robot found on this Wi-Fi) · Menu = search again"
+	elif l.host != "":
 		who = "%s @ %s · %s%s" % [l.robot_name if l.robot_name != "" else "robot", l.host, "online" if l.online else "offline", (" · Wi-Fi %d dBm" % l.rssi) if l.rssi != 0 else ""]
 	var found := ""
 	if l.found.size() > 1:
@@ -155,8 +162,31 @@ func _refresh_panel() -> void:
 		panel.text += "\n" + muse.status_text() + ("   🎤 listening..." if recording else "")
 		if muse.last_answer != "":
 			info.text = muse.last_answer
-	if l.host == "" and l.found.size() > 0 and not test:
+	if test:
+		return
+	if demo != null and l.online:
+		_stop_demo()
+	if l.found.size() > 0 and (l.host == "" or demo != null) and not l.online:
+		_stop_demo()
 		_pick(0)
+	elif demo == null and not l.scanning and l.found.is_empty() and not l.online and l.note.begins_with("No robot"):
+		_start_demo()
+
+func _start_demo() -> void:
+	if demo != null:
+		return
+	demo = DemoRobot.new()
+	add_child(demo)
+	screen_mat.albedo_texture = demo.texture
+	link.note = "Demo robot: drive around the virtual room. Press Menu to search for your real robot."
+	_refresh_panel()
+
+func _stop_demo() -> void:
+	if demo == null:
+		return
+	demo.queue_free()
+	demo = null
+	screen_mat.albedo_texture = null
 
 func _on_muse() -> void:
 	_refresh_panel()
@@ -200,6 +230,15 @@ func _ptt(down: bool) -> void:
 			wav.save_to_wav(f)
 			muse.voice(FileAccess.get_file_as_bytes(f))
 
+func _notification(what: int) -> void:
+	# Meta menu / headset off / app in background: stop the robot at once
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		if link:
+			link.stop_now()
+		if recording:
+			recording = false
+			rec_effect.set_recording_active(false)
+
 func _pick(i: int) -> void:
 	if link.found.is_empty():
 		return
@@ -242,8 +281,12 @@ func _process(delta: float) -> void:
 			arcade = not arcade
 			cfg.set_value("ui", "arcade", arcade); cfg.save("user://avatar.cfg")
 			link.note = "Arcade mode (right stick)" if arcade else "Tank mode (two sticks)"; _refresh_panel()
-		if _pressed("MENU", left_hand.is_button_pressed("menu_button")) and link.found.size() > 1:
-			_pick(robot_index + 1)
+		if _pressed("MENU", left_hand.is_button_pressed("menu_button")):
+			if demo != null or link.found.is_empty():
+				_stop_demo()
+				link.scan(["carpathron.local"])
+			elif link.found.size() > 1:
+				_pick(robot_index + 1)
 		var lg := left_hand.get_float("grip") > 0.8
 		var rg := right_hand.get_float("grip") > 0.8
 		if lg and rg:
@@ -259,7 +302,21 @@ func _process(delta: float) -> void:
 			_ptt(rg)
 			if _pressed("LG", lg):
 				muse.ask("What do you see? Anything in the way?")
-	if test:
+	if demo_test > 0:
+		var dt_ms := Time.get_ticks_msec() - demo_test
+		if demo != null and dt_ms < 40000:
+			if not test.has("demo_t0"):
+				test["demo_t0"] = Time.get_ticks_msec(); test["demo_p0"] = demo.body.position
+			var since: int = Time.get_ticks_msec() - test["demo_t0"]
+			if since < 1500:
+				ls = Vector2(0, 1); rs = Vector2(0, 1)
+			elif since > 2000:
+				print("DEMO_TEST ", JSON.stringify({"demo": true, "moved_m": demo.body.position.distance_to(test["demo_p0"]), "tex": screen_mat.albedo_texture == demo.texture, "note": link.note}))
+				get_tree().quit()
+		elif dt_ms > 40000:
+			print("DEMO_TEST ", JSON.stringify({"demo": false, "note": link.note, "scanning": link.scanning}))
+			get_tree().quit()
+	if test.has("host"):
 		var r := _test_step()
 		ls = r[0]; rs = r[1]; stop = r[2]
 	var mx := 100.0 if turbo else 85.0
@@ -288,13 +345,18 @@ func _process(delta: float) -> void:
 	if stop:
 		if _pressed("STOP", true):
 			link.stop_now()
+			if demo != null:
+				demo.drive(0, 0)
 			link.note = "STOP"; _refresh_panel()
 			if xr_on:
 				right_hand.trigger_haptic_pulse("haptic", 0.0, 0.7, 0.1, 0.0)
 		return
 	prev["STOP"] = false
-	link.drive(int(round(l)), int(round(r2)))
-	screen_mat.albedo_color = Color(1, 1, 1) if link.online or test else Color(0.45, 0.45, 0.45)
+	if demo != null:
+		demo.drive(int(round(l)), int(round(r2)))
+	else:
+		link.drive(int(round(l)), int(round(r2)))
+	screen_mat.albedo_color = Color(1, 1, 1) if link.online or test or demo != null else Color(0.45, 0.45, 0.45)
 
 # ---- automated test (no headset): connect, wait for video, drive forward 1 s, stop, photo, report, quit
 func _test_step() -> Array:

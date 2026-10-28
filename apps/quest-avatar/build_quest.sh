@@ -8,7 +8,7 @@ APKTOOL=${APKTOOL:-apktool.jar}
 LOADER_AAR=${LOADER_AAR:-openxr_loader_for_android-1.1.49.aar}
 KS=${KS:?set KS to your keystore}; KS_PASS=${KS_PASS:?set KS_PASS}; KS_ALIAS=${KS_ALIAS:?set KS_ALIAS}
 mkdir -p build && rm -rf build/dec build/*.apk build/*.idsig
-"$GODOT" --headless --path . --export-debug "Quest" build/CarpathronAvatar-unsigned.apk > build/export.log 2>&1 || { tail -20 build/export.log; exit 1; }
+"$GODOT" --headless --path . --export-${EXPORT:-release} "Quest" build/CarpathronAvatar-unsigned.apk > build/export.log 2>&1 || { tail -20 build/export.log; exit 1; }
 java -jar "$APKTOOL" d -f -s -o build/dec build/CarpathronAvatar-unsigned.apk > /dev/null
 python3 tools_quest_patch.py build/dec
 unzip -o -q -j "$LOADER_AAR" jni/arm64-v8a/libopenxr_loader.so -d build/dec/lib/arm64-v8a

@@ -24,6 +24,15 @@ m = m.replace('<uses-feature android:glEsVersion', '''<uses-permission android:n
     </queries>
     <uses-feature android:glEsVersion''', 1)
 m = m.replace('<application ', '<application android:usesCleartextTraffic="true" ', 1)
+# Meta Horizon Store (VRC.Quest.Packaging): launch activity excluded from recents, release build not debuggable
+m = m.replace('android:excludeFromRecents="false"', 'android:excludeFromRecents="true"')
+m = m.replace(' android:debuggable="true"', '')
+# minSdk 32 / targetSdk 34 (store rule for apps created after March 2026)
+y = f'{d}/apktool.yml'
+yt = open(y).read()
+yt = re.sub(r"minSdkVersion: '?\d+'?", "minSdkVersion: 32", yt)
+yt = re.sub(r"targetSdkVersion: '?\d+'?", "targetSdkVersion: 34", yt)
+open(y, 'w').write(yt)
 m = m.replace('<category android:name="android.intent.category.LAUNCHER"/>', '''<category android:name="android.intent.category.LAUNCHER"/>
                 <category android:name="com.oculus.intent.category.VR"/>
                 <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD"/>''', 1)

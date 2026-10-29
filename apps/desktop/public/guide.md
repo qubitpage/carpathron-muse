@@ -274,10 +274,10 @@ app log"*, *"deploy this folder to /var/www/site"*, *"set up a daily database ba
 
 Left menu → **Plugins → GitHub**:
 
-- **Sign in with browser** (recommended):
-  - If the **GitHub CLI** (`gh`) is installed, its login opens in your browser; approve it and the app imports the login.
-  - Otherwise the app shows a **code** and opens `github.com/login/device`: type the code, approve, and the app connects
-    by itself. (This needs an OAuth app *Client ID* in the details section; the GitHub CLI route needs nothing.)
+- **Sign in with browser** (recommended): the app downloads the official **GitHub CLI** the first time (into its own
+  folder, no admin rights), shows a **one-time code** (already copied) and opens `github.com/login/device`. Paste the
+  code, click **Authorize**, and the app connects by itself. If you added an OAuth app *Client ID* in the details
+  section, that is used instead.
 - **Token** (alternative): open the link on the page to create a token with the `repo` and `workflow` scopes, paste it, **Connect**.
 - Set the **commit author** (name and email) — commits are made under your name.
 - **Disconnect** removes the token from this PC.
@@ -297,21 +297,34 @@ The agent checks for secrets and a `.gitignore` before pushing and never force-p
 ## 9. MCP servers (add more tools)
 
 *Settings → MCP servers (tools)* connects extra tools using the **Model Context Protocol**, the same format other
-AI apps use. Paste a JSON object, then **Save & start**:
+AI apps use. They work with **both engines** (Meta API key and Muse Code).
+
+**Built in — nothing to install** (set up automatically, and the **Add built-in servers** button adds them back):
+
+| Server | What the agent gets |
+|---|---|
+| `filesystem` | Read, write, search, move files in the folders you list (default `%USERPROFILE%\MuseCarpathron`) |
+| `memory` | A knowledge graph: store people, projects, facts and relations, and query them later |
+| `sequential-thinking` | A step-by-step thinking tool for planning hard problems |
+
+**Add others:** edit the JSON, then **Save & start**:
 
 ```json
 {
-  "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\me\\Documents"] },
+  "filesystem": { "builtin": "filesystem", "args": ["C:\\Users\\me\\Documents", "D:\\Projects"] },
+  "memory": { "builtin": "memory" },
+  "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "…" } },
   "remote": { "url": "https://example.com/mcp" }
 }
 ```
 
-- `command` + `args` start a local server (Node.js is needed for `npx` ones).
-- `url` connects to a remote MCP server.
-- The status list shows each server and how many tools it has; **Restart all** reloads them.
-- MCP tools are used by the API-key engine. Muse Code gets the app's built-in tools through the Carpathron bridge.
-
----
+- `builtin` runs a server that ships with the app.
+- `command` + `args` start a local server. `npx …` servers need **Node.js** on the PC, `uvx …` servers need **Python/uv**.
+  `"command": "node"` works without Node.js installed (the app's own runtime is used).
+- `url` connects to a remote MCP server (add `"headers"` for an API key).
+- `"enabled": false` keeps a server in the list but off.
+- The status list shows each server — **ready** with its tools, or **error** with the reason. **Restart all** reloads them.
+- In chats the tools appear as `mcp__<server>__<tool>`; ask normally (*"remember in the knowledge graph that…"*).
 
 ## 10. Memory, projects and skills
 
@@ -457,8 +470,9 @@ The full app opens: chat, robot, video. A phone can also act as the robot's came
 | SSH: *host key changed* | If you reinstalled the server: Edit → **Reset host key**. Otherwise don't connect |
 | The same server appears twice | Install 1.5.3 or newer — duplicates are merged at start |
 | A server chat says the server was removed | Re-add the server, then pick it again with the 🌐 chip |
-| GitHub *Sign in with browser* does nothing | Install the GitHub CLI, or add a Client ID in the details, or use a token |
+| GitHub *Sign in with browser* fails | The app downloads the GitHub CLI by itself (needs internet to github.com). If it still fails, use a token (details section) |
 | Push refused (403) | The token needs the `repo` (and `workflow`) scope, or you lack access to that repository |
+| MCP server shows *error* | Read the reason in the list: `npx` needs Node.js installed; check the JSON; **Restart all** |
 | arduino-cli missing | Ask *"set up Arduino"* (`arduino_setup`) or set its path in Settings |
 | Board not found / upload fails | Other programs using the COM port (close Serial Monitor), USB cable with data, hold BOOT |
 | WhatsApp doesn't answer | Status must be *connected*; write in **Message yourself** or add your number |

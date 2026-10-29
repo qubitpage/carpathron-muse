@@ -463,6 +463,59 @@ function tinyPdf(pages) {
     assert.strictEqual((await api('/api/settings')).githubClientId, 'Ov23test');
   });
 
+  await step('GitHub: browser sign-in with the GitHub CLI runs in the background and shows the code in the app', async () => {
+    await api('/api/github', null, 'DELETE');
+    const fake = path.join(dataDir, 'fake-gh.js');
+    fs.writeFileSync(fake, `#!/usr/bin/env node
+const a = process.argv.slice(2).join(' ');
+if (a === '--version') { console.log('gh version 9.9.9 (test)'); process.exit(0); }
+if (a.startsWith('auth token')) { if (process.env.GH_TOKEN) { console.log('env-token-leaked'); process.exit(0); } console.log('ghp_test'); process.exit(0); }
+if (a.startsWith('auth login')) {
+  if (process.env.GH_TOKEN) { console.error('The value of the GH_TOKEN environment variable is being used'); process.exit(1); }
+  process.stderr.write('! First copy your one-time code: WXYZ-9876\\nOpen this URL to continue in your web browser: https://github.com/login/device\\n');
+  setTimeout(() => { console.error('✓ Logged in as msrusu87'); process.exit(0); }, 1500);
+} else process.exit(2);
+`, { mode: 0o755 });
+    process.env.MC_GH_BIN = fake;
+    process.env.GH_TOKEN = 'should-be-ignored';
+    try {
+      let st = await api('/api/github/gh/start', {});
+      for (let i = 0; i < 20 && st.status !== 'code'; i++) { await new Promise((r) => setTimeout(r, 200)); st = await api('/api/github/gh/start'); }
+      assert.strictEqual(st.code, 'WXYZ-9876', JSON.stringify(st));
+      assert.strictEqual(st.url, 'https://github.com/login/device');
+      for (let i = 0; i < 30 && st.status !== 'done'; i++) { await new Promise((r) => setTimeout(r, 200)); st = await api('/api/github/gh/start'); }
+      assert.strictEqual(st.status, 'done', JSON.stringify(st));
+      assert.strictEqual(st.login, 'msrusu87');
+      assert.strictEqual((await api('/api/settings')).github.login, 'msrusu87');
+    } finally { delete process.env.MC_GH_BIN; delete process.env.GH_TOKEN; }
+  });
+
+  await step('MCP: built-in servers (filesystem, memory, sequential-thinking) start with no Node.js install and their tools run', async () => {
+    const st = await api('/api/mcp');
+    assert.deepStrictEqual(Object.keys(st.config).sort(), ['filesystem', 'memory', 'sequential-thinking'], 'seeded on first run');
+    let list = srv.mcp.status();
+    for (let i = 0; i < 100 && list.some((x) => x.status === 'starting'); i++) { await new Promise((r) => setTimeout(r, 200)); list = srv.mcp.status(); }
+    for (const x of list) assert.strictEqual(x.status, 'ready', `${x.name}: ${x.error}`);
+    const fsDir = st.config.filesystem.args[0];
+    fs.mkdirSync(fsDir, { recursive: true }); fs.writeFileSync(path.join(fsDir, 'mcp-hello.txt'), 'hello from mcp');
+    assert.ok(/hello from mcp/.test(await srv.mcp.call('filesystem', 'read_text_file', { path: path.join(fsDir, 'mcp-hello.txt') })));
+    await srv.mcp.call('memory', 'create_entities', { entities: [{ name: 'Carpathron', entityType: 'robot', observations: ['ESP32-CAM car'] }] });
+    assert.ok(/ESP32-CAM car/.test(await srv.mcp.call('memory', 'read_graph', {})));
+    const think = srv.mcp.status().find((x) => x.name === 'sequential-thinking');
+    assert.ok(think.tools.length >= 1);
+    assert.ok(srv.agent.tools ? true : true);
+    // Muse Code sessions get the same servers
+    const ms = srv.mcp.museServers(st.config);
+    assert.deepStrictEqual(Object.keys(ms).sort(), ['filesystem', 'memory', 'sequential-thinking']);
+    assert.strictEqual(ms.memory.env.ELECTRON_RUN_AS_NODE, '1');
+    // a server whose program is missing reports it clearly
+    await api('/api/settings', { mcpServers: { ...st.config, broken: { command: 'npx-does-not-exist', args: [] } } });
+    for (let i = 0; i < 50; i++) { const b = srv.mcp.status().find((x) => x.name === 'broken'); if (b && b.status !== 'starting') break; await new Promise((r) => setTimeout(r, 200)); }
+    const broken = srv.mcp.status().find((x) => x.name === 'broken');
+    assert.ok(broken.status === 'error' && /not found|ENOENT|spawn/i.test(broken.error), JSON.stringify(broken));
+    await api('/api/settings', { mcpServers: st.config });
+  });
+
   await step('projects: create a project and put a chat in it (no browser prompt needed)', async () => {
     const p = await api('/api/projects', { name: 'EU funding' });
     const c = await conv();

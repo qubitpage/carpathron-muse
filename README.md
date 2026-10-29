@@ -21,19 +21,24 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.5.3_(128_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.5.4_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.4.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.5.3) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.5.4) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.4) | [**CarpathronAvatar-1.1.4.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. The Meta Horizon Store version is in review. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 
-All files of this version: **[Release v1.5.3](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.5.3)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.5.4](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.5.4)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
 
-## What's new in 1.5.3
+## What's new in 1.5.4
+
+- **GitHub sign-in with the browser, reworked:** the app downloads the official GitHub CLI by itself (into its own folder — no admin rights, no winget, no extra window), shows the one-time code in the app (already copied) and opens the GitHub page. Authorize and it connects. A `GH_TOKEN` set on the PC no longer blocks the login.
+- **MCP servers that work out of the box:** `filesystem`, `memory` (knowledge graph) and `sequential-thinking` ship with the app and run on its built-in runtime — no Node.js needed. They are set up automatically and work with **both engines** (Meta API key and Muse Code). Your own servers (`npx`, `uvx`, remote URL) work as before; errors now say clearly what is missing.
+
+### 1.5.3
 
 - **📖 Guide & help** (bottom left): the complete documentation inside the app — install from scratch, connecting Meta (API key or Muse Code), every menu and button, all agent tools, remote servers and SSH keys, GitHub, MCP servers, Arduino, the robot, WhatsApp, phone and Quest, troubleshooting. Searchable, with a contents list. Same text in [`docs/GUIDE.md`](docs/GUIDE.md).
 - **No duplicate servers:** a server is one entry per *user + host + port*. Adding it again (by you or by the agent) updates the saved entry instead of making a copy; duplicates saved by older versions are merged at start, keeping the credentials, and their chats move to the kept entry.

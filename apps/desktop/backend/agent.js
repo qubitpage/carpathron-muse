@@ -717,7 +717,7 @@ class Agent {
       if (rt.abort.signal.aborted) resolve({ kind: 'aborted' });
       else rt.abort.signal.addEventListener('abort', () => setTimeout(() => resolve({ kind: 'aborted' }), graceMs), { once: true });
     });
-    const sessionP = this.muse.session(conv, { onApproval, model: conv.museModel || s.museModel || undefined, mode, bridge: this.bridgeFor ? this.bridgeFor(conv) : null });
+    const sessionP = this.muse.session(conv, { onApproval, model: conv.museModel || s.museModel || undefined, mode, bridge: this.bridgeFor ? this.bridgeFor(conv) : null, extraMcp: this.mcp && this.mcp.museServers ? this.mcp.museServers(s.mcpServers) : null });
     const opened = await Promise.race([sessionP, abortWait(0)]);
     if (opened && opened.kind === 'aborted') { sessionP.catch(() => {}); return; }
     const session = opened;

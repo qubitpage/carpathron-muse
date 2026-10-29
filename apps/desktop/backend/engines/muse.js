@@ -199,7 +199,7 @@ class MuseEngine {
   }
 
   // Opens (or resumes) the Muse session for a conversation.
-  async session(conv, { onApproval, model, mode, bridge }) {
+  async session(conv, { onApproval, model, mode, bridge, extraMcp }) {
     const client = await this.ensure();
     if (conv.museSessionId && this.sessions.has(conv.museSessionId)) return this.sessions.get(conv.museSessionId);
     let session;
@@ -216,7 +216,10 @@ class MuseEngine {
     if (!session) {
       const opts = { workspaceRoot: path.resolve(conv.workspace) };
       if (model) opts.modelId = model;
-      if (bridge && (this.granted || []).includes('sessionMcp')) opts.config = { mcpServers: { carpathron: bridge } };
+      if ((this.granted || []).includes('sessionMcp')) {
+        const servers = { ...(extraMcp || {}), ...(bridge ? { carpathron: bridge } : {}) };
+        if (Object.keys(servers).length) opts.config = { mcpServers: servers };
+      }
       const profile = mode === 'full' ? await this.pickFullProfile() : (this.getSettings().musePermissionProfile || null);
       if (profile) opts.permissionProfile = profile;
       const attempts = [

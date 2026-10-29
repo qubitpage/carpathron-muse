@@ -4,11 +4,49 @@ const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
 const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const { execFileSync } = require('child_process');
 const safe = (s) => String(s).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
 
+// MCP servers that ship inside the app and run on its built-in Node (no Node.js install needed).
+const BUILTIN_MCP = {
+  filesystem: { pkg: '@modelcontextprotocol/server-filesystem', about: 'Read, write, search and move files in the folders you allow' },
+  memory: { pkg: '@modelcontextprotocol/server-memory', about: 'A knowledge graph the agent can store facts in and query' },
+  'sequential-thinking': { pkg: '@modelcontextprotocol/server-sequential-thinking', about: 'Step-by-step thinking tool for planning hard problems' },
+};
+let nodeOnPath;
+function hasNode() {
+  if (nodeOnPath !== undefined) return nodeOnPath;
+  try { execFileSync(process.platform === 'win32' ? 'where' : 'which', ['node'], { stdio: 'ignore', windowsHide: true }); nodeOnPath = true; } catch { nodeOnPath = false; }
+  return nodeOnPath;
+}
+// Turns a config entry into something that can be started: built-in servers and "node" without Node.js
+// installed run on the app's own runtime (Electron as Node).
+function resolveServer(config, { dataDir } = {}) {
+  if (config.url) return { ...config };
+  const runAsNode = { ELECTRON_RUN_AS_NODE: '1' };
+  if (config.builtin) {
+    const b = BUILTIN_MCP[config.builtin];
+    if (!b) throw new Error(`unknown built-in MCP server "${config.builtin}" (available: ${Object.keys(BUILTIN_MCP).join(', ')})`);
+    const entry = path.join(path.dirname(require.resolve(`${b.pkg}/package.json`)), 'dist', 'index.js');
+    const env = { ...runAsNode, ...(config.env || {}) };
+    let args = Array.isArray(config.args) ? config.args.map(String) : [];
+    if (config.builtin === 'filesystem' && !args.length) args = [path.join(os.homedir(), 'MuseCarpathron')];
+    if (config.builtin === 'memory' && !env.MEMORY_FILE_PATH && dataDir) env.MEMORY_FILE_PATH = path.join(dataDir, 'mcp-memory.jsonl');
+    for (const a of args) if (config.builtin === 'filesystem') { try { fs.mkdirSync(a, { recursive: true }); } catch {} }
+    return { command: process.execPath, args: [entry, ...args], env, cwd: config.cwd };
+  }
+  if (!config.command) throw new Error('missing "command"');
+  if (/^node(\.exe)?$/i.test(config.command) && !hasNode()) return { ...config, command: process.execPath, env: { ...runAsNode, ...(config.env || {}) } };
+  return { ...config };
+}
+
 class McpManager {
-  constructor({ log }) {
+  constructor({ log, dataDir }) {
     this.log = log;
+    this.dataDir = dataDir;
     this.servers = new Map(); // name -> { client, tools, status, error, config }
   }
 
@@ -30,14 +68,17 @@ class McpManager {
       if (config.url) {
         transport = new StreamableHTTPClientTransport(new URL(config.url), config.headers ? { requestInit: { headers: config.headers } } : undefined);
       } else {
-        if (!config.command) throw new Error('missing "command"');
+        const r = resolveServer(config, { dataDir: this.dataDir });
         transport = new StdioClientTransport({
-          command: config.command,
-          args: Array.isArray(config.args) ? config.args.map(String) : [],
-          env: { ...process.env, ...(config.env || {}) },
-          cwd: config.cwd || undefined,
+          command: r.command,
+          args: Array.isArray(r.args) ? r.args.map(String) : [],
+          env: { ...process.env, ...(r.env || {}) },
+          cwd: r.cwd || undefined,
           stderr: 'pipe',
         });
+        let errTail = '';
+        transport.stderr?.on('data', (d) => { errTail = (errTail + d).slice(-600); });
+        entry.stderrTail = () => errTail;
       }
       await Promise.race([
         client.connect(transport),
@@ -50,7 +91,8 @@ class McpManager {
       this.log(`MCP "${name}" ready (${entry.tools.length} tools)`);
     } catch (e) {
       entry.status = 'error';
-      entry.error = e.message;
+      const tail = entry.stderrTail ? entry.stderrTail().trim() : '';
+      entry.error = /ENOENT/.test(e.message) && config.command ? `"${config.command}" was not found on this PC${/^npx|^npm|^node/i.test(config.command) ? ' — install Node.js (nodejs.org) or use a built-in server' : ''}` : e.message + (tail ? ` — ${tail.split('\n').slice(-2).join(' ')}` : '');
       this.log(`MCP "${name}" failed: ${e.message}`);
     }
   }
@@ -63,6 +105,17 @@ class McpManager {
 
   status() {
     return [...this.servers].map(([name, s]) => ({ name, status: s.status, error: s.error, tools: s.tools.map((t) => t.name) }));
+  }
+
+  // The configured stdio servers in Muse Code's session format, so Meta-account chats get them too.
+  museServers(config = {}) {
+    const out = {};
+    for (const [name, c] of Object.entries(config)) {
+      if (!c || c.enabled === false || c.url) continue;
+      try { const r = resolveServer(c, { dataDir: this.dataDir }); out[safe(name)] = { transport: 'stdio', command: r.command, args: (r.args || []).map(String), env: r.env || {}, mode: 'optional' }; }
+      catch {}
+    }
+    return out;
   }
 
   // Tool specs for the agent: name -> mcp__server__tool
@@ -102,4 +155,4 @@ class McpManager {
   async closeAll() { for (const n of [...this.servers.keys()]) await this.stopOne(n); }
 }
 
-module.exports = { McpManager };
+module.exports = { McpManager, BUILTIN_MCP, resolveServer };

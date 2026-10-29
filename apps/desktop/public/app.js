@@ -935,8 +935,8 @@
     mcpText.value = JSON.stringify(s.mcpServers || {}, null, 2);
     body.append(h('div', { class: 'card' },
       h('h3', {}, 'MCP servers (tools)'),
-      h('p', { class: 'muted small' }, 'Connect extra tools with the Model Context Protocol (used by the API-key engine). Same format as other MCP apps:'),
-      h('pre', { class: 'small muted' }, '{\n  "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\\\Users\\\\me\\\\Documents"] },\n  "remote": { "url": "https://example.com/mcp" }\n}'),
+      h('p', { class: 'muted small' }, 'Extra tools via the Model Context Protocol, for both engines (Meta API key and Muse Code). Built in, nothing to install: filesystem, memory, sequential-thinking. Add others in the same format as other MCP apps (npx/uvx servers need Node.js / Python on this PC):'),
+      h('pre', { class: 'small muted' }, '{\n  "filesystem": { "builtin": "filesystem", "args": ["C:\\\\Users\\\\me\\\\Documents"] },\n  "memory": { "builtin": "memory" },\n  "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "…" } },\n  "remote": { "url": "https://example.com/mcp" }\n}'),
       mcpText,
       h('div', { id: 'mcpStatus', class: 'list' }),
       h('div', { class: 'row' },
@@ -944,7 +944,13 @@
           let cfg; try { cfg = JSON.parse(mcpText.value || '{}'); } catch (e) { return toast(`Invalid JSON: ${e.message}`, true); }
           S.settings = await api('/api/settings', { body: { mcpServers: cfg } }); toast('Saved — starting servers…');
         } }, 'Save & start'),
-        h('button', { class: 'btn', onclick: async () => { S.boot.mcp = await api('/api/mcp/reload', { body: {} }); renderMcpStatus(); } }, 'Restart all'))));
+        h('button', { class: 'btn', onclick: async () => { S.boot.mcp = await api('/api/mcp/reload', { body: {} }); renderMcpStatus(); } }, 'Restart all'),
+        h('button', { class: 'btn', title: 'Adds filesystem, memory and sequential-thinking (they ship with the app)', onclick: async () => {
+          let cfg; try { cfg = JSON.parse(mcpText.value || '{}'); } catch (e) { return toast(`Invalid JSON: ${e.message}`, true); }
+          for (const b of await api('/api/mcp/builtins')) if (!Object.values(cfg).some((c) => c && c.builtin === b.id)) cfg[b.id] = { builtin: b.id };
+          mcpText.value = JSON.stringify(cfg, null, 2);
+          S.settings = await api('/api/settings', { body: { mcpServers: cfg } }); toast('Built-in servers added — starting…');
+        } }, 'Add built-in servers'))));
     renderMcpStatus();
 
     // --- WhatsApp
@@ -1177,18 +1183,32 @@
       } catch (e) { toast(e.message, true); }
       return;
     }
-    const r = await api('/api/github/gh/login', { body: {} }).catch((e) => ({ error: e.message }));
-    if (r.error) return toast(r.error, true);
+    // GitHub CLI flow: the app downloads gh if needed, runs "gh auth login --web" in the background and shows the code here
+    const r = await api('/api/github/gh/start', { body: {} }).catch((e) => ({ status: 'error', error: e.message }));
+    const codeBox = h('div', { class: 'pin', hidden: true }, '');
+    const btns = h('div', { class: 'row', hidden: true });
+    const cancel = h('button', { class: 'btn', onclick: () => { stop = true; api('/api/github/gh/start', { method: 'DELETE' }).catch(() => {}); closeModal(); } }, 'Cancel');
     modal(h('h3', {}, 'Sign in to GitHub'),
-      h('p', {}, r.installing ? 'A window opened: it installs the official GitHub CLI first (Windows may ask for permission), then opens GitHub in your browser.' : 'A window opened and your browser opens GitHub.'),
-      h('p', {}, 'In that window you see a one-time code: paste it on the GitHub page and click Authorize. This app connects automatically when you are done.'),
-      status, h('button', { class: 'btn', onclick: () => { stop = true; closeModal(); } }, 'Cancel'));
-    const until = Date.now() + 10 * 60 * 1000;
+      h('p', {}, 'Uses the official GitHub CLI (downloaded into the app the first time — no admin rights needed). Enter the code below on the GitHub page and click Authorize.'),
+      codeBox, btns, status, cancel);
+    let shown = false;
+    const until = Date.now() + 16 * 60 * 1000;
+    let st = r;
     while (!stop && Date.now() < until) {
-      await new Promise((res) => setTimeout(res, 3000));
-      const x = await api('/api/github/gh/import', { body: {} }).catch((e) => ({ error: e.message }));
-      if (x && x.login) return finish(true, `✓ Connected as ${x.login}`);
-      status.textContent = /not installed/.test(x.error || '') ? 'Installing GitHub CLI…' : 'Waiting for the browser login…';
+      if (st.status === 'done') return finish(true, `✓ Connected as ${st.login}`);
+      if (st.status === 'error') { status.textContent = `✕ ${st.error}`; status.classList.remove('muted'); return; }
+      if (st.status === 'cancelled') return;
+      if (st.status === 'code' && !shown) {
+        shown = true;
+        codeBox.textContent = st.code; codeBox.hidden = false;
+        btns.append(h('button', { class: 'btn primary', onclick: () => openUrl(st.url) }, 'Open GitHub'), h('button', { class: 'btn', onclick: () => navigator.clipboard.writeText(st.code).then(() => toast('Code copied')) }, 'Copy code'));
+        btns.hidden = false;
+        navigator.clipboard.writeText(st.code).catch(() => {});
+        openUrl(st.url);
+      }
+      status.textContent = st.status === 'code' ? 'Code copied. Paste it on the GitHub page that opened and click Authorize — this connects by itself.' : (st.message || 'Starting…');
+      await new Promise((res) => setTimeout(res, 1500));
+      st = await api('/api/github/gh/start').catch((e) => ({ status: 'error', error: e.message }));
     }
     if (!stop) finish(false, 'GitHub login timed out — try again.');
   }

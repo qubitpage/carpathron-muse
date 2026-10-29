@@ -76,22 +76,111 @@ class GitHub {
   deviceStatus() { const f = this.flow; return f ? { status: f.status, error: f.error || '', login: this.cfg().login || '' } : { status: 'none' }; }
 
   // B) GitHub CLI: "gh auth login --web" opens the browser; then the token is imported from gh.
+  ghDir() { return path.join(this.store.dataDir || os.tmpdir(), 'tools', 'gh'); }
   findGh() {
     const cands = ['gh'];
-    if (IS_WIN) cands.unshift(path.join(process.env.ProgramFiles || 'C:\\Program Files', 'GitHub CLI', 'gh.exe'), path.join(process.env.LOCALAPPDATA || '', 'Programs', 'GitHub CLI', 'gh.exe'));
+    const own = path.join(this.ghDir(), 'bin', IS_WIN ? 'gh.exe' : 'gh');
+    if (process.env.MC_GH_BIN) return process.env.MC_GH_BIN;
+    cands.unshift(own);
+    if (IS_WIN) cands.splice(1, 0, path.join(process.env.ProgramFiles || 'C:\\Program Files', 'GitHub CLI', 'gh.exe'), path.join(process.env.LOCALAPPDATA || '', 'Programs', 'GitHub CLI', 'gh.exe'));
     for (const c of cands) { if (c === 'gh') return 'gh'; try { if (fs.statSync(c).isFile()) return c; } catch {} }
     return 'gh';
   }
   run(cmd, args, timeoutMs = 20000) {
     return new Promise((resolve) => {
       let child, out = '';
-      try { child = spawn(cmd, args, { windowsHide: true }); } catch (e) { resolve({ code: -1, out: e.message }); return; }
+      try { child = spawn(cmd, args, { windowsHide: true, env: this.ghEnv() }); } catch (e) { resolve({ code: -1, out: e.message }); return; }
       const t = setTimeout(() => { try { child.kill(); } catch {} }, timeoutMs);
       child.stdout.on('data', (d) => (out += d)); child.stderr.on('data', (d) => (out += d));
       child.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: e.message }); });
       child.on('close', (code) => { clearTimeout(t); resolve({ code, out: out.trim() }); });
     });
   }
+  // Downloads the official GitHub CLI (zip from github.com/cli/cli releases) into the app's data folder.
+  // No administrator rights, no winget, no extra window.
+  async ghInstall(onStatus = () => {}) {
+    if ((await this.ghStatus()).installed) return this.findGh();
+    const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
+    const plat = IS_WIN ? 'windows' : process.platform === 'darwin' ? 'macOS' : 'linux';
+    const ext = plat === 'linux' ? '.tar.gz' : '.zip';
+    onStatus('Finding the latest GitHub CLI…');
+    let j, asset;
+    // 1) the release page redirect (no API rate limit), 2) the REST API
+    try {
+      const r = await fetch(process.env.MC_GH_LATEST || 'https://github.com/cli/cli/releases/latest', { redirect: 'manual', headers: { 'User-Agent': 'Muse-Carpathron' }, signal: AbortSignal.timeout(30000) });
+      const tag = ((r.headers.get('location') || '').match(/\/tag\/(v[\d.]+)/) || [])[1];
+      if (tag) { const v = tag.slice(1); const name = `gh_${v}_${plat}_${arch}${ext}`; j = { tag_name: tag }; asset = { name, size: 0, browser_download_url: `https://github.com/cli/cli/releases/download/${tag}/${name}` }; }
+    } catch {}
+    if (!asset) {
+      const rel = await fetch(process.env.MC_GH_RELEASES || 'https://api.github.com/repos/cli/cli/releases/latest', { headers: { 'User-Agent': 'Muse-Carpathron', Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(30000) });
+      if (!rel.ok) throw new Error(`Could not reach GitHub to download the GitHub CLI (HTTP ${rel.status}).`);
+      j = await rel.json();
+      asset = (j.assets || []).find((a) => a.name.endsWith(`_${plat}_${arch}${ext}`));
+    }
+    if (!asset) throw new Error(`No GitHub CLI download for ${plat}/${arch} in ${(j && j.tag_name) || 'the latest release'}.`);
+    onStatus(`Downloading GitHub CLI ${j.tag_name || ''}…`);
+    const res = await fetch(asset.browser_download_url, { headers: { 'User-Agent': 'Muse-Carpathron' }, signal: AbortSignal.timeout(300000) });
+    if (!res.ok) throw new Error(`GitHub CLI download failed (HTTP ${res.status}).`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const dir = this.ghDir();
+    await fsp.rm(dir, { recursive: true, force: true });
+    await fsp.mkdir(path.join(dir, 'bin'), { recursive: true });
+    onStatus('Unpacking…');
+    if (ext === '.zip') {
+      const JSZip = require('jszip');
+      const zip = await JSZip.loadAsync(buf);
+      const entry = Object.values(zip.files).find((f) => !f.dir && /(^|\/)bin\/gh(\.exe)?$/.test(f.name));
+      if (!entry) throw new Error('The GitHub CLI download did not contain gh.');
+      await fsp.writeFile(path.join(dir, 'bin', path.basename(entry.name)), await entry.async('nodebuffer'), { mode: 0o755 });
+    } else {
+      const tgz = path.join(dir, 'gh.tar.gz'); await fsp.writeFile(tgz, buf);
+      const r = await this.run('tar', ['-xzf', tgz, '-C', dir, '--strip-components=1'], 60000);
+      if (r.code !== 0) throw new Error(`Could not unpack the GitHub CLI: ${r.out}`);
+      await fsp.unlink(tgz).catch(() => {});
+    }
+    const st = await this.ghStatus();
+    if (!st.installed) throw new Error('The GitHub CLI was downloaded but does not start.');
+    this.log(`github: installed ${st.version} in ${dir}`);
+    return this.findGh();
+  }
+
+  // "gh auth login --web" in the background: the one-time code and the URL are shown in the app,
+  // the user authorizes in the browser, then the token is imported automatically.
+  ghLoginStart() {
+    if (this.gh && ['installing', 'starting', 'code'].includes(this.gh.status)) return this.ghLoginStatus();
+    const st = this.gh = { status: 'installing', message: 'Checking the GitHub CLI…', code: '', url: '', error: '', login: '', out: '' };
+    (async () => {
+      try {
+        const bin = await this.ghInstall((m) => { st.message = m; });
+        if (st.status === 'cancelled') return;
+        st.status = 'starting'; st.message = 'Asking GitHub for a sign-in code…';
+        const child = spawn(bin, ['auth', 'login', '--web', '--hostname', 'github.com', '--git-protocol', 'https', '--scopes', 'repo,workflow,read:org', '--skip-ssh-key'],
+          { windowsHide: true, env: this.ghEnv({ GH_PROMPT_DISABLED: '1', NO_COLOR: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_BROWSER: IS_WIN ? 'cmd /c rem' : 'true' }) });
+        st.child = child;
+        const onData = (d) => {
+          st.out = (st.out + d).slice(-4000);
+          const c = st.out.match(/one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/);
+          const u = st.out.match(/https:\/\/github\.com\/login\/device\S*/);
+          if (c && !st.code) { st.code = c[1]; st.url = u ? u[0] : 'https://github.com/login/device'; st.status = 'code'; st.message = 'Enter the code on GitHub and click Authorize.'; }
+          if (/Press Enter/i.test(String(d))) { try { child.stdin.write('\n'); } catch {} }
+        };
+        child.stdout.on('data', onData); child.stderr.on('data', onData);
+        const timer = setTimeout(() => { try { child.kill(); } catch {} }, 15 * 60 * 1000);
+        const code = await new Promise((r) => { child.on('error', (e) => { st.out += e.message; r(-1); }); child.on('close', r); });
+        clearTimeout(timer); st.child = null;
+        if (st.status === 'cancelled') return;
+        if (code !== 0) throw new Error(`GitHub CLI login did not finish: ${st.out.trim().split('\n').slice(-3).join(' ').slice(0, 300) || `exit ${code}`}`);
+        const info = await this.ghImport();
+        st.status = 'done'; st.login = info.login; st.message = `Connected as ${info.login}`;
+      } catch (e) { if (st.status !== 'cancelled') { st.status = 'error'; st.error = e.message; } this.log(`github: gh login failed: ${e.message}`); }
+    })();
+    return this.ghLoginStatus();
+  }
+  // a GH_TOKEN / GITHUB_TOKEN in the environment would make gh refuse to log in and override the stored login
+  ghEnv(extra = {}) { const e = { ...process.env, ...extra }; for (const k of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'GH_HOST']) delete e[k]; return e; }
+  ghLoginStatus() { const s = this.gh; return s ? { status: s.status, message: s.message, code: s.code, url: s.url, error: s.error, login: s.login } : { status: 'none' }; }
+  ghLoginCancel() { const s = this.gh; if (s) { s.status = 'cancelled'; if (s.child) try { s.child.kill(); } catch {} } return { ok: true }; }
+
   async ghStatus() { const v = await this.run(this.findGh(), ['--version']); return { installed: v.code === 0, version: v.code === 0 ? v.out.split('\n')[0] : '' }; }
   async ghImport() {
     const r = await this.run(this.findGh(), ['auth', 'token', '-h', 'github.com']);

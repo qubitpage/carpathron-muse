@@ -14,7 +14,7 @@ const { Store } = require('./store');
 const { Robot } = require('./robot');
 const { Mapper } = require('./mapper');
 const voice = require('./voice');
-const { McpManager } = require('./mcp');
+const { McpManager, BUILTIN_MCP } = require('./mcp');
 const { Agent } = require('./agent');
 const { WhatsApp } = require('./whatsapp');
 const { Projects, Memory, Skills, extractText, Bm25 } = require('./knowledge');
@@ -96,7 +96,16 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   };
 
   const robot = new Robot({ getIp: () => store.settings.robot.carIp, emit: (e, d) => (e === 'log' ? logFn(d) : emit(e, d)) });
-  const mcp = new McpManager({ log: logFn });
+  const mcp = new McpManager({ log: logFn, dataDir });
+  // First run with this version: set up the built-in MCP servers (they need nothing installed).
+  if (!store.settings.mcpBuiltinsSeeded) {
+    const cur = store.settings.mcpServers || {};
+    const seed = { filesystem: { builtin: 'filesystem', args: [path.join(os.homedir(), 'MuseCarpathron')] }, memory: { builtin: 'memory' }, 'sequential-thinking': { builtin: 'sequential-thinking' } };
+    for (const [k, v] of Object.entries(seed)) if (!cur[k]) cur[k] = v;
+    store.settings.mcpServers = cur;
+    store.settings.mcpBuiltinsSeeded = true;
+    store.saveSettings();
+  }
   const camera = new Camera({ getSettings: () => store.settings, emit, log: logFn });
   // Camera source: a device that offered its camera (e.g. a phone on the robot) first, else the desktop window's webcam.
   camera.pickClient = () => {
@@ -452,6 +461,9 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     }
     if (p === '/api/github/device' && m === 'GET') return send(res, 200, { ...github.deviceStatus(), info: github.publicInfo() });
     if (p === '/api/github/gh' && m === 'GET') return send(res, 200, await github.ghStatus());
+    if (p === '/api/github/gh/start' && m === 'POST') return send(res, 200, github.ghLoginStart());
+    if (p === '/api/github/gh/start' && m === 'GET') return send(res, 200, github.ghLoginStatus());
+    if (p === '/api/github/gh/start' && m === 'DELETE') return send(res, 200, github.ghLoginCancel());
     if (p === '/api/github/gh/login' && m === 'POST') {
       try {
         const st = await github.ghStatus();
@@ -473,6 +485,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
 
     // MCP
     if (p === '/api/mcp' && m === 'GET') return send(res, 200, { servers: mcp.status(), config: store.settings.mcpServers });
+    if (p === '/api/mcp/builtins') return send(res, 200, Object.entries(BUILTIN_MCP).map(([id, b]) => ({ id, about: b.about })));
     if (p === '/api/mcp/reload' && m === 'POST') { await mcp.closeAll(); await mcp.sync(store.settings.mcpServers); emit('mcp:status', mcp.status()); return send(res, 200, mcp.status()); }
 
     // memory

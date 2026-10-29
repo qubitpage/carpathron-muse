@@ -32,7 +32,7 @@ const VENDOR = {
   '/vendor/marked.js': path.join(__dirname, '..', 'node_modules', 'marked', 'lib', 'marked.umd.js'),
   '/vendor/purify.js': path.join(__dirname, '..', 'node_modules', 'dompurify', 'dist', 'purify.min.js'),
 };
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.ico': 'image/x-icon', '.md': 'text/markdown; charset=utf-8' };
 
 function lanIps() {
   const out = [];
@@ -108,6 +108,21 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   camera.sendRequest = (data) => { const c = camera.pickClient(); if (c) c.send(JSON.stringify({ event: 'camera:request', data })); };
   const secrets = new Secrets(dataDir);
   const remote = new Remote({ store, secrets, log: logFn, emit });
+  // Chats that pointed at a merged duplicate now point at the kept server; older chats get the 🌐 badge data.
+  try {
+    let n = 0;
+    for (const meta of store.list()) {
+      const stale = meta.remote === undefined;
+      const moved = meta.remote && remote.merged[meta.remote.serverId];
+      if (!stale && !moved) continue;
+      const c = store.get(meta.id);
+      if (!c) continue;
+      if (c.remote && remote.merged[c.remote.serverId]) { c.remote.serverId = remote.merged[c.remote.serverId]; n++; store._dirty.add(c.id); }
+      store.index[c.id] = store._meta(c);
+    }
+    store._saveIndex();
+    if (n) logFn(`remote: moved ${n} chat(s) to the kept server`);
+  } catch (e) { logFn(`remote: chat migration failed: ${e.message}`); }
   const jobs = new Jobs(dataDir);
   const github = new GitHub({ store, secrets, log: logFn });
   seedSkills(skills);

@@ -158,10 +158,34 @@ function tinyPdf(pages) {
     assert.strictEqual(t.os, 'linux');
     const list = await api('/api/servers');
     assert.ok(list[0].fingerprint && list[0].connected);
-    const bad = await api('/api/servers', { name: 'bad', host: '127.0.0.1', port: 18632, username: 'tester', password: 'nope' });
+    const bad = await api('/api/servers', { name: 'bad', host: '127.0.0.1', port: 18632, username: 'nobody', password: 'nope' });
     const tb = await api(`/api/servers/${bad.id}/test`, {});
     assert.ok(!tb.ok && /login|authentication/i.test(tb.error), tb.error);
     await api(`/api/servers/${bad.id}`, null, 'DELETE');
+  });
+
+  await step('SSH: no duplicate servers (adding the same server updates it; old duplicates are merged)', async () => {
+    const before = (await api('/api/servers')).length;
+    const again = await api('/api/servers', { name: 'testbox copy', host: '127.0.0.1', port: 18632, username: 'tester', keyId: '' });
+    assert.ok(again.existed && again.id === server.id, JSON.stringify(again));
+    assert.strictEqual((await api('/api/servers')).length, before);
+    assert.ok((await api(`/api/servers/${server.id}/test`, {})).ok, 'password kept');
+    assert.strictEqual(again.name, 'testbox', 'keeps its name');
+    const other = await api('/api/servers', { name: 'other', host: '127.0.0.1', port: 18632, username: 'someoneelse' });
+    await assert.rejects(api('/api/servers', { id: other.id, host: '127.0.0.1', port: 18632, username: 'tester' }), /already saved/);
+    await api(`/api/servers/${other.id}`, null, 'DELETE');
+    // old installs: duplicates already saved are merged at start, chats follow the kept one
+    const { Remote } = require('../backend/remote');
+    const settings = { servers: [
+      { id: 'a', name: 'q', host: 'Q.com ', port: 22, username: 'ubuntu', createdAt: 1, password: 'x' },
+      { id: 'b', name: 'q', host: 'q.com', port: 22, username: 'ubuntu', createdAt: 2, keyId: 'k1' },
+      { id: 'c', name: 'q', host: 'q.com', port: 22, username: 'ubuntu', createdAt: 3 },
+      { id: 'd', name: 'other', host: 'q.com', port: 2222, username: 'ubuntu' },
+    ] };
+    const rm = new Remote({ store: { settings, saveSettings() {} }, secrets: {} });
+    assert.deepStrictEqual(settings.servers.map((x) => x.id), ['b', 'd']);
+    assert.strictEqual(settings.servers[0].password, 'x', 'credentials merged into the kept one');
+    assert.deepStrictEqual(rm.merged, { a: 'b', c: 'b' });
   });
 
   await step('SSH: changed host key is refused with a clear warning', async () => {

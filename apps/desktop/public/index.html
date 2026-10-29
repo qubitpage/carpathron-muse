@@ -28,6 +28,7 @@
         <button data-view="settings"><i>☰</i> Settings</button>
       </nav>
       <div class="chat-list" id="chatList"></div>
+      <button class="guide-btn" id="btnGuide" data-view="guide" title="How to set up and use everything"><i>📖</i> Guide &amp; help</button>
       <div class="side-foot" id="sideFoot"></div>
     </aside>
 
@@ -202,6 +203,12 @@
         <p class="muted">How it works: the app reads your folders and files <b>locally</b>, sends only what is needed with your prompt to Meta's model in the <b>cloud</b>, and then executes the returned actions (edits, commands, robot moves) <b>locally</b> on this PC. Here you can see each step.</p>
         <div class="list activity" id="activityList"></div>
         <details><summary>Technical log</summary><pre id="techLog"></pre></details>
+      </section>
+
+      <!-- GUIDE -->
+      <section class="view page" id="view-guide" hidden>
+        <div class="page-head"><h1>Guide</h1><input id="guideSearch" class="guide-search" placeholder="Search the guide…" spellcheck="false"></div>
+        <div class="guide-wrap"><nav class="guide-toc" id="guideToc"></nav><article class="guide-body md" id="guideBody">Loading…</article></div>
       </section>
 
       <!-- SETTINGS -->

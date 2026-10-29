@@ -292,3 +292,26 @@ body[data-view="chat"] .mobile-menu { display: none !important; }
 .plugin-card .head{display:flex;align-items:center;gap:10px}
 .plugin-card .logo{font-size:26px}
 .dlg-input{width:100%}
+
+/* guide */
+.guide-btn { display: flex; gap: 10px; align-items: center; margin: 4px 8px; padding: 8px 10px; border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px; cursor: pointer; color: var(--text); font: inherit; }
+.guide-btn i { font-style: normal; width: 16px; text-align: center; }
+.guide-btn:hover, .guide-btn.on { border-color: var(--accent); }
+.guide-search { flex: 1; max-width: 360px; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; }
+.guide-wrap { display: grid; grid-template-columns: 230px 1fr; gap: 24px; max-width: 1180px; align-items: start; }
+.guide-toc { position: sticky; top: 0; display: flex; flex-direction: column; gap: 2px; max-height: calc(100vh - 120px); overflow: auto; padding-right: 6px; }
+.guide-toc a { color: var(--muted); text-decoration: none; padding: 5px 8px; border-radius: 6px; font-size: 13px; }
+.guide-toc a:hover { background: var(--panel-2); color: var(--text); }
+.guide-body { line-height: 1.6; min-width: 0; padding-bottom: 80px; }
+.guide-body h1 { font-size: 26px; margin: 0 0 8px; }
+.guide-body h2 { font-size: 20px; margin: 30px 0 10px; padding-top: 6px; scroll-margin-top: 12px; }
+.guide-body h3 { font-size: 16px; margin: 20px 0 8px; }
+.guide-body hr { border: 0; border-top: 1px solid var(--line); margin: 22px 0; }
+.guide-body table { border-collapse: collapse; margin: 10px 0; width: 100%; font-size: 13.5px; }
+.guide-body th, .guide-body td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+.guide-body th { background: var(--panel-2); }
+.guide-body code { font-family: var(--mono); font-size: 12.5px; background: var(--panel-2); padding: 1px 5px; border-radius: 5px; }
+.guide-body pre { background: #0a0c0f; border: 1px solid var(--line); border-radius: 10px; padding: 12px; overflow-x: auto; }
+.guide-body pre code { background: none; padding: 0; }
+.guide-body a { color: var(--accent); }
+@media (max-width: 860px) { .guide-wrap { grid-template-columns: 1fr; } .guide-toc { position: static; max-height: none; } }

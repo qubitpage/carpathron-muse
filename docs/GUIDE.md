@@ -1,328 +1,476 @@
-# Carpathron — the A-to-Z guide
+# Muse Carpathron — the complete guide
 
-Everything you need to build, set up, use and get the best out of Carpathron: the robot car, the Windows app
-with Meta Muse, WhatsApp text and voice control, the browser and the Meta Quest avatar app.
+Muse Carpathron is a Windows app that turns **Meta Muse** models into a working assistant on your PC: it chats,
+writes and runs code, works on your **remote servers over SSH**, publishes to **GitHub**, writes and flashes
+**Arduino / ESP32 firmware**, reads and designs **PDFs and websites**, does **web research**, and drives the
+**Carpathron robot** from the PC, WhatsApp, a phone or a Meta Quest headset.
 
-**Contents**
-
-1. [What Carpathron is](#1-what-carpathron-is)
-2. [What you need](#2-what-you-need)
-3. [Build the car](#3-build-the-car)
-4. [Flash the car firmware](#4-flash-the-car-firmware)
-5. [Put the car on your Wi-Fi](#5-put-the-car-on-your-wi-fi)
-6. [Install Muse Carpathron on Windows](#6-install-muse-carpathron-on-windows)
-7. [Connect Meta Muse](#7-connect-meta-muse)
-8. [Chat and the agent](#8-chat-and-the-agent)
-9. [Memory, projects and skills](#9-memory-projects-and-skills)
-10. [Drive the robot from the PC](#10-drive-the-robot-from-the-pc)
-11. [Robot head and room map](#11-robot-head-and-room-map)
-12. [WhatsApp: text and voice](#12-whatsapp-text-and-voice)
-13. [Phone and browser access](#13-phone-and-browser-access)
-14. [Meta Quest 3S: the Carpathron Avatar app](#14-meta-quest-3s-the-carpathron-avatar-app)
-15. [Quest browser VR (no install)](#15-quest-browser-vr-no-install)
-16. [Build your own robot](#16-build-your-own-robot)
-17. [Best practices](#17-best-practices)
-18. [Safety](#18-safety)
-19. [Troubleshooting](#19-troubleshooting)
-20. [Reference: commands and controls](#20-reference-commands-and-controls)
+This guide starts from zero (installing the app) and then explains every menu, button and tool.
 
 ---
 
-## 1. What Carpathron is
+## 1. Quick start (10 minutes)
 
-Carpathron gives a robot a **brain** (Meta Muse), **many ways to be reached** (desktop, WhatsApp, voice,
-browser, VR) and **one open protocol** so new robots plug in without changing the apps.
+1. **Install the app** — run `Install.bat` (or `Muse-Carpathron-Setup.exe`) and click **Yes** on the Windows prompt (section 2).
+2. **Connect Meta** — *Settings → Sign in to Meta*. Either paste a **Meta API key** and press *Save & test*, or install
+   **Muse Code** and sign in with your **Meta account** (section 3).
+3. **New chat** (top left) → type what you want, for example *"What can you do on this PC?"*.
+4. Pick the **mode** at the top right: **Ask** while you learn, **Auto** or **Full** when you trust the setup.
+5. Optional, add what you use:
+   - **Remote** → add your VPS / dedicated server (section 7).
+   - **Plugins → GitHub** → *Sign in with browser* (section 8).
+   - **Robot** → *Find my car* (section 12).
+   - **Settings → WhatsApp** to control everything from your phone (section 13).
 
-| Part | Role |
+---
+
+## 2. Install, update and uninstall
+
+**Requirements:** Windows 10 or 11 (64-bit), internet access, a Meta account or a Meta Model API key.
+
+**Install**
+1. Download the latest release: <https://github.com/qubitpage/carpathron-muse/releases/latest>
+   (`Muse-Carpathron-Setup.exe`). If you received a folder with `Install.bat` and `.part` files, keep them together
+   and double-click **Install.bat** — it joins the parts, checks they are not damaged (SHA-256) and starts the installer.
+2. Click **Yes** on the Windows (UAC) prompt. The app installs for all users, adds Start-menu and desktop shortcuts and a
+   firewall rule that lets only devices **on your own network** reach it (phone, Quest).
+3. The app opens. It also lives in the system tray (bottom right) — closing the window keeps it running for WhatsApp
+   and the robot; use *Quit* in the tray menu to exit completely.
+
+**Update:** install the new version over the old one. **Your chats, settings, saved servers, keys, memory and
+skills are kept** — they are not in the installer.
+
+**Where your data is**
+
+| What | Where |
 |---|---|
-| **Baby Carpathron** | The robot: ESP32-CAM 4WD car with live camera |
-| **Muse Carpathron** | The brain and hub on your Windows PC: Muse agent, memory, tools, WhatsApp, robot link |
-| **Carpathron Avatar** | The body you wear: a native Meta Quest app to see through the robot and drive it |
-| **Carpathron Robot Protocol** | The language every Carpathron robot speaks (HTTP + MJPEG) |
+| Workspace, photos, room maps, research reports | `%USERPROFILE%\MuseCarpathron` |
+| Chats, settings, servers, keys, memory, skills, log | `%APPDATA%\Muse Carpathron\data` |
+| Log file (for troubleshooting) | `%APPDATA%\Muse Carpathron\muse-carpathron.log` |
 
-Meta models used: **Muse Spark** (chat, tools, vision), **Muse Voice Transcribe** (speech to text) and
-**Muse Code** (sign in with your Meta account).
+Passwords, API keys, SSH keys and the GitHub token are **encrypted with your Windows account** (DPAPI). They never
+appear in the installer, in the repository, in the browser or on the phone.
 
-## 2. What you need
+**Uninstall:** Windows *Settings → Apps → Muse Carpathron → Uninstall*. Your data folders stay; delete them by hand
+if you want a clean start.
 
-| Item | Notes |
+---
+
+## 3. Connect Meta Muse (the brain)
+
+*Settings → Sign in to Meta* offers two engines. You can use both and switch per chat.
+
+| Engine | What you need | Best for |
+|---|---|---|
+| **Meta API key** | An API key from the Meta developer platform (dev.meta.ai → API keys) | Everything: all models, vision, image generation, SAM, voice, WhatsApp, Quest |
+| **Meta account (Muse Code)** | The Muse Code program + your Meta login | Using your Meta account instead of a key; Muse Code's own coding agent |
+
+### 3.1 Meta API key
+
+1. *Settings → Sign in to Meta → API key* → paste the key → **Save & test**. A green tick means it works.
+2. *API base URL* — leave the default unless Meta gives you another address.
+3. **Remove key** deletes it from this PC.
+
+### 3.2 Meta account (Muse Code)
+
+1. **Install Muse Code** — opens the official installer in a new window; press **Re-check** when it finishes.
+   (If you installed it somewhere special, fill in *Muse Code path*.)
+2. **Sign in with Meta** — a window opens; log in with your Meta account, then press **Test**.
+3. **Windows sandbox** (optional, one time): **Set up Windows sandbox** → click **Yes** on the Windows prompt.
+   It lets Muse Code run PowerShell commands in a protected sandbox. You do **not** need it if you:
+   - leave *Settings → Tools & models → Muse Code Windows sandbox* on **Automatic** (the default — the app runs
+     without the sandbox when it isn't available), or
+   - use **Full** mode, or
+   - use the API-key engine.
+
+### 3.3 Models and what they can do
+
+Pick the model at the top of a chat. Under the chat header, small badges show what the selected model can do
+(text, images, video, audio, PDF, tools, reasoning, web search) — the app adapts automatically.
+
+| Model | Use it for |
 |---|---|
-| KUONGSHUN AD174 ESP32 WiFi Camera 4WD kit | ESP32-CAM, L298N driver, 4 TT motors, battery box |
-| 2 × 18650 batteries, **fully charged** | The motors run only from the batteries, never from USB |
-| Windows 10 / 11 / Server PC | Same Wi-Fi as the car |
-| 2.4 GHz Wi-Fi | The ESP32 does not see 5 GHz networks |
-| Meta Model API key | From the Meta developer platform. Or a Meta account with Muse Code |
-| Phone with WhatsApp | Optional, for remote control |
-| Meta Quest 3S | Optional, for the avatar experience |
-| USB-C cable | To flash the car and to install the Quest app |
+| **muse-spark-1.1 / 1.2 / 1.3** | Everyday work: chat, coding, tools, looking at images. Has **reasoning effort** |
+| **muse-wonder-1.0** | The hardest problems; effort up to *max* |
+| **muse-image-1.0** | Draws or edits pictures — your message is the prompt; attach an image to edit it |
+| **sam-3.1** | Finds objects in a photo or video (boxes + overlay picture). Attach the image, write what to find |
+| **muse-voice-transcribe-1.0** | Turns an audio file into text. Attach the audio |
 
-## 3. Build the car
+**Reasoning effort** (Spark / Wonder): the selector next to the model. Higher = slower but more careful.
+Default in *Settings → Tools & models*.
 
-Follow the kit's *Assembly Guide* (steps 0–8). The important parts:
+---
 
-- **Motors:** each pair on one side goes to the same L298N output.
-- **Battery box → L298N P1 (VIN / GND)**, red to VIN.
-- **L298N P2 (5V / GND) → ESP32 header pins 2–3** (red = 5V nearest the USB-C end, black = GND).
-- **6-wire cable: L298N P7 (EN_A, IN1, IN2, IN3, IN4, EN_B) → ESP32 header pins 4–9**, directly next to the
-  red/black plug, **no bare pins between the two plugs**, one bare pin at each end of the header.
-- Click the **antenna** firmly onto the ESP32-CAM: it makes a big difference to video and control.
+## 4. The screen at a glance
 
-| L298N | ESP32 GPIO | Meaning |
-|---|---|---|
-| ENA | 12 | right wheels speed |
-| IN1 / IN2 | 13 / 14 | right forward / back |
-| IN3 / IN4 | 15 / 33 | left forward / back |
-| ENB | 2 | left wheels speed |
+**Left side (top to bottom)**
 
-## 4. Flash the car firmware
+| Item | What it does |
+|---|---|
+| **New chat** | Starts a new conversation |
+| **Search chats** | Searches all chats (titles and content) |
+| **Projects** | Folders + knowledge files that chats can use (section 10) |
+| **Remote** | Your servers, terminals and SSH keys (section 7) |
+| **Plugins** | GitHub and other connections (section 8) |
+| **Memory** | What the app remembers about you (section 10) |
+| **Skills** | Reusable `/commands` (section 10) |
+| **Robot** | Live video and driving (section 12) |
+| **Activity** | What ran on your PC and what went to the cloud |
+| **Settings** | Everything else (section 15) |
+| **Chat list** | Your chats by day. Icons: 🌐 works on a server · ⌨ saved terminal session · 💬 from WhatsApp |
+| **Status** (bottom) | Connection, Muse Code, API key, WhatsApp. **📖 Guide** opens this page |
 
-1. Install **Arduino IDE 2** and the **CH340** USB driver.
-2. Boards Manager → **esp32 by Espressif → version 2.0.12** (the kit's version; do not update to 3.x).
-3. Open `firmware/carpathron_car/carpathron_car.ino`.
-4. **Tools → Board → AI Thinker ESP32-CAM**, **Tools → Port →** the COM port of the car.
-5. **Upload.** If it says *Wrong boot mode*: hold **IO0**, tap **RST**, release IO0, upload again.
-6. **One-time boot fix (important):** GPIO 12 is also a boot pin. With the 6-wire plug connected the ESP32
-   would pick the wrong flash voltage and loop with `invalid header: 0xffffffff`. Open the Serial Monitor
-   (115200, New Line), type `fixboot`, then `BURN`. It permanently sets the flash to 3.3 V (correct for the
-   ESP32-CAM). Afterwards the car starts normally with everything plugged in.
+**Chat header (top)**
 
-## 5. Put the car on your Wi-Fi
+| Control | What it does |
+|---|---|
+| **Title** | Click to rename the chat |
+| **🖥 This PC / 🌐 server** | Where the agent works: your PC or one of your servers |
+| **📁 folder** | The folder the agent works in on your PC |
+| **▦ project** | Puts the chat in a project |
+| **Engine** | Meta account (Muse Code) or Meta API key |
+| **Model** and **effort** | See 3.3 |
+| **Ask · Auto · Full · Plan** | Approval mode (section 5) |
 
-Option A — **from the PC over USB** (Serial Monitor, 115200, New Line):
-`wifi` → the car lists networks → type the network name → type its password. The car prints its IP.
+**Message box:** type, attach files (📎, or drag & drop), **Enter** sends,
+**Shift+Enter** = new line. While it works the send button becomes **■ Stop** (or press **Esc**).
 
-Option B — **from a phone:** join the Wi-Fi **Carpathron-Car** (password `carpathron`), open
-`http://192.168.4.1/setup`, pick your home network (not *Carpathron-Car*), type the password, **Save and connect**.
+---
 
-After that the car lives on your Wi-Fi at its IP (for example `192.168.1.131`) and at `http://carpathron.local/`.
-Its own hotspot switches off 90 s after it joins, and comes back only if your Wi-Fi is unreachable.
+## 5. Chatting with the agent
 
-Serial commands at any time: `status`, `test` (spins each side for 1 s), `wifi`, `forget`, `help`.
+Talk normally — *"make a landing page for my robot"*, *"why is this script failing?"*, *"summarise the attached PDF"*.
+Every action the agent takes shows as a card (file read, command, search…). Click a card to see details and output.
 
-## 6. Install Muse Carpathron on Windows
+### 5.1 Modes
 
-Run the installer (or `Install.bat`, which re-assembles a split installer and checks it is not damaged) and
-click **Yes** on the Windows prompt. It installs per-machine, adds a Start menu and desktop shortcut and a
-firewall rule that lets only devices **on your local network** reach the app (Quest, phone).
+| Mode | Behaviour |
+|---|---|
+| **Ask** | Asks before changing files, running commands, moving the robot, pushing to GitHub. Answer **Allow once**, **Always allow in this chat** or **Deny** |
+| **Auto** | Does everything without asking |
+| **Full** | Like Auto, plus Muse Code gets its full-access profile (no sandbox limits) and all extra tools (SSH, GitHub, PDF, Arduino…) |
+| **Plan** | Read-only: researches and writes a plan, changes nothing |
 
-Your data lives in `%USERPROFILE%\MuseCarpathron` (workspace, photos, maps) and the app data folder (chats,
-settings). Updates keep both.
+### 5.2 Stop
 
-## 7. Connect Meta Muse
+**■ Stop** or **Esc** stops the current answer within a few seconds, even if a command or the model hangs.
+The chat stays usable — just write again.
 
-Pick an engine at the top of a chat:
+### 5.3 Attachments
 
-| Engine | How | Best for |
-|---|---|---|
-| **Meta API key** | Settings → *Meta API key* → paste key → *Test* | Everything: vision, voice, room maps, WhatsApp, Quest |
-| **Meta account (Muse Code)** | Settings → *Install Muse Code* → *Sign in* (and *Set up sandbox* once, click Yes) | Using your Meta account instead of a key |
+Images, PDF, Word, Excel, PowerPoint, text and code files, audio, video. The agent reads documents
+(`read_document`), looks at images with vision models, and sends audio to Muse Voice Transcribe.
 
-Choose the model in the model picker (for example *muse-spark-1.3* or *muse-wonder-1.0*). Under the header you see
-what that model can do (images, video, audio, PDF, tools, reasoning, web search) and, for Spark/Wonder, the
-**reasoning effort**. Pick **muse-image-1.0** to draw pictures, **sam-3.1** to find objects in a photo, or
-**muse-voice-transcribe-1.0** to turn an audio file into text — your message is then the prompt.
+### 5.4 Long jobs and helpers
 
-**Mode**: **Ask** (approve changes, commands and robot moves), **Auto** (everything runs without asking),
-**Full** (everything runs; Muse Code also gets its full-access profile, so no sandbox is needed), **Plan** (read-only).
+- Big jobs are split into **sub-agents** that work in parallel (`delegate`).
+- Long commands (builds, servers, training) run as **background jobs** — the agent checks their output later.
+- *Settings → Defaults → Max agent steps per message* limits how long one answer may run (default 100).
 
-If Muse Code says it needs the Windows sandbox: click *Set up sandbox* (click **Yes** on the Windows prompt), or use
-**Full** mode, or the API-key engine (it runs commands itself and needs no sandbox).
+### 5.5 Chat commands
 
-## 8. Chat and the agent
+| Command | What it does |
+|---|---|
+| `/remember <fact>` | Saves the fact to memory |
+| `/<skill-name> <task>` | Runs a skill, e.g. `/research best ESP32 boards` |
 
-Talk normally. The agent can read and write files in your workspace, run PowerShell, fetch web pages, use
-MCP servers (Settings → MCP), drive the robot and take photos, and split big jobs into **parallel sub-agents**.
-Every action appears as a card; risky ones ask for **Allow / Allow for this chat / Deny**.
+---
 
-The **Activity** page shows what ran **locally** (your PC) and what went to the **cloud** (Meta API).
+## 6. Everything the agent can do (tools)
 
-**Stop** (■ or **Esc**) ends the current answer within a few seconds, even if a command or the model hangs.
+You never call tools yourself — ask in plain words and the agent picks them. This list helps you know what to ask for.
 
-### Work on a server (VPS / dedicated)
+**Files and commands (your PC or the selected server)**
+`list_dir` · `read_file` · `write_file` · `edit_file` · `search` · `run_command` (PowerShell on Windows, bash on Linux servers, up to 1 hour) ·
+`job_start` / `job_output` / `job_stop` (background jobs)
 
-1. Left menu → **Remote** → *Add server*: host, user, password **or** key, default folder → *Save & connect*.
-   Recommended: **SSH keys → Generate key**, then on the server row **🔑 Install key** — the app adds the key to the
-   server's `authorized_keys`, switches to key login and can remove the saved password. **⌨ Terminal** opens a shell in the app.
-   Credentials are encrypted with your Windows account; the server's host key is remembered and a change is reported.
-2. In a chat click **🖥 This PC** → pick the server and a folder → *Use this server*. Now files and commands run **on the server**.
-3. Useful: *"/server-setup install nginx and a certificate for example.com"*, *"tail the app logs"*, *"deploy this folder"* (upload).
-   The agent can keep an interactive shell open (`ssh_shell`) for programs that ask questions, and run long jobs in the background.
+**Web and research**
+`web_search` (Meta search grounding, then DuckDuckGo) · `web_fetch` (read a page) ·
+`deep_research` (plans searches, reads many sources, saves a cited report in `research/`)
 
-### GitHub
+**Documents and design**
+`read_document` (PDF, DOCX, XLSX, PPTX…) · `create_pdf` (designed PDF from HTML/CSS or Markdown) ·
+`screenshot_page` (looks at a website or file at desktop and phone width) · `view_image`
 
-Left menu → **Plugins → GitHub**: create a token (link on the page), paste it, set the commit author → *Connect*.
-Then ask for example *"/github-publish this folder as qubitpage/robot-app"* or *"make release v1.2.0 with dist/Setup.exe"*.
+**Meta media models**
+`generate_image` (Muse Image) · `segment_image` (SAM 3.1) · `transcribe_audio` (Muse Voice Transcribe)
+
+**Remote servers (SSH)**
+`ssh_servers` · `ssh_exec` · `ssh_shell` (interactive shell for programs that ask questions) · `ssh_upload` · `ssh_download` ·
+`ssh_key` · `ssh_save_server`
+
+**GitHub**
+`github_account` · `github_repos` · `github_create_repo` · `github_publish` · `github_clone` · `github_release` ·
+`github_issues` · `github_pulls` · `github_api`
+
+**Arduino / firmware**
+`arduino_setup` · `arduino_boards` · `arduino_compile` · `arduino_upload` · `serial_monitor` · `arduino_cli` · `open_arduino_ide`
+
+**Robot**
+`robot_status` · `robot_drive` · `robot_stop` · `robot_turn` · `robot_look` · `robot_photo` · `robot_scan_room`
+
+**With Muse Code:** these same tools reach Muse Code through the built-in **Carpathron bridge** (an MCP server the
+app starts for each chat). In Muse Code they appear as `mcp__carpathron__…`. Keep *Settings → Tools & models → Give Muse Code the app tools* ticked.
+
+---
+
+## 7. Remote servers (VPS / dedicated) — the Remote page
+
+### 7.1 Add a server
+
+1. Left menu → **Remote** → **+ Add server**.
+2. Fill in: **Name** (anything), **Host** (domain or IP), **Port** (22), **User** (e.g. `root` or `ubuntu`), and one way to log in:
+   - **Password**, or
+   - an **app key** (from the SSH keys list below), or
+   - a **private key** pasted in or a key file path (e.g. `C:\Users\me\.ssh\id_ed25519`), with its passphrase if it has one.
+3. **Default folder** (optional) — where chats and terminals start, e.g. `/var/www`.
+4. **Save & connect** — the app connects, remembers the server's **host key** and shows the OS.
+
+**One entry per server.** A server is identified by *user + host + port*. If you add one that is already saved,
+the app updates the saved entry instead of making a copy (and the agent does the same). Older duplicates are merged
+automatically when the app starts, and their chats move to the kept entry.
+
+**Security:** credentials are encrypted with your Windows account. If a server's host key ever changes, the app
+refuses to connect and warns you (possible attack, or the server was reinstalled). If you reinstalled it yourself,
+use **Edit → Reset host key**.
+
+### 7.2 Server buttons
+
+| Button | What it does |
+|---|---|
+| **⌨ Terminal** | Opens a live shell inside the app. **Ctrl+C** button stops a running program. The session is **saved as a chat** (⌨ in the chat list) |
+| **Test** | Connects and shows OS and basic info |
+| **Disconnect** | Closes the connection (it reconnects when needed) |
+| **🔑 Install key** | Adds an SSH key to the server's `authorized_keys`, switches the server to key login and can delete the saved password |
+| **Chat here** | Opens a new chat that works on this server |
+| **Edit / Delete** | Change or remove the saved server |
+
+### 7.3 SSH keys (recommended instead of passwords)
+
+1. **Generate key** — creates an **ed25519** key stored encrypted in the app.
+   Or **Import key** to bring in an existing private key.
+2. On the server row: **🔑 Install key** → choose the key → tick *switch to key login* (and *remove saved password* if you like).
+3. Other buttons: **Copy public key** (paste it into a hosting panel), **Export to .ssh** (use it with other programs), **Delete**.
+Keys already in `%USERPROFILE%\.ssh` are listed too.
+
+### 7.4 Work on a server from a chat
+
+- Click **🖥 This PC** in the chat header → choose the server and a folder → **Use this server**.
+  The chip turns into **🌐 server-name**: from now on files, searches and commands in that chat run **on the server**.
+- Or press **Chat here** on the Remote page.
+- **Chats remember their server.** Close the app, come back another day, open the chat from the list (🌐) and
+  continue — it reconnects by itself.
+- **Terminal sessions** are saved as chats (⌨). Open one later to see what ran, ask the agent to continue from there
+  (it sees the recent terminal output), or press **⌨ Continue in terminal**.
+
+Good requests: *"/server-setup install nginx and a free certificate for example.com"*, *"show the last 100 lines of the
+app log"*, *"deploy this folder to /var/www/site"*, *"set up a daily database backup"*.
+
+---
+
+## 8. Plugins — GitHub
+
+### 8.1 Sign in
+
+Left menu → **Plugins → GitHub**:
+
+- **Sign in with browser** (recommended):
+  - If the **GitHub CLI** (`gh`) is installed, its login opens in your browser; approve it and the app imports the login.
+  - Otherwise the app shows a **code** and opens `github.com/login/device`: type the code, approve, and the app connects
+    by itself. (This needs an OAuth app *Client ID* in the details section; the GitHub CLI route needs nothing.)
+- **Token** (alternative): open the link on the page to create a token with the `repo` and `workflow` scopes, paste it, **Connect**.
+- Set the **commit author** (name and email) — commits are made under your name.
+- **Disconnect** removes the token from this PC.
+
+### 8.2 Use it
+
+Ask in a chat, for example:
+- *"/github-publish this folder as my-user/robot-app (private)"*
+- *"clone my-user/website into the workspace"*
+- *"make release v1.2.0 with dist/Setup.exe"*
+- *"list open issues in my-user/robot-app"* · *"open a pull request from branch fix-login"*
+
 The agent checks for secrets and a `.gitignore` before pushing and never force-pushes unless you ask.
 
-### Documents, PDFs, websites, research
+---
 
-- Attach or point to PDF / Word / Excel / PowerPoint files: the agent reads them (`read_document`).
-- `/design-pdf` makes a designed PDF from HTML + CSS and checks the result; `/design-website` builds a site and checks it with
-  screenshots at desktop and phone width.
-- `/research <question>` searches the web, reads the sources and saves a cited report in your workspace (`research/`).
+## 9. MCP servers (add more tools)
 
-### Firmware (Arduino / ESP32)
+*Settings → MCP servers (tools)* connects extra tools using the **Model Context Protocol**, the same format other
+AI apps use. Paste a JSON object, then **Save & start**:
 
-`/firmware <what you want>`: the agent finds or downloads **arduino-cli** (Arduino IDE 2 already contains it), installs the
-core (e.g. `esp32:esp32`), writes the sketch, **compiles**, fixes errors, **flashes** the board on its COM port and reads the
-**serial monitor** to verify. ESP32 that does not connect: hold **BOOT** while it says *Connecting…*.
+```json
+{
+  "filesystem": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\me\\Documents"] },
+  "remote": { "url": "https://example.com/mcp" }
+}
+```
 
-## 9. Memory, projects and skills
+- `command` + `args` start a local server (Node.js is needed for `npx` ones).
+- `url` connects to a remote MCP server.
+- The status list shows each server and how many tools it has; **Restart all** reloads them.
+- MCP tools are used by the API-key engine. Muse Code gets the app's built-in tools through the Carpathron bridge.
 
-- **Memory:** facts about you and your work, saved automatically (*auto-memory*) or with `/remember …`.
-  Every chat sees the relevant ones; edit or delete them on the Memory page.
-- **Chat search:** the agent can search all earlier chats (RAG), so chat B knows what you decided in chat A.
-- **Projects:** a folder + knowledge files (PDF, DOCX, text, code). Chats in a project search them automatically.
-- **Skills:** reusable instructions run with `/name`. After repeated multi-step work the app offers to learn a
-  skill in your style (*auto-skills*).
+---
 
-## 10. Drive the robot from the PC
+## 10. Memory, projects and skills
 
-Robot page → **Find my car** (or type its IP) → *car online* with **live video**.
+**Memory** — facts about you and your work. Saved automatically when you say things like *"I prefer…"* or with
+`/remember …`. Every chat sees the relevant ones. View, edit or delete them on the **Memory** page.
 
-- Pad or **W A S D** (Space = stop), speed slider (remembered), headlight slider.
-- Diagonals pivot on one side; ⟲ ⟳ spin on the spot.
-- **Take photo** saves to `MuseCarpathron\photos` and shows it.
-- Or just ask the agent: *"drive forward 50 cm, turn right and take a photo"*.
+**Chat search** — the agent can search earlier chats, so a new chat knows what you decided before.
 
-## 11. Robot head and room map
+**Projects** — a folder plus knowledge files (PDF, DOCX, text, code).
+1. **Projects → New project** → name and folder.
+2. Add knowledge files.
+3. Start chats inside the project: they work in its folder and search its files automatically.
 
-The camera is fixed to the car, so the car **turns its body** to look.
+**Skills** — saved instructions you run with `/name`. Built in:
 
-- **Look left / behind / right:** turn → photo → turn back. Also by voice and WhatsApp.
-- **Scan the room:** the car turns a full circle in 8 steps, photographs every side, **Muse Spark** names the
-  objects, their distance and the free space, and you get a **top-down map** + photo collage. The summary is
-  saved to memory so later chats know the room. Maps are in `MuseCarpathron\maps`.
-- **Turn calibration** (do this once): Robot page → *Turn calibration* → **Test 360°**. Too far → lower
-  *Full turn (ms)*; not far enough → raise it. Looking, scanning and VR head steering all use it.
-
-## 12. WhatsApp: text and voice
-
-**Personal WhatsApp:** Settings → WhatsApp → *Personal* → scan the QR with WhatsApp → *Linked devices*.
-Use the **Message yourself** chat (or add allowed numbers).
-**WhatsApp Business Cloud API:** fill in the Cloud fields; the app can open a Cloudflare tunnel for the webhook.
-
-Send `/help` for the list. Highlights:
-
-| Message | What happens |
+| Skill | What it does |
 |---|---|
-| `/photo` | The car takes a photo and sends it |
-| `/drive forward 2` · `/f /b /l /r` | Quick moves |
-| `/look left` · `/look back` | Turn, photo, turn back |
-| `/scan` | Room map image + collage + summary |
-| 🎤 voice note | **Muse Voice Transcribe** → short phrases ("forward two seconds", "stop", "look left") run instantly, anything longer goes to the agent |
-| any text | The Muse agent with memory and tools |
-| `yes` / `no` | Answer an approval request |
+| `/design-website` | Builds a website and checks it at desktop and phone width |
+| `/design-pdf` | Designs a PDF (HTML + CSS) and checks the result |
+| `/research` | Web research with a cited report |
+| `/firmware` | Writes, compiles, flashes and tests Arduino / ESP32 firmware |
+| `/carpathron-build` | The full Carpathron build process (robot, apps, firmware) |
+| `/github-publish` | Publishes a folder to GitHub safely |
+| `/server-setup` | Sets up and checks a Linux server |
 
-Voice notes are transcribed in English and 24 other languages (Romanian is not in Meta's list yet).
+Create your own on the **Skills** page. After repeated multi-step work, the app offers to learn a new skill in your style.
 
-## 13. Phone and browser access
+---
 
-Settings → *Phone & Quest*: open the shown address (`https://<pc-ip>:8443/pair`) on any device on your Wi-Fi,
-accept the certificate warning once (*Advanced → Proceed*), type the **6-digit PIN** shown on the PC
-(valid 10 minutes). The full app opens: chat, robot, video. A phone can also act as the robot's camera.
+## 11. Arduino and firmware
 
-## 14. Meta Quest 3S: the Carpathron Avatar app
+Ask for example *"/firmware blink the LED on my ESP32 and print the Wi-Fi IP"*. The agent:
+1. finds **arduino-cli** (Arduino IDE 2 already includes it) or downloads it (`arduino_setup`);
+2. installs the board core (e.g. `esp32:esp32`) and libraries;
+3. writes the sketch, **compiles** and fixes errors;
+4. finds the board's COM port and **uploads**;
+5. reads the **serial monitor** to check it works.
 
-### Install (once)
+Tips: ESP32 that doesn't connect → hold **BOOT** while it says *Connecting…*. For the ESP32-CAM car use the
+`esp32` core **2.0.12** and board *AI Thinker ESP32-CAM*. Path to arduino-cli can be set in *Settings → Tools & models*.
+`open_arduino_ide` opens the sketch in Arduino IDE if you want to edit it yourself.
 
-1. **Developer Mode:** Meta Horizon phone app → Devices → your Quest → Headset settings → *Developer Mode* on
-   (create a free developer organisation if asked). Restart the headset.
-2. **Meta Quest Developer Hub** on the PC → connect the Quest with USB-C → in the headset accept
-   **Allow USB debugging** (check *Always allow*; if you don't see it, look in the headset's Notifications).
-3. Developer Hub → Device manager → **Add build** → `CarpathronAvatar-1.1.4.apk` ([download](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk)).
-4. In the headset: **Library → filter (top right) → Unknown Sources → Carpathron Avatar**. Pin it if you like.
-   The USB cable is only for installing.
+---
 
-### Use
+## 12. The Carpathron robot
 
-The robot's camera fills a big screen in front of you; a panel below shows connection, signal and help.
-The app finds the robot on your Wi-Fi by itself (and remembers it). The first time it asks to link with
-Muse Carpathron: click **Allow** on the PC.
+### 12.1 Build and flash the car (once)
 
-| Control | Action |
+1. Kit: ESP32-CAM 4WD car (L298N driver, 4 motors), **2 × charged 18650** batteries (motors never run from USB).
+2. Wiring: battery box → L298N **VIN/GND**; L298N **5V/GND** → ESP32 5V/GND; the 6-wire plug **EN_A, IN1, IN2, IN3, IN4, EN_B** →
+   ESP32 GPIO **12, 13, 14, 15, 33, 2**, right next to the power plug with no empty pins between them. Click the antenna on.
+3. Flash `firmware/carpathron_car/carpathron_car.ino` (Arduino IDE, board *AI Thinker ESP32-CAM*, core 2.0.12),
+   or ask the agent with `/firmware`.
+4. **One-time boot fix:** Serial Monitor (115200, New Line) → `fixboot` → `BURN`. Without it the car can loop with
+   `invalid header: 0xffffffff`.
+5. **Wi-Fi:** in the Serial Monitor type `wifi` and follow the steps, or join the Wi-Fi **Carpathron-Car**
+   (password `carpathron`) with a phone, open `http://192.168.4.1/setup` and choose your 2.4 GHz network.
+
+Full robot hardware details (wiring tables, Quest controls, protocol): [docs/ROBOT-GUIDE.md](https://github.com/qubitpage/carpathron-muse/blob/main/docs/ROBOT-GUIDE.md).
+
+### 12.2 Drive from the PC — the Robot page
+
+- **Find my car** (or type its IP) → live video.
+- Pad or **W A S D** (Space = stop), speed and headlight sliders, ⟲ ⟳ spin on the spot.
+- **Take photo** (saved in `MuseCarpathron\photos`), **Look left / behind / right**, **Scan the room** (turns a full
+  circle, photographs every side, Muse names objects and free space, draws a top-down map — saved in `MuseCarpathron\maps`).
+- **Turn calibration** (once per floor type): *Test 360°*, then adjust *Full turn (ms)*.
+- Or just ask: *"drive forward 50 cm, turn right and take a photo"*.
+
+### 12.3 Meta Quest 3S
+
+- **Carpathron Avatar app:** enable Developer Mode (Meta Horizon phone app), install the APK with Meta Quest Developer Hub,
+  open it from *Library → Unknown Sources*. Sticks drive, **A/X** stop, **B** photo, turn your head to steer,
+  **hold right grip and talk** to Muse. The first time, click **Allow** on the PC.
+- **No install:** open the pairing link (section 14) in the Quest browser → Robot → **👁 Robot eyes (VR)**.
+
+### 12.4 Safety
+
+The car stops by itself 2.5 s after commands stop. **Space**, **STOP**, **A/X** and `/robot stop` stop it at once.
+Keep it away from stairs, pets and liquids; in VR stay seated or inside your boundary.
+
+---
+
+## 13. WhatsApp (text and voice)
+
+*Settings → WhatsApp remote control*:
+
+- **A · Personal WhatsApp** — scan the QR code with WhatsApp (*Linked devices*), like WhatsApp Web. Write to yourself in
+  **Message yourself**, or add **allowed phone numbers** (with country code).
+- **B · WhatsApp Business Cloud API** — fill in *Phone number ID*, *Access token*, a *verify word* of your choice and the
+  *App secret*. **Start public tunnel** opens a Cloudflare tunnel for the webhook. **Send test** checks it.
+
+Commands: `/help` · `/new` · `/stop` · `/status` · `/mode ask|auto|full|plan` · `/photo` · `/drive forward 2` ·
+`/f /b /l /r` · `/look left|right|back` · `/turn 90` · `/scan` · `/robot stop` · `/remember <fact>` · `yes` / `no`
+(answer approvals). Anything else goes to the agent. **Voice notes** are transcribed (English and 24 other languages)
+and run like typed messages.
+
+---
+
+## 14. Phone, tablet and Quest browser
+
+*Settings → Phone & Quest access*: open the address shown (`https://<pc-ip>:8443/pair`) on a device on the same Wi-Fi,
+accept the certificate warning once (*Advanced → Proceed*), type the **6-digit PIN** shown on the PC (valid 10 minutes).
+The full app opens: chat, robot, video. A phone can also act as the robot's camera.
+
+---
+
+## 15. Settings, section by section
+
+| Section | What's in it |
 |---|---|
-| Left stick / right stick | Left wheels / right wheels (tank). Click right stick → one-stick arcade |
-| Trigger | Turbo (100 %) |
-| **A / X** | **STOP** |
-| B | Photo |
-| **Turn your head** | The robot turns with you (head steering). **Y** toggles it |
-| **Hold right grip + talk** | Muse: "drive forward two seconds", "look behind", "scan the room", any question |
-| Left grip | "What do you see?" — Muse Spark looks through the robot's camera |
-| Both grips 1 s | Search robots and the PC again |
-| Menu | Next robot (if several) |
+| **Sign in to Meta** | API key, Muse Code install / sign-in / sandbox (section 3) |
+| **Defaults** | Default engine, approval mode, folder (workspace), API model, max steps, custom instructions for every chat |
+| **Remote servers, SSH keys and GitHub** | Shortcuts to the Remote and Plugins pages |
+| **Tools & models** | Default reasoning effort; web search source; Muse Code sandbox (*Automatic / Always / Off*); trust workspace; Muse Code permission profile (*Load profiles*); *Give Muse Code the app tools* (bridge); arduino-cli path |
+| **MCP servers (tools)** | Extra tools (section 9) |
+| **WhatsApp remote control** | Section 13 |
+| **Phone & Quest access** | Section 14 |
+| **About** | Version and links |
 
-Taking the headset off or leaving the app stops the robot.
+---
 
-## 15. Quest browser VR (no install)
+## 16. Best practices
 
-Open the pairing page in the Quest browser (section 13), Robot page → **👁 Robot eyes (VR)**. Same idea as the
-app, inside the browser: video screen, sticks, head steering, A/X stop, B photo, left grip look behind, both
-grips scan. The second button, **Passthrough drive (AR)**, keeps the real room visible to watch the real car.
-
-## 16. Build your own robot
-
-Implement the **Carpathron Robot Protocol** (`protocol/ROBOT-PROTOCOL.md`): `/status`, `/drive`, `/stop`,
-`/capture` and MJPEG `/stream` on port 81, plus an auto-stop timeout. Your robot then works with the agent,
-WhatsApp, voice, room scan, browser VR and the Quest app, with no app changes.
-
-## 17. Best practices
-
-**Power and hardware**
-- Always run the motors from **charged 18650s**; USB alone powers only the ESP32 and camera.
-- Antenna clicked on, car within good range of the router (−70 dBm or better for smooth video).
-- Lift the wheels for the first tests; check each side with `test` in the Serial Monitor.
-
-**Driving**
-- Start at 60–80 % indoors; use turbo in open space.
-- Calibrate the 360° turn on the floor you drive on (carpet and tiles differ).
-- One video viewer at a time gives the best control latency on weak Wi-Fi (the car supports up to 3).
-
-**Working with Muse**
-- Be specific: *"drive forward 1 metre, then look left and tell me if the door is open"*.
-- Use **Ask** mode while learning, **Auto** when you trust the setup, **Plan** for long jobs.
+- Start in **Ask** mode; switch to **Auto/Full** for long trusted jobs; use **Plan** to think before big changes.
+- Be specific: *what*, *where* (folder or server) and *how you'll check it*.
 - Put manuals and notes into a **Project** so answers cite them.
-- Keep memory clean: review the Memory page now and then.
+- Use **SSH keys** instead of passwords, and one saved entry per server.
+- Never paste passwords or tokens into a chat — use the Remote and Plugins pages, where they are encrypted.
+- Review **Memory** now and then; delete what is wrong or old.
+- For releases: build, test, then *"make release vX.Y.Z with the installer"*.
 
-**Security**
-- The app is only reachable on your local network and needs a token, PIN pairing or (Quest app) an approval on the PC.
-- Never paste passwords or keys into chats. WhatsApp only answers you (self-chat) and numbers you allow.
-- Keep the API key in Settings only; it is never sent to the browser or the phone.
+---
 
-## 18. Safety
-
-- The robot **stops by itself** after 2.5 s without commands (lost Wi-Fi, closed app).
-- **A/X** in VR, **Space** on the PC, **STOP** buttons and `/robot stop` on WhatsApp stop immediately.
-- Keep the car away from stairs, pets and liquids; supervise children.
-- In VR you cannot see your real surroundings: stay seated or inside your Guardian boundary.
-
-## 19. Troubleshooting
+## 17. Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| `invalid header: 0xffffffff` boot loop | Run the one-time `fixboot` (section 4) |
-| Upload *Wrong boot mode* | Hold IO0, tap RST, release, upload |
-| Wheels don't move | Batteries charged and switched on, L298N LED on, battery plug in **P1 VIN/GND**, 6-wire plug fully on |
-| Only some directions work | 6-wire plug shifted by a pin: no bare pins between the two plugs |
-| One side runs backwards | `INVERT_LEFT` / `INVERT_RIGHT` in the firmware |
-| Car not found on Wi-Fi | It must be on 2.4 GHz; Serial Monitor `status`; try `http://carpathron.local/` |
-| Video stops / jerky driving | Signal too weak: move closer to the router, antenna on, close extra video viewers |
-| Quest: *page isn't working* | Update Muse Carpathron (1.2.1+ redirects http→https); same Wi-Fi as the PC |
-| Quest: can't find the app | Library → filter → **Unknown Sources** |
-| Quest: "Muse: PC app not found" | Muse Carpathron must be running on the PC, same Wi-Fi; both grips 1 s to search again |
-| WhatsApp doesn't answer | Settings → WhatsApp → status *connected*; write in **Message yourself** or add your number |
-| Voice note not understood | Speak English, close to the mic; Romanian is not supported by Muse Voice Transcribe yet |
-| Muse Code shell errors | Settings → *Set up sandbox* and click **Yes** on the Windows prompt |
+| *No Meta API key* / *Muse Code not found* (bottom left) | Settings → Sign in to Meta |
+| Muse Code: *needs Windows sandbox* | Settings → Tools & models → sandbox **Automatic**, or **Full** mode, or *Set up Windows sandbox* and click **Yes** |
+| Stop doesn't seem to react | Wait up to 3 s; the answer is force-finished. Then write again |
+| SSH: *wrong user, password or key* | Remote → Edit: check user and password/key; **Test** |
+| SSH: *host key changed* | If you reinstalled the server: Edit → **Reset host key**. Otherwise don't connect |
+| The same server appears twice | Install 1.5.3 or newer — duplicates are merged at start |
+| A server chat says the server was removed | Re-add the server, then pick it again with the 🌐 chip |
+| GitHub *Sign in with browser* does nothing | Install the GitHub CLI, or add a Client ID in the details, or use a token |
+| Push refused (403) | The token needs the `repo` (and `workflow`) scope, or you lack access to that repository |
+| arduino-cli missing | Ask *"set up Arduino"* (`arduino_setup`) or set its path in Settings |
+| Board not found / upload fails | Other programs using the COM port (close Serial Monitor), USB cable with data, hold BOOT |
+| WhatsApp doesn't answer | Status must be *connected*; write in **Message yourself** or add your number |
+| Phone can't open the app | Same Wi-Fi; accept the certificate; new PIN after 10 minutes |
+| Something else | Activity page, and the log at `%APPDATA%\Muse Carpathron\muse-carpathron.log` |
 
-## 20. Reference: commands and controls
+---
 
-**Car Serial Monitor:** `status` · `test` · `wifi` · `forget` · `fixboot` · `help`
+## 18. Keyboard shortcuts
 
-**Car web page** (`http://<car-ip>/`): pad (hold to drive), speed, light, *Test left/right wheels*, *Wi-Fi setup*.
-
-**Robot protocol:** `GET /status` · `/drive?l=&r=` · `/stop` · `/capture` · `:81/stream` · `/led?v=` · `ws /ws`
-
-**WhatsApp:** `/help` `/new` `/stop` `/status` `/mode ask|auto|plan` `/photo` `/drive <dir> [s]` `/f /b /l /r`
-`/look left|right|back` `/turn <deg>` `/scan` `/robot stop` `/remember <fact>` · voice notes · `yes`/`no`
-
-**Chat:** `/remember <fact>` · `/<skill-name>` · engine, model and mode pickers at the top.
+| Keys | Action |
+|---|---|
+| **Enter** / **Shift+Enter** | Send / new line |
+| **Esc** | Stop the current answer, or close a dialog |
+| **W A S D**, **Space** | Drive / stop the robot (Robot page) |

@@ -23,6 +23,39 @@ class Remote {
     this.conns = new Map(); // serverId -> { client, ready: Promise, os, home }
     this.shells = new Map(); // shellId -> { serverId, stream, buf, closed }
     if (!Array.isArray(this.store.settings.servers)) this.store.settings.servers = [];
+    this.merged = this.dedupe(); // oldId -> keptId, for chats that pointed at a removed duplicate
+  }
+
+  // One saved entry per server: same user + host + port is the same server.
+  static target(s) { return `${String(s.username || 'root').trim()}@${String(s.host || '').trim().toLowerCase()}:${Number(s.port || 22)}`; }
+  sameAs(input, exceptId) {
+    const t = Remote.target(input);
+    return this.servers().find((s) => s.id !== exceptId && Remote.target(s) === t) || null;
+  }
+  dedupe() {
+    const groups = new Map();
+    for (const s of this.servers()) { const t = Remote.target(s); if (!groups.has(t)) groups.set(t, []); groups.get(t).push(s); }
+    const merged = {};
+    const keep = [];
+    for (const g of groups.values()) {
+      if (g.length === 1) { keep.push(g[0]); continue; }
+      // keep the one that uses a key, then the most recently used, then the oldest
+      g.sort((a, b) => (!!b.keyId - !!a.keyId) || ((b.lastUsed || 0) - (a.lastUsed || 0)) || ((a.createdAt || 0) - (b.createdAt || 0)));
+      const k = g[0];
+      for (const d of g.slice(1)) {
+        for (const f of ['password', 'privateKey', 'passphrase', 'keyId', 'keyPath', 'defaultPath', 'fingerprint', 'os']) if (!k[f] && d[f]) k[f] = d[f];
+        merged[d.id] = k.id;
+      }
+      keep.push(k);
+    }
+    if (Object.keys(merged).length) {
+      // keep the original order of the kept entries
+      const ids = new Set(keep.map((s) => s.id));
+      this.store.settings.servers = this.servers().filter((s) => ids.has(s.id));
+      this.store.saveSettings();
+      this.log(`remote: merged ${Object.keys(merged).length} duplicate server entr${Object.keys(merged).length === 1 ? 'y' : 'ies'}`);
+    }
+    return merged;
   }
 
   // ------------------------------------------------------------ saved servers
@@ -54,28 +87,36 @@ class Remote {
   save(input) {
     const list = this.servers();
     let s = input.id ? list.find((x) => x.id === input.id) : null;
+    const host = String(input.host ?? (s && s.host) ?? '').trim();
+    if (!host) throw new Error('Host is required');
+    const target = { host, port: input.port || (s && s.port) || 22, username: input.username ?? (s && s.username) ?? 'root' };
+    const dup = this.sameAs(target, s && s.id);
+    if (dup && s) throw new Error(`${Remote.target(dup)} is already saved as "${dup.name}". Edit that one instead.`);
+    // Adding a server that is already saved updates the saved one (no duplicates).
+    let existed = false;
+    if (dup && !s) { s = dup; existed = true; }
     const isNew = !s;
     if (!s) s = { id: crypto.randomUUID(), createdAt: Date.now() };
-    const host = String(input.host ?? s.host ?? '').trim();
-    if (!host) throw new Error('Host is required');
-    s.name = String(input.name || s.name || host).trim().slice(0, 60);
+    const before = isNew ? '' : Remote.target(s);
+    s.name = String((existed ? s.name : input.name) || s.name || input.name || host).trim().slice(0, 60);
     s.host = host;
     s.port = Math.max(1, Math.min(65535, Number(input.port || s.port || 22)));
     s.username = String(input.username ?? s.username ?? 'root').trim() || 'root';
     s.defaultPath = String(input.defaultPath ?? s.defaultPath ?? '').trim();
     s.keyPath = String(input.keyPath ?? s.keyPath ?? '').trim();
-    if (input.keyId !== undefined) s.keyId = String(input.keyId || '');
+    if (input.keyId !== undefined && !(existed && !input.keyId)) s.keyId = String(input.keyId || '');
     if (typeof input.password === 'string' && input.password) s.password = this.secrets.encrypt(input.password);
     if (typeof input.privateKey === 'string' && input.privateKey.trim()) s.privateKey = this.secrets.encrypt(input.privateKey.trim() + '\n');
     if (typeof input.passphrase === 'string' && input.passphrase) s.passphrase = this.secrets.encrypt(input.passphrase);
     if (input.clearPassword) delete s.password;
     if (input.clearKey) delete s.privateKey;
-    if (input.resetFingerprint || (!isNew && (input.host || input.port))) delete s.fingerprint;
+    const changed = !isNew && before !== Remote.target(s);
+    if (input.resetFingerprint || changed) delete s.fingerprint;
     if (isNew) list.push(s);
     this.store.settings.servers = list;
     this.store.saveSettings();
-    this.disconnect(s.id);
-    return this.publicList().find((x) => x.id === s.id);
+    if (changed || input.resetFingerprint || input.password || input.privateKey || input.keyId !== undefined || input.clearPassword || input.clearKey) this.disconnect(s.id);
+    return { ...this.publicList().find((x) => x.id === s.id), existed };
   }
 
   remove(id) {

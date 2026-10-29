@@ -293,7 +293,8 @@ async function execX(name, args, ctx) {
     }
     case 'ssh_save_server': {
       const s = remote.save({ name: args.name, host: args.host, port: args.port, username: args.username, password: args.password, keyPath: args.private_key_path, defaultPath: args.default_path });
-      try { const t = await remote.test(s.id); return `Saved and connected to ${s.name} (${t.os}).\n${t.output}`; }
+      const what = s.existed ? `Already saved as "${s.name}" — updated that entry (no duplicate made)` : `Saved ${s.name}`;
+      try { const t = await remote.test(s.id); return `${what} and connected (${t.os}).\n${t.output}`; }
       catch (e) { return `Saved ${s.name}, but connecting failed: ${e.message}`; }
     }
     // ---- documents

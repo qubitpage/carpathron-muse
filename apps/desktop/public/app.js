@@ -153,6 +153,8 @@
     if (view === 'settings') renderSettings();
     if (view === 'robot') window.MCRobot && window.MCRobot.show(S);
     if (view === 'remote') renderRemote();
+    if (view === 'guide') renderGuide();
+    $('#btnGuide').classList.toggle('on', view === 'guide');
     if (view === 'plugins') renderPlugins();
     renderChatList();
   }
@@ -193,6 +195,44 @@
     if (!q) return renderChatList();
     searchT = setTimeout(async () => renderChatList(await api(`/api/search?q=${encodeURIComponent(q)}`)), 250);
   });
+
+  // ------------------------------------------------------------ guide
+  const G = { html: null };
+  $('#btnGuide').onclick = () => show('guide');
+  async function renderGuide() {
+    const body = $('#guideBody'), toc = $('#guideToc');
+    if (!G.html) {
+      try { G.html = DOMPurify.sanitize(marked.parse(await (await fetch('guide.md', { cache: 'no-store' })).text(), { gfm: true, breaks: false })); }
+      catch (e) { body.textContent = `Could not load the guide: ${e.message}`; return; }
+      body.innerHTML = G.html;
+      // links open in the browser; headings get ids for the contents list
+      body.querySelectorAll('a[href^="http"]').forEach((a) => { a.target = '_blank'; a.rel = 'noopener'; });
+      toc.innerHTML = '';
+      body.querySelectorAll('h2').forEach((hd, i) => {
+        hd.id = `g${i}`;
+        toc.append(h('a', { href: '#', onclick: (e) => { e.preventDefault(); hd.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, hd.textContent));
+      });
+    }
+    $('#guideSearch').value = '';
+    filterGuide('');
+  }
+  function filterGuide(q) {
+    q = q.trim().toLowerCase();
+    const body = $('#guideBody');
+    // show whole sections (h2 + everything until the next h2) that contain the words
+    let sec = [];
+    const words = q.split(/\s+/).filter(Boolean);
+    const flush = () => {
+      const txt = sec.map((el) => el.textContent.toLowerCase()).join(' ');
+      const hit = words.every((w) => txt.includes(w));
+      sec.forEach((el) => { el.hidden = !hit; });
+      if (sec[0] && sec[0].tagName === 'H2') { const a = $$('#guideToc a')[Number(sec[0].id.slice(1))]; if (a) a.hidden = !hit; }
+      sec = [];
+    };
+    for (const el of body.children) { if (el.tagName === 'H2') flush(); sec.push(el); }
+    flush();
+  }
+  $('#guideSearch').addEventListener('input', (e) => filterGuide(e.target.value));
 
   function renderFoot() {
     const el = $('#sideFoot');
@@ -1178,7 +1218,7 @@
         S.boot.servers = await api('/api/servers');
         if (test) { out.textContent = 'Connecting…'; const r = await api(`/api/servers/${saved.id}/test`, { body: {} }); out.textContent = r.ok ? `✓ Connected (${r.os}). ${r.output.split('\n').slice(0, 3).join(' · ')}` : `✕ ${r.error}`; if (!r.ok) return; S.boot.servers = await api('/api/servers'); }
         renderServerList(); if (!test) closeModal(); else setTimeout(closeModal, 1600);
-        toast('Server saved');
+        toast(saved.existed ? `Already saved as "${saved.name}" — updated it instead of adding a copy` : 'Server saved');
       } catch (e) { out.textContent = `✕ ${e.message}`; }
     };
     modal(h('h3', {}, sv ? `Edit ${sv.name}` : 'Add a remote server'),

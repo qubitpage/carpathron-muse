@@ -38,6 +38,7 @@
           <div class="title-wrap">
             <input class="chat-title" id="chatTitle" value="New chat" spellcheck="false">
             <div class="chips">
+              <button class="chip" id="chipWhere" title="Where the agent works: this PC or a remote server (SSH)">🖥 <span>This PC</span></button>
               <button class="chip" id="chipFolder" title="Attached folder — the agent works here">📁 <span>workspace</span></button>
               <button class="chip" id="chipProject" title="Project">▦ <span>No project</span></button>
             </div>
@@ -48,13 +49,16 @@
               <option value="api">Meta API key</option>
             </select>
             <select id="selModel" title="Model"></select>
+            <select id="selEffort" title="Reasoning effort" hidden></select>
             <div class="seg" id="segMode" title="Approval mode">
               <button data-mode="ask" title="Ask before changing files, running commands or moving the robot">Ask</button>
               <button data-mode="auto" title="Do everything without asking">Auto</button>
+              <button data-mode="full" title="Full access: no approvals, Muse Code full-access profile, all servers and tools">Full</button>
               <button data-mode="plan" title="Read-only: research and plan">Plan</button>
             </div>
           </div>
         </header>
+        <div class="caps" id="caps"></div>
         <div class="messages" id="messages"></div>
         <div class="composer-wrap">
           <div class="slash" id="slash" hidden></div>
@@ -184,6 +188,7 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
+  <div class="modal-back" id="modal" hidden><div class="modal" id="modalBox"></div></div>
 
   <script src="/vendor/marked.js"></script>
   <script src="/vendor/purify.js"></script>

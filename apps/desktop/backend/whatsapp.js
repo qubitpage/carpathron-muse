@@ -13,7 +13,7 @@ const HELP = [
   '*Muse Carpathron* — commands:',
   '/new — start a new chat',
   '/stop — stop the current task',
-  '/mode ask|auto|plan — approval mode',
+  '/mode ask|auto|full|plan — approval mode',
   '/status — what is running',
   '',
   '*Robot*',
@@ -161,7 +161,7 @@ class WhatsApp {
       } catch (e) { await reply(`📷 ${e.message}`); }
       return;
     }
-    const mm = lower.match(/^\/mode\s+(ask|auto|plan)$/);
+    const mm = lower.match(/^\/mode\s+(ask|auto|full|plan)$/);
     if (mm) { this.store.updateSettings({ mode: mm[1] }); this.emit('settings:update', this.store.publicSettings()); return reply(`Mode set to *${mm[1]}*.`); }
     if (this.agent.isRunning(conv.id)) return reply('⏳ Still working on the previous message. Send /stop to cancel it.');
 

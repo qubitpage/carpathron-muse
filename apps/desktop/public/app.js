@@ -102,6 +102,7 @@
       case 'camera:photo': window.MCRobot && window.MCRobot.onPhoto && window.MCRobot.onPhoto(d); break;
       case 'robot:status': case 'robot:motors': case 'robot:scan': case 'robot:map': window.MCRobot && window.MCRobot.onEvent(ev, d); break;
       case 'avatar:link': avatarLinkPrompt(d); break;
+      case 'remote:status': S.boot.servers = d; if (S.view === 'chat') renderHead(); if (S.view === 'settings') renderServers(); break;
       default: break;
     }
   }
@@ -265,15 +266,16 @@
     const name = S.conv.projectId ? (S.projects.find((p) => p.id === S.conv.projectId)?.name) : null;
     const sugg = [
       'What can you do on this PC?',
-      'Look at my attached folder and summarize the project',
-      'Write a Python script that renames photos by date',
+      '/design-website A landing page for Carpathron robots',
+      '/research Best ESP32 boards for robots in 2026',
+      '/firmware Blink test on my ESP32, then print the Wi-Fi IP',
+      '/server-setup Check my server and install nginx',
       'Drive the robot in a small square',
-      '/plan Build a web page for my startup',
     ];
     return h('div', { class: 'empty', id: 'emptyState' },
       h('img', { src: 'icon.png', width: 56, height: 56, style: 'border-radius:14px' }),
       h('h2', {}, name ? `Project: ${name}` : 'How can I help you today?'),
-      h('div', { class: 'muted' }, `Engine: ${effectiveEngine(S.conv) === 'muse' ? 'Meta account (Muse Code)' : 'Meta API key'} · Mode: ${S.conv.mode || S.settings.mode}`),
+      h('div', { class: 'muted' }, `Engine: ${effectiveEngine(S.conv) === 'muse' ? 'Meta account (Muse Code)' : 'Meta API key'} · Mode: ${S.conv.mode || S.settings.mode} · Working on: ${whereLabel()}`),
       h('div', { class: 'sugg' }, sugg.map((t) => h('button', { onclick: () => { $('#input').value = t; autoGrow(); $('#input').focus(); } }, t))),
     );
   }
@@ -283,6 +285,11 @@
     $('#chatTitle').value = S.conv.title || 'New chat';
     const ws = S.conv.workspace || S.settings.workspace;
     $('#chipFolder span').textContent = ws;
+    const remote = currentServer();
+    $('#chipWhere span').textContent = whereLabel();
+    $('#chipWhere').classList.toggle('remote', !!remote);
+    $('#chipWhere').firstChild.textContent = remote ? '🌐 ' : '🖥 ';
+    $('#chipFolder').hidden = !!remote;
     const proj = S.conv.projectId && S.projects.find((p) => p.id === S.conv.projectId);
     $('#chipProject span').textContent = proj ? proj.name : 'No project';
     const eng = effectiveEngine(S.conv);
@@ -311,7 +318,73 @@
     if (current && !list.some((m) => m.id === current)) sel.append(h('option', { value: current }, current));
     sel.value = current;
     sel.title = engine === 'muse' && S.models.museError ? S.models.museError : 'Model';
+    renderCaps(engine, list.find((m) => m.id === current));
   }
+  // What the chosen model can do (images, video, audio, PDF, tools, reasoning, web search, image output, segmentation…)
+  function renderCaps(engine, m) {
+    const box = $('#caps'), eff = $('#selEffort');
+    box.innerHTML = '';
+    eff.hidden = true;
+    if (engine === 'muse') { box.append(h('span', { class: 'cap' }, 'Muse Code agent: own tools + app tools (SSH, PDF, research, Arduino, robot) via bridge')); return; }
+    if (!m) return;
+    const kindLabel = { chat: 'Chat agent', image: 'Image model — your message is the picture prompt (attach images to edit)', segment: 'SAM 3.1 — type what to find; attach an image/video (or it uses the robot camera)', transcribe: 'Speech to text — attach a WAV/OGG file' }[m.kind] || m.kind;
+    box.append(h('span', { class: 'cap kind' }, kindLabel));
+    for (const c of m.capLabels || []) box.append(h('span', { class: 'cap' }, c));
+    if (m.note) box.append(h('span', { class: 'note' }, m.note));
+    if ((m.effort || []).length) {
+      eff.innerHTML = '';
+      eff.append(h('option', { value: '' }, 'Effort: auto'));
+      for (const e of m.effort) eff.append(h('option', { value: e }, `Effort: ${e}`));
+      eff.value = S.conv.effort || S.settings.effort || '';
+      eff.hidden = false;
+    }
+  }
+  $('#selEffort').onchange = (e) => patchConv({ effort: e.target.value || null });
+  function currentServer() {
+    const r = S.conv && S.conv.remote;
+    return r && r.serverId ? (S.boot.servers || []).find((x) => x.id === r.serverId) : null;
+  }
+  function whereLabel() {
+    const sv = currentServer();
+    return sv ? `${sv.name}:${(S.conv.remote && S.conv.remote.path) || sv.defaultPath || '~'}` : 'This PC';
+  }
+  // ---- modal
+  function modal(...kids) { const box = $('#modalBox'); box.innerHTML = ''; box.append(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false)); $('#modal').hidden = false; }
+  function closeModal() { $('#modal').hidden = true; }
+  $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
+  // ---- where does this chat work: this PC or a server
+  $('#chipWhere').onclick = () => {
+    const servers = S.boot.servers || [];
+    const cur = S.conv.remote && S.conv.remote.serverId;
+    const pathIn = h('input', { value: (S.conv.remote && S.conv.remote.path) || '', placeholder: 'Folder on the server (empty = default / home)' });
+    const dirs = h('div', { class: 'dirs' });
+    let picked = cur || null;
+    const browse = async () => {
+      if (!picked) return;
+      dirs.textContent = 'Loading…';
+      const r = await api(`/api/servers/${picked}/ls?path=${encodeURIComponent(pathIn.value)}`).catch((e) => ({ error: e.message }));
+      dirs.innerHTML = '';
+      if (r.error) { dirs.append(h('span', { class: 'small', style: 'color:var(--warn)' }, r.error)); return; }
+      pathIn.value = r.path;
+      const up = r.path.replace(/\/[^/]+\/?$/, '') || '/';
+      dirs.append(h('button', { class: 'btn tiny', onclick: () => { pathIn.value = up; browse(); } }, '⬆ ..'));
+      for (const d of r.dirs.slice(0, 200)) dirs.append(h('button', { class: 'btn tiny', onclick: () => { pathIn.value = `${r.path.replace(/\/$/, '')}/${d}`; browse(); } }, `📁 ${d}`));
+    };
+    const opts = [h('div', { class: 'opt' + (!cur ? ' on' : ''), onclick: async () => { await patchConv({ remote: null }); closeModal(); toast('Working on this PC'); } }, '🖥', h('div', {}, h('b', {}, 'This PC'), h('div', { class: 'small muted' }, S.conv.workspace || S.settings.workspace)))];
+    for (const sv of servers) {
+      const o = h('div', { class: 'opt' + (sv.id === cur ? ' on' : ''), onclick: () => { picked = sv.id; $$('.opt', $('#modalBox')).forEach((x) => x.classList.remove('on')); o.classList.add('on'); if (!pathIn.value) pathIn.value = sv.defaultPath || ''; browse(); } },
+        '🌐', h('div', { class: 'grow' }, h('b', {}, sv.name), h('div', { class: 'small muted' }, `${sv.username}@${sv.host}:${sv.port}${sv.os ? ' · ' + sv.os : ''}${sv.connected ? ' · connected' : ''}`)));
+      opts.push(o);
+    }
+    modal(h('h3', {}, 'Where should Muse work in this chat?'), ...opts,
+      servers.length ? null : h('p', { class: 'small muted' }, 'No servers saved yet. Add your VPS or dedicated server in Settings → Remote servers (saved once, encrypted on this PC).'),
+      servers.length ? h('div', {}, h('label', { class: 'small muted' }, 'Folder on the server'), h('div', { class: 'row' }, pathIn, h('button', { class: 'btn', onclick: browse }, 'Browse')), dirs) : null,
+      h('div', { class: 'row' },
+        servers.length ? h('button', { class: 'btn primary', onclick: async () => { if (!picked) return toast('Pick a server', true); await patchConv({ remote: { serverId: picked, path: pathIn.value.trim() } }); closeModal(); toast(`Working on ${whereLabel()}`); } }, 'Use this server') : null,
+        h('button', { class: 'btn', onclick: () => { closeModal(); show('settings'); setTimeout(() => $('#srvCard')?.scrollIntoView({ behavior: 'smooth' }), 300); } }, '＋ Add / edit servers'),
+        h('button', { class: 'btn', onclick: closeModal }, 'Close')));
+    if (cur) browse();
+  };
   $('#selEngine').onchange = (e) => patchConv({ engine: e.target.value });
   $('#selModel').onchange = (e) => (effectiveEngine(S.conv) === 'muse' ? patchConv({ museModel: e.target.value }) : patchConv({ model: e.target.value }));
   $$('#segMode button').forEach((b) => (b.onclick = () => patchConv({ mode: b.dataset.mode })));
@@ -345,6 +418,7 @@
       case 'assistant':
         el = h('div', { class: 'msg assistant' + (m.streaming ? ' streaming' : ''), html: md(m.text) });
         decorateCode(el);
+        if (m.image) el.append(genImg(m.image));
         break;
       case 'thinking':
         el = h('details', { class: 'fold thinking' }, h('summary', {}, '💭', h('span', {}, `Thinking${m.label ? ' ' + m.label : ''}…`)), h('div', { class: 'body' }, m.text || ''));
@@ -357,7 +431,7 @@
           h('div', { class: 'body' },
             args && args !== '{}' ? h('pre', { class: 'muted' }, args.length > 4000 ? args.slice(0, 4000) + '…' : args) : null,
             out ? h('pre', {}, out) : (m.status === 'running' ? h('span', { class: 'muted small' }, 'running…') : null)));
-        if (m.image) { el.open = true; $('.body', el).prepend(h('img', { class: 'photo', src: window.MCphotoUrl(m.image), alt: 'robot photo', onclick: () => isDesktop && window.desktop.openPath(m.image) })); }
+        if (m.image) { el.open = true; $('.body', el).prepend(h('img', { class: 'photo', src: window.MCphotoUrl(m.image), alt: 'image', onclick: () => isDesktop && window.desktop.openPath(m.image) })); }
         if (m.status === 'error' && SANDBOX_RE.test(out || '')) { const wrap = h('div', {}, el, sandboxFix()); el.dataset.id = m.id; wrap.dataset.id = m.id; return wrap; }
         break;
       }
@@ -374,16 +448,19 @@
         break;
       }
       case 'error': el = h('div', { class: 'msg error' }, '⚠️ ', m.text, SANDBOX_RE.test(m.text || '') ? sandboxFix() : null); break;
-      default: el = h('div', { class: 'msg info' }, m.text || '');
+      default: el = h('div', { class: 'msg info' }, m.text || '', m.image ? genImg(m.image) : null);
     }
     el.dataset.id = m.id;
     return el;
   }
+  function genImg(p) { return h('img', { class: 'gen', src: window.MCphotoUrl(p), alt: 'image', onclick: () => isDesktop && window.desktop.openPath(p) }); }
   const SANDBOX_RE = /sandbox (setup has not run|enforcement unavailable)|setup_required/i;
   function sandboxFix() {
     return h('div', { class: 'fixbar' },
       h('span', {}, '🛡 Muse Code needs a one-time Windows sandbox setup before it can run commands.'),
-      h('button', { class: 'btn primary', onclick: async () => { try { await api('/api/muse/sandbox', { body: {} }); toast('A setup window opened. Click YES on the Windows prompt, then send your message again.'); } catch (e) { toast(e.message, true); } } }, 'Set up sandbox'));
+      h('button', { class: 'btn primary', onclick: async () => { try { await api('/api/muse/sandbox', { body: {} }); toast('A setup window opened. Click YES on the Windows prompt, then send your message again.'); } catch (e) { toast(e.message, true); } } }, 'Set up sandbox'),
+      h('button', { class: 'btn', title: 'Muse Code full-access profile (no sandbox) for this chat', onclick: () => patchConv({ mode: 'full' }).then(() => toast('Full access for this chat — send the message again')) }, 'Use Full access'),
+      S.settings.hasApiKey ? h('button', { class: 'btn', title: 'The API-key engine runs commands directly with this app (no Muse sandbox)', onclick: () => patchConv({ engine: 'api' }).then(() => toast('Switched this chat to the API-key engine')) }, 'Use API engine') : null);
   }
   function decorateCode(el) {
     $$('pre', el).forEach((pre) => {
@@ -495,7 +572,16 @@
     } catch (err) { toast(err.message, true); }
     finally { $('#btnSend').disabled = false; }
   });
-  $('#btnStop').onclick = async () => { if (S.conv && S.conv.id) await api(`/api/convs/${S.conv.id}/stop`, { body: {} }); };
+  $('#btnStop').onclick = async () => {
+    if (!S.conv || !S.conv.id) { setRunning(false); return; }
+    const id = S.conv.id;
+    S.statusText = 'Stopping…'; setStatus('Stopping…');
+    let r = null;
+    try { r = await api(`/api/convs/${id}/stop`, { body: {} }); } catch (e) { toast(e.message, true); }
+    if (!r || !r.ok) { S.running.delete(id); if (S.conv && S.conv.id === id) setRunning(false); renderChatList(); }
+    setTimeout(() => { if (S.conv && S.conv.id === id) resyncConv(); }, 3500);
+  };
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#btnStop').hidden && document.activeElement === input) $('#btnStop').click(); });
   $('#btnNewChat').onclick = () => newChat();
   $('#btnAttach').onclick = () => $('#fileInput').click();
   $('#fileInput').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
@@ -719,10 +805,10 @@
 
     // --- defaults
     const model = h('input', { value: s.model });
-    const mode = h('select', {}, h('option', { value: 'ask' }, 'Ask — approve changes, commands and robot moves'), h('option', { value: 'auto' }, 'Auto — do everything without asking'), h('option', { value: 'plan' }, 'Plan — read-only'));
+    const mode = h('select', {}, h('option', { value: 'ask' }, 'Ask — approve changes, commands and robot moves'), h('option', { value: 'auto' }, 'Auto — do everything without asking'), h('option', { value: 'full' }, 'Full access — no approvals, Muse Code full-access profile'), h('option', { value: 'plan' }, 'Plan — read-only'));
     mode.value = s.mode;
     const ws = h('input', { value: s.workspace });
-    const steps = h('input', { type: 'number', min: 5, max: 200, value: s.maxSteps });
+    const steps = h('input', { type: 'number', min: 5, max: 500, value: s.maxSteps });
     const sys = h('textarea', { rows: 4, placeholder: 'e.g. Answer in Romanian. I am building a robot startup called Carpathron.' });
     sys.value = s.systemPrompt || '';
     body.append(h('div', { class: 'card' },
@@ -733,8 +819,42 @@
       field('Max agent steps per message', steps),
       field('Custom instructions (for every chat)', sys),
       h('button', { class: 'btn primary', onclick: async () => {
-        try { S.settings = await api('/api/settings', { body: { mode: mode.value, workspace: ws.value, model: model.value.trim(), maxSteps: Number(steps.value) || 40, systemPrompt: sys.value } }); toast('Saved'); }
+        try { S.settings = await api('/api/settings', { body: { mode: mode.value, workspace: ws.value, model: model.value.trim(), maxSteps: Number(steps.value) || 100, systemPrompt: sys.value } }); toast('Saved'); }
         catch (e) { toast(e.message, true); }
+      } }, 'Save')));
+
+    // --- remote servers
+    body.append(h('div', { class: 'card', id: 'srvCard' },
+      h('h3', {}, 'Remote servers (SSH)'),
+      h('p', { class: 'muted small' }, 'Save your VPS / dedicated servers once. Passwords and keys are encrypted with your Windows account. In a chat click 🖥 This PC to switch the chat to a server: then files and commands run there, and the agent can also use ssh_exec, an interactive ssh_shell, uploads and downloads on any saved server.'),
+      h('div', { id: 'srvList', class: 'list' }),
+      h('button', { class: 'btn primary', onclick: () => editServer(null) }, '＋ Add server')));
+    renderServers();
+
+    // --- tools & models
+    const effSel = h('select', {}, ...['', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map((e) => h('option', { value: e }, e || 'Model default')));
+    effSel.value = s.effort || '';
+    const webSel = h('select', {}, h('option', { value: 'auto' }, 'Meta search grounding (API key), then DuckDuckGo'), h('option', { value: 'duckduckgo' }, 'DuckDuckGo only'));
+    webSel.value = s.webSearch || 'auto';
+    const cliIn = h('input', { value: s.arduinoCli || '', placeholder: S.boot.features && S.boot.features.arduinoCli ? `Found: ${S.boot.features.arduinoCli}` : 'Not found — the agent can download it (arduino_setup)' });
+    const bridgeOn = h('input', { type: 'checkbox' }); bridgeOn.checked = s.museBridge !== false;
+    const profSel = h('select', {}, h('option', { value: '' }, 'Muse Code default'));
+    if (s.musePermissionProfile) profSel.append(h('option', { value: s.musePermissionProfile }, s.musePermissionProfile));
+    profSel.value = s.musePermissionProfile || '';
+    const profOut = h('span', { class: 'small muted' });
+    body.append(h('div', { class: 'card' },
+      h('h3', {}, 'Tools & models'),
+      h('p', { class: 'muted small' }, `Built-in tools: files and full PowerShell, background jobs, SSH servers, documents (PDF / Word / Excel / PowerPoint), designed PDFs and page screenshots${S.boot.features && !S.boot.features.render ? ' (needs the desktop app)' : ''}, web search and deep research, Arduino / ESP32 firmware (compile, flash, serial), Muse Image, SAM 3.1, voice transcription, robot. The model menu shows what each Muse model can do.`),
+      field('Default reasoning effort (Muse Spark / Wonder)', effSel),
+      field('Web search', webSel),
+      field('arduino-cli path (optional)', cliIn),
+      h('label', { class: 'inline toggle' }, bridgeOn, ' Give Muse Code (Meta account engine) the app tools: SSH, PDF, research, Arduino, robot, Muse Image, SAM'),
+      h('div', { class: 'row' }, field('Muse Code permission profile', profSel, 'Full mode picks a full-access profile automatically if Muse Code offers one.'),
+        h('button', { class: 'btn', style: 'align-self:flex-end', onclick: async () => { profOut.textContent = 'Loading…'; const r = await api('/api/muse/profiles'); const cur = profSel.value; profSel.innerHTML = ''; profSel.append(h('option', { value: '' }, 'Muse Code default')); for (const p of r.profiles || []) profSel.append(h('option', { value: p.id, disabled: p.available === false }, `${p.label}${p.description ? ' — ' + p.description : ''}`)); profSel.value = cur; profOut.textContent = r.profiles && r.profiles.length ? `${r.profiles.length} profiles` : (r.error || 'This Muse Code version lists no profiles'); } }, 'Load profiles')),
+      profOut,
+      h('button', { class: 'btn primary', onclick: async () => {
+        S.settings = await api('/api/settings', { body: { effort: effSel.value, webSearch: webSel.value, arduinoCli: cliIn.value.trim(), museBridge: bridgeOn.checked, musePermissionProfile: profSel.value } });
+        toast('Saved');
       } }, 'Save')));
 
     // --- MCP
@@ -810,6 +930,63 @@
     // --- about
     body.append(h('div', { class: 'card' }, h('h3', {}, 'About'),
       h('p', { class: 'small muted' }, `Muse Carpathron ${S.boot.version} · ${S.boot.platform} · Data stays on this PC except what is sent to Meta's model for each message (see Activity).`)));
+  }
+  function renderServers() {
+    const el = $('#srvList');
+    if (!el) return;
+    el.innerHTML = '';
+    const list = S.boot.servers || [];
+    if (!list.length) el.append(h('div', { class: 'muted small' }, 'No servers yet.'));
+    for (const sv of list) {
+      const out = h('div', { class: 'small muted' });
+      el.append(h('div', { class: 'item' },
+        h('span', { class: 'pill ' + (sv.connected ? 'ok' : '') }, sv.connected ? 'connected' : sv.os || 'saved'),
+        h('div', { class: 'grow' }, h('b', {}, sv.name), h('div', { class: 'meta' }, `${sv.username}@${sv.host}:${sv.port} · ${sv.auth}${sv.defaultPath ? ' · ' + sv.defaultPath : ''}${sv.fingerprint ? ' · host key ' + sv.fingerprint.slice(0, 12) + '…' : ''}`), out),
+        h('button', { class: 'btn tiny', onclick: async () => { out.textContent = 'Connecting…'; const r = await api(`/api/servers/${sv.id}/test`, { body: {} }); out.textContent = r.ok ? `✓ ${r.output.split('\n').slice(0, 4).join(' · ')}` : `✕ ${r.error}`; S.boot.servers = await api('/api/servers'); } }, 'Test'),
+        h('button', { class: 'btn tiny', onclick: () => editServer(sv) }, 'Edit'),
+        h('button', { class: 'btn tiny', onclick: async () => { if (confirm(`Delete server "${sv.name}" and its saved credentials?`)) { await api(`/api/servers/${sv.id}`, { method: 'DELETE' }); S.boot.servers = await api('/api/servers'); renderServers(); } } }, 'Delete')));
+    }
+  }
+  function editServer(sv) {
+    const f = (name, attrs = {}) => h('input', { name, ...attrs });
+    const name = f('name', { value: sv ? sv.name : '', placeholder: 'e.g. my-vps' });
+    const host = f('host', { value: sv ? sv.host : '', placeholder: 'IP or domain' });
+    const port = f('port', { value: sv ? sv.port : 22, type: 'number' });
+    const user = f('user', { value: sv ? sv.username : 'root' });
+    const pass = f('pass', { type: 'password', placeholder: sv && sv.hasPassword ? '•••••• saved (type to replace)' : 'Password (optional if you use a key)' });
+    const keyPath = f('keyPath', { value: sv ? sv.keyPath : '', placeholder: 'Key file, e.g. C:\\Users\\me\\.ssh\\id_ed25519 (optional)' });
+    const keyText = h('textarea', { placeholder: sv && sv.hasKey ? 'Private key saved (paste to replace)' : 'Or paste a private key (-----BEGIN OPENSSH PRIVATE KEY----- …) (optional)' });
+    const phrase = f('phrase', { type: 'password', placeholder: sv && sv.hasPassphrase ? '•••••• saved' : 'Key passphrase (if any)' });
+    const dpath = f('dpath', { value: sv ? sv.defaultPath : '', placeholder: 'Default folder, e.g. /var/www (optional)' });
+    const out = h('div', { class: 'small muted' });
+    const save = async (test) => {
+      const b = { id: sv ? sv.id : undefined, name: name.value.trim(), host: host.value.trim(), port: Number(port.value) || 22, username: user.value.trim(), keyPath: keyPath.value.trim(), defaultPath: dpath.value.trim() };
+      if (pass.value) b.password = pass.value;
+      if (keyText.value.trim()) b.privateKey = keyText.value.trim();
+      if (phrase.value) b.passphrase = phrase.value;
+      try {
+        const saved = await api('/api/servers', { body: b });
+        S.boot.servers = await api('/api/servers');
+        if (test) { out.textContent = 'Connecting…'; const r = await api(`/api/servers/${saved.id}/test`, { body: {} }); out.textContent = r.ok ? `✓ Connected (${r.os}). ${r.output.split('\n').slice(0, 3).join(' · ')}` : `✕ ${r.error}`; if (!r.ok) return; S.boot.servers = await api('/api/servers'); }
+        renderServers(); if (!test) closeModal(); else setTimeout(closeModal, 1600);
+        toast('Server saved');
+      } catch (e) { out.textContent = `✕ ${e.message}`; }
+    };
+    modal(h('h3', {}, sv ? `Edit ${sv.name}` : 'Add a remote server'),
+      h('div', { class: 'srv-form' },
+        h('label', {}, 'Name', name), h('label', {}, 'Host', host),
+        h('label', {}, 'User', user), h('label', {}, 'Port', port),
+        h('label', { class: 'full' }, 'Password', pass),
+        h('label', { class: 'full' }, 'Private key file', keyPath),
+        h('label', { class: 'full' }, 'Private key text', keyText),
+        h('label', {}, 'Key passphrase', phrase), h('label', {}, 'Default folder', dpath)),
+      h('p', { class: 'small muted' }, 'The server\'s host key is remembered at the first connection; a change is reported as a warning. Credentials never leave this PC except to log in to that server.'),
+      out,
+      h('div', { class: 'row' },
+        h('button', { class: 'btn primary', onclick: () => save(true) }, 'Save & connect'),
+        h('button', { class: 'btn', onclick: () => save(false) }, 'Save'),
+        sv ? h('button', { class: 'btn', onclick: async () => { await api(`/api/servers/${sv.id}/reset-key`, { body: {} }); toast('Host key forgotten — the next connection saves the new one'); } }, 'Reset host key') : null,
+        h('button', { class: 'btn', onclick: closeModal }, 'Cancel')));
   }
   function renderMcpStatus() {
     const el = $('#mcpStatus');

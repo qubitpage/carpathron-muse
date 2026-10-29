@@ -2,7 +2,7 @@
 'use strict';
 const { clip } = require('../tools');
 
-const FALLBACK_MODELS = ['muse-spark-1.3', 'muse-spark-1.3-contributor', 'muse-spark-1.2', 'muse-spark-1.2-contributor', 'muse-spark-1.1'];
+const FALLBACK_MODELS = ['muse-spark-1.3', 'muse-wonder-1.0', 'muse-spark-1.3-contributor', 'muse-spark-1.2', 'muse-spark-1.2-contributor', 'muse-spark-1.1', 'muse-image-1.0', 'sam-3.1', 'muse-voice-transcribe-1.0'];
 
 function friendlyHttpError(status, body) {
   let msg = body;
@@ -36,7 +36,7 @@ class ApiEngine {
   }
 
   // One model call. Streams text through onText. Returns { content, reasoning, toolCalls: [{id,name,arguments}] }
-  async complete({ model, messages, tools, signal: outer, onText, onReasoning }) {
+  async complete({ model, messages, tools, signal: outer, onText, onReasoning, effort }) {
     // Our own abort: user Stop, or no answer from Meta in time.
     const ctl = new AbortController();
     let timedOut = '';
@@ -45,7 +45,12 @@ class ApiEngine {
     let timer = setTimeout(() => { timedOut = 'Meta API did not answer within 90 seconds.'; ctl.abort(); }, 90000);
     const idle = () => { clearTimeout(timer); timer = setTimeout(() => { timedOut = 'Meta API stopped sending data for 120 seconds.'; ctl.abort(); }, 120000); };
     try {
-      return await this._complete({ model, messages, tools, signal: ctl.signal, onText, onReasoning, idle });
+      try {
+        return await this._complete({ model, messages, tools, signal: ctl.signal, onText, onReasoning, idle, effort });
+      } catch (e) {
+        if (effort && /reasoning|effort|400/i.test(e.message) && !ctl.signal.aborted) return await this._complete({ model, messages, tools, signal: ctl.signal, onText, onReasoning, idle });
+        throw e;
+      }
     } catch (e) {
       if (timedOut && !(outer && outer.aborted)) throw new Error(`${timedOut} Check your internet connection and try again.`);
       if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN/i.test(String(e.message) + String(e.cause && e.cause.code))) throw new Error(`Cannot reach the Meta API at ${this.base()} (${(e.cause && e.cause.code) || e.message}). Check your internet connection.`);
@@ -56,8 +61,9 @@ class ApiEngine {
     }
   }
 
-  async _complete({ model, messages, tools, signal, onText, onReasoning, idle }) {
+  async _complete({ model, messages, tools, signal, onText, onReasoning, idle, effort }) {
     const body = { model, messages, stream: true };
+    if (effort) body.reasoning_effort = effort;
     if (tools && tools.length) {
       body.tools = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
       body.tool_choice = 'auto';

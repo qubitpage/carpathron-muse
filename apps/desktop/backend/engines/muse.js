@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 const { execFileSync, spawn } = require('child_process');
 
+
 const IS_WIN = process.platform === 'win32';
 const EXE = IS_WIN ? 'muse.exe' : 'muse';
 
@@ -178,7 +179,7 @@ class MuseEngine {
   }
 
   // Opens (or resumes) the Muse session for a conversation.
-  async session(conv, { onApproval, model, mode }) {
+  async session(conv, { onApproval, model, mode, bridge }) {
     const client = await this.ensure();
     if (conv.museSessionId && this.sessions.has(conv.museSessionId)) return this.sessions.get(conv.museSessionId);
     let session;
@@ -195,12 +196,21 @@ class MuseEngine {
     if (!session) {
       const opts = { workspaceRoot: path.resolve(conv.workspace) };
       if (model) opts.modelId = model;
-      try { session = await client.startSession(approvalMode ? { ...opts, approvalMode } : opts); }
-      catch (e) {
-        if (!approvalMode) throw e;
-        this.log(`Muse rejected approval mode "${approvalMode}" (${e.message}); using its default — approvals are still enforced by this app.`);
-        session = await client.startSession(opts);
+      if (bridge) opts.config = { mcpServers: { carpathron: bridge } };
+      const profile = mode === 'full' ? await this.pickFullProfile() : (this.getSettings().musePermissionProfile || null);
+      if (profile) opts.permissionProfile = profile;
+      const attempts = [
+        approvalMode ? { ...opts, approvalMode } : opts,
+        opts.permissionProfile ? (({ permissionProfile, ...o }) => (approvalMode ? { ...o, approvalMode } : o))(opts) : null,
+        opts.config ? (({ config, permissionProfile, ...o }) => (approvalMode ? { ...o, approvalMode } : o))(opts) : null,
+        (({ config, permissionProfile, ...o }) => o)(opts),
+      ].filter(Boolean);
+      let lastErr;
+      for (const a of attempts) {
+        try { session = await client.startSession(a); break; }
+        catch (e) { lastErr = e; this.log(`Muse session start with [${Object.keys(a).join(', ')}] refused: ${e.message}`); }
       }
+      if (!session) throw lastErr;
       session.onApproval(onApproval);
       session.onApprovalError?.((f) => this.log(`Muse approval error: ${f.kind}`));
       conv.museSessionId = session.sessionId;
@@ -248,13 +258,21 @@ class MuseEngine {
       `Set-Location -LiteralPath '${q(cwd)}'`,
       "Write-Host 'Muse Code - one-time Windows sandbox setup' -ForegroundColor Green",
       "Write-Host 'If Windows asks for permission (UAC), click YES. This lets Muse run commands safely.' -ForegroundColor Yellow",
+      `$m='${q(bin)}'`,
+      '$help = (& $m --help 2>&1 | Out-String)',
+      "$ok = $false",
+      // 1) a dedicated sandbox command, if this Muse Code version has one
+      "if ($help -match '(?m)^\\s*sandbox\\b') { Write-Host '> muse sandbox setup' -ForegroundColor Cyan; & $m sandbox setup; if ($LASTEXITCODE -eq 0) { $ok = $true } }",
+      // 2) run one harmless command non-interactively (triggers the setup and the UAC prompt)
+      "if (-not $ok) { Write-Host '> muse exec (test command)' -ForegroundColor Cyan; & $m exec --approval-mode never 'Run this exact PowerShell command and show its output: Get-Date'; if ($LASTEXITCODE -eq 0) { $ok = $true } }",
+      "if (-not $ok) { & $m exec 'Run this exact PowerShell command and show its output: Get-Date'; if ($LASTEXITCODE -eq 0) { $ok = $true } }",
       "Write-Host ''",
-      `& '${q(bin)}' exec --approval-mode never 'Run this exact PowerShell command and show its output: Get-Date'`,
-      "Write-Host ''",
-      "if ($LASTEXITCODE -eq 0) { Write-Host 'Done. Go back to Muse Carpathron and press Re-test. You can close this window.' -ForegroundColor Green }",
-      "else { Write-Host 'Setup did not finish. Starting Muse interactively: type  run Get-Date  and press Enter, approve the Windows prompt, then type /exit.' -ForegroundColor Yellow; & '" + q(bin) + "' }",
-    ].join('; ');
-    spawn('cmd.exe', ['/c', 'start', '"Muse sandbox setup"', '/D', cwd, 'powershell.exe', '-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', script], { cwd, detached: true, windowsHide: false, stdio: 'ignore' }).unref();
+      "if ($ok) { Write-Host 'Done. Go back to Muse Carpathron and send your message again. You can close this window.' -ForegroundColor Green }",
+      "else { Write-Host 'Automatic setup did not finish. Muse starts now: type  run Get-Date  and press Enter, approve the Windows prompt, then type /exit.' -ForegroundColor Yellow; Write-Host 'Alternative: in Muse Carpathron use Full access mode or the API-key engine (no sandbox needed).' -ForegroundColor Yellow; & $m }",
+    ].join('\r\n');
+    const file = path.join(os.tmpdir(), 'muse-carpathron-sandbox-setup.ps1');
+    fs.writeFileSync(file, '\ufeff' + script, 'utf8');
+    spawn('cmd.exe', ['/c', 'start', '"Muse sandbox setup"', '/D', cwd, 'powershell.exe', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', file], { cwd, detached: true, windowsHide: false, stdio: 'ignore' }).unref();
   }
 
   // Opens a PowerShell window that runs Meta's official installer.
@@ -264,6 +282,31 @@ class MuseEngine {
     spawn('cmd.exe', ['/c', 'start', '"Install Muse Code"', '/D', cwd, 'powershell.exe', '-NoExit', '-ExecutionPolicy', 'Bypass', '-Command',
       "Write-Host 'Installing Meta Muse Code (official installer from dev.meta.ai)...' -ForegroundColor Green; irm https://dev.meta.ai/install.ps1 | iex; Write-Host ''; Write-Host 'Done. Go back to Muse Carpathron and press Re-check.' -ForegroundColor Green"],
     { cwd, detached: true, windowsHide: false, stdio: 'ignore' }).unref();
+  }
+
+  // Forget a session that stopped responding; the next message starts a new one.
+  dropSession(conv) {
+    if (!conv || !conv.museSessionId) return;
+    this.sessions.delete(conv.museSessionId);
+    conv.museSessionId = null;
+  }
+
+  // Permission profiles the Muse Code host offers (e.g. a full-access / no-sandbox profile).
+  async permissionProfiles() {
+    await this.ensure();
+    try {
+      const r = await this.conn.request('permissionProfile/list', {});
+      const rows = r.profiles || r.items || r.rows || (Array.isArray(r) ? r : []);
+      return rows.map((p) => ({ id: p.id || p.profileId || p.name, label: p.displayLabel || p.label || p.name || p.id, description: p.description || '', available: p.available !== false && p.status !== 'unavailable' }));
+    } catch (e) { this.log(`Muse permission profiles not available: ${e.message}`); return []; }
+  }
+
+  async pickFullProfile() {
+    const want = this.getSettings().musePermissionProfile;
+    const list = await this.permissionProfiles();
+    if (want) return list.find((p) => p.id === want) ? want : null;
+    const full = list.find((p) => p.available && /full|danger|unrestricted|bypass|yolo|no.?sandbox|trusted|unsandbox/i.test(`${p.id} ${p.label}`));
+    return full ? full.id : null;
   }
 
   async close() {

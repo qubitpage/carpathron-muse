@@ -20,6 +20,11 @@ const { WhatsApp } = require('./whatsapp');
 const { Projects, Memory, Skills, extractText, Bm25 } = require('./knowledge');
 const { MuseEngine, protectedFolder } = require('./engines/muse');
 const { Camera } = require('./camera');
+const { Secrets } = require('./secrets');
+const { Remote } = require('./remote');
+const { Jobs, findArduinoCli } = require('./xtools');
+const models = require('./models');
+const render = require('./render');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const VENDOR = {
@@ -42,6 +47,27 @@ async function getCert(dataDir) {
   fs.writeFileSync(keyF, pems.private);
   fs.writeFileSync(certF, pems.cert);
   return { key: pems.private, cert: pems.cert };
+}
+
+// Built-in skills (saved once; the user can edit or delete them).
+const BUILTIN_SKILLS = [
+  { name: 'design-website', description: 'Design and build a modern website or landing page, then check it visually', body: 'Build a complete, modern, responsive website for the request.\n1. Ask yourself who it is for and what the page must achieve; pick a clear visual direction (colors, type, spacing) and write it down in 3 lines.\n2. Create index.html + styles.css (+ script.js only if needed) in a new folder. Use semantic HTML, CSS variables, a fluid layout (flex/grid), real copy (no lorem ipsum), accessible contrast, and a mobile layout.\n3. If images help, make them with generate_image (hero, illustrations, logo) and save them in the folder.\n4. Check it with screenshot_page at width 1366 and at width 390. Look at the screenshots critically: alignment, spacing, overflow, readability, hierarchy. Fix and re-check until it looks professional.\n5. If asked to publish, upload with ssh_upload to the chosen server and configure nginx/caddy there with ssh_exec.' },
+  { name: 'design-pdf', description: 'Create a professionally designed PDF (report, offer, CV, flyer, invoice)', body: 'Create a professionally designed PDF.\n1. Collect the content (read the given files with read_document, research with web_search if facts are needed).\n2. Write one HTML document with embedded CSS: @page size and margins, a cover or header, clear typographic hierarchy, tables with borders, page-break rules (break-inside: avoid for tables/figures), SVG charts drawn inline when numbers matter, a footer.\n3. Save the HTML next to the PDF, call create_pdf with source = that HTML, then check it: screenshot_page on the HTML (width 1240) and read_document on the PDF (page count, text). Fix layout problems and regenerate.\n4. Report the PDF path and page count.' },
+  { name: 'research', description: 'Research a topic on the web and write a cited report', body: 'Use deep_research with depth "standard" (or "deep" if the user wants thoroughness) on the request. Then read the report, check the most important claims against the sources with web_fetch, correct anything unsupported, and give the user a short answer plus the report path.' },
+  { name: 'firmware', description: 'Write, build and flash ESP32/Arduino firmware, then verify on the serial monitor', body: 'Firmware workflow:\n1. arduino_setup (with the core needed, e.g. esp32:esp32) if arduino_compile is not available yet.\n2. arduino_boards to find the port and board.\n3. Write or edit the sketch in its own folder (folder name = sketch name, file <name>.ino). Keep pins, Wi-Fi credentials and constants at the top.\n4. arduino_compile; read errors (file:line) and fix until BUILD OK.\n5. arduino_upload to the port (ESP32: if it cannot connect, tell the user to hold BOOT).\n6. serial_monitor for 10 s to verify it boots and prints what is expected (IP address, sensor values). Fix and repeat if needed.' },
+  { name: 'carpathron-build', description: 'The Carpathron process: robot firmware + control app + Avatar (VR) + docs, end to end', body: 'Work like the Carpathron project:\n1. Hardware: list parts and pins; write the robot firmware (ESP32, HTTP/WebSocket protocol like protocol/ROBOT-PROTOCOL.md) and flash it with the /firmware steps.\n2. Control: connect the robot in Muse Carpathron (Robot page → Find my car), test robot_status, robot_drive, robot_photo.\n3. Apps: extend the desktop control center or the Quest Avatar app; build, run, and test after every change.\n4. Server: if the user wants it online, deploy to the chosen SSH server (ssh_upload, ssh_exec, job_start for long processes).\n5. Documentation: README with setup steps and a designed PDF (/design-pdf) for partners.\nAfter each step report what works and what is next.' },
+  { name: 'server-setup', description: 'Set up or fix a VPS / dedicated server over SSH', body: 'On the chosen server (ssh_servers to list):\n1. Inspect first: OS, disk, memory, running services (ssh_exec: uname -a; df -h; free -m; systemctl --failed; ss -tlnp).\n2. Say what you will change, then do it step by step: updates, firewall (keep SSH open!), users, nginx/caddy, certificates, docker, databases, app deployment with systemd or docker compose.\n3. Use ssh_shell for interactive programs. Verify each step (curl the site, check logs).\n4. Summarise what was changed and how to undo it.' },
+];
+function seedSkills(skills) {
+  // Add each built-in skill once; if the user deletes one it stays deleted.
+  const marker = path.join(skills.dir, '.seeded.json');
+  let done = [];
+  try { done = JSON.parse(fs.readFileSync(marker, 'utf8')); } catch {}
+  try {
+    const have = new Set(skills.list().map((k) => k.name));
+    for (const k of BUILTIN_SKILLS) if (!done.includes(k.name)) { if (!have.has(k.name)) skills.save(k); done.push(k.name); }
+    fs.writeFileSync(marker, JSON.stringify(done));
+  } catch {}
 }
 
 async function startServer({ dataDir, log = console.log, version = '1.0.0', portOverride } = {}) {
@@ -78,7 +104,11 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   camera.hasWindow = () => !!camera.pickClient();
   camera.carHasCamera = () => robot.status().state === 'online' && robot.status().camera;
   camera.sendRequest = (data) => { const c = camera.pickClient(); if (c) c.send(JSON.stringify({ event: 'camera:request', data })); };
-  const agent = new Agent({ store, robot, mcp, emit, log: logFn, memory, projects, skills, camera });
+  const secrets = new Secrets(dataDir);
+  const remote = new Remote({ store, secrets, log: logFn, emit });
+  const jobs = new Jobs(dataDir);
+  seedSkills(skills);
+  const agent = new Agent({ store, robot, mcp, emit, log: logFn, memory, projects, skills, camera, remote, jobs, dataDir });
   const mapper = new Mapper({ robot, camera, api: agent.api, memory, getSettings: () => store.settings, emit, log: logFn });
   agent.mapper = mapper;
   wa = new WhatsApp({ store, agent, emit, log: logFn, dataDir });
@@ -119,16 +149,23 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   const readJson = async (req) => { const b = await readBody(req); return b.length ? JSON.parse(b.toString('utf8')) : {}; };
   const send = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
 
+  // Attachments are kept (images for vision / Muse Image / SAM, audio for transcription, documents for tools).
+  const ATT_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.oga': 'audio/ogg', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.pdf': 'application/pdf' };
   async function attachmentsToText(list) {
     const out = [];
+    const dir = path.join(dataDir, 'attachments', new Date().toISOString().slice(0, 10));
+    await fsp.mkdir(dir, { recursive: true });
     for (const a of (list || []).slice(0, 10)) {
-      const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'mc-att-'));
-      const file = path.join(tmpDir, path.basename(String(a.name || 'file')).replace(/[<>:"/\\|?*]/g, '_'));
+      const safe = path.basename(String(a.name || 'file')).replace(/[<>:"/\\|?*]/g, '_');
+      const file = path.join(dir, `${Date.now().toString(36)}-${safe}`);
+      const mime = ATT_MIME[path.extname(safe).toLowerCase()] || '';
       try {
         await fsp.writeFile(file, Buffer.from(String(a.dataBase64 || ''), 'base64'));
-        out.push({ name: path.basename(file), text: await extractText(file) });
-      } catch (e) { out.push({ name: path.basename(file), text: `[could not read: ${e.message}]` }); }
-      finally { fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {}); }
+        if (/^(image|audio|video)\//.test(mime)) { agent.shown.add(path.resolve(file)); out.push({ name: safe, path: file, mime, text: '' }); continue; }
+        let text = '';
+        try { text = await extractText(file); } catch (e) { text = `[binary file; use tools on it: ${e.message}]`; }
+        out.push({ name: safe, path: file, mime, text });
+      } catch (e) { out.push({ name: safe, text: `[could not read: ${e.message}]` }); }
     }
     return out;
   }
@@ -152,6 +189,8 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       robot: robot.status(),
       lanIps: lanIps(),
       platform: process.platform,
+      servers: remote.publicList(),
+      features: { render: render.available(), arduinoCli: findArduinoCli(dataDir, store.settings.arduinoCli) || '' },
     };
   }
 
@@ -180,7 +219,12 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       }
       if (m === 'PATCH') {
         const b = await readJson(req);
-        for (const k of ['title', 'model', 'museModel', 'engine', 'mode', 'projectId']) if (k in b) c[k] = b[k] || null;
+        for (const k of ['title', 'model', 'museModel', 'engine', 'mode', 'projectId', 'effort']) if (k in b) c[k] = b[k] || null;
+        if ('remote' in b) {
+          if (!b.remote || !b.remote.serverId) c.remote = null;
+          else { const sv = remote.find(b.remote.serverId); if (!sv) return send(res, 400, { error: 'Unknown server' }); c.remote = { serverId: sv.id, path: String(b.remote.path || sv.defaultPath || '').trim() }; }
+          c.museSessionId = null;
+        }
         if (b.workspace) {
           const ws = path.resolve(String(b.workspace));
           try { if (!fs.statSync(ws).isDirectory()) throw 0; } catch { return send(res, 400, { error: 'Folder does not exist' }); }
@@ -224,8 +268,8 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/models') {
       const engine = url.searchParams.get('engine') || 'api';
       try {
-        const models = engine === 'muse' ? await agent.muse.listModels() : await agent.api.listModels();
-        return send(res, 200, { models });
+        const list = engine === 'muse' ? await agent.muse.listModels() : models.withCaps(await agent.api.listModels());
+        return send(res, 200, { models: list });
       } catch (e) { return send(res, 200, { models: [], error: e.message }); }
     }
 
@@ -234,7 +278,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/settings' && m === 'POST') {
       const b = await readJson(req);
       const patch = {};
-      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills']) if (k in b) patch[k] = b[k];
+      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel']) if (k in b) patch[k] = b[k];
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey.trim();
       if (b.clearApiKey) patch.apiKey = '';
       if (b.workspace) {
@@ -292,6 +336,32 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         return send(res, 200, { ok: true, reply: r.content.slice(0, 200) });
       } catch (e) { return send(res, 200, { ok: false, error: e.message }); }
     }
+
+    // Remote servers (SSH)
+    if (p === '/api/servers' && m === 'GET') return send(res, 200, remote.publicList());
+    if (p === '/api/servers' && m === 'POST') {
+      const b = await readJson(req);
+      try { const sv = remote.save(b); emit('remote:status', remote.publicList()); return send(res, 200, sv); }
+      catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if ((mm = p.match(/^\/api\/servers\/([\w-]+)$/)) && m === 'DELETE') { remote.remove(mm[1]); emit('remote:status', remote.publicList()); return send(res, 200, { ok: true }); }
+    if ((mm = p.match(/^\/api\/servers\/([\w-]+)\/test$/)) && m === 'POST') {
+      try { const r = await remote.test(mm[1]); return send(res, 200, r); } catch (e) { return send(res, 200, { ok: false, error: e.message }); }
+    }
+    if ((mm = p.match(/^\/api\/servers\/([\w-]+)\/reset-key$/)) && m === 'POST') { try { remote.save({ id: mm[1], resetFingerprint: true }); return send(res, 200, { ok: true }); } catch (e) { return send(res, 400, { error: e.message }); } }
+    if ((mm = p.match(/^\/api\/servers\/([\w-]+)\/ls$/))) {
+      try {
+        const dir = await remote.resolve(mm[1], url.searchParams.get('path') || '', '');
+        const list = await remote.list(mm[1], dir);
+        return send(res, 200, { path: dir, dirs: list.filter((e) => e.longname[0] === 'd').map((e) => e.filename).filter((n) => !n.startsWith('.')).sort() });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    if ((mm = p.match(/^\/api\/servers\/([\w-]+)\/disconnect$/)) && m === 'POST') { remote.disconnect(mm[1]); emit('remote:status', remote.publicList()); return send(res, 200, { ok: true }); }
+
+    // Muse Code ↔ app tools (MCP bridge, called by backend/bridge.js)
+    if (p === '/api/bridge/tools') return send(res, 200, { tools: agent.bridgeTools() });
+    if (p === '/api/bridge/call' && m === 'POST') { const b = await readJson(req); return send(res, 200, await agent.bridgeCall(String(b.conv || ''), String(b.name || ''), b.args || {})); }
+    if (p === '/api/muse/profiles') { try { return send(res, 200, { profiles: await agent.muse.permissionProfiles() }); } catch (e) { return send(res, 200, { profiles: [], error: e.message }); } }
 
     // MCP
     if (p === '/api/mcp' && m === 'GET') return send(res, 200, { servers: mcp.status(), config: store.settings.mcpServers });
@@ -361,8 +431,9 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       const f = path.resolve(String(url.searchParams.get('path') || ''));
       const inPhotos = path.basename(path.dirname(f)) === 'photos' && /\.jpe?g$/i.test(f);
       const inMaps = path.basename(path.dirname(path.dirname(f))) === 'maps' && /\.(jpe?g|png)$/i.test(f);
-      if ((!inPhotos && !inMaps) || !fs.existsSync(f)) return send(res, 404, { error: 'not found' });
-      res.writeHead(200, { 'Content-Type': /\.png$/i.test(f) ? 'image/png' : 'image/jpeg', 'Cache-Control': 'no-store' });
+      const shown = agent.shown.has(f) && /\.(jpe?g|png|webp|gif|bmp)$/i.test(f);
+      if ((!inPhotos && !inMaps && !shown) || !fs.existsSync(f)) return send(res, 404, { error: 'not found' });
+      res.writeHead(200, { 'Content-Type': models.mimeOf(f).startsWith('image/') ? models.mimeOf(f) : 'image/jpeg', 'Cache-Control': 'no-store' });
       return fs.createReadStream(f).pipe(res);
     }
     // Robot head + room maps
@@ -551,6 +622,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   });
 
   const port = store.settings.port;
+  agent.bridgeInfo = { port, token: token(), ca: path.join(dataDir, 'cert.pem') };
   // One port, both protocols: browsers (Quest Browser!) often try http:// first. TLS connections go to the
   // HTTPS app; plain HTTP gets a redirect to https:// on the same address instead of an empty "page isn't working".
   const redirect = http.createServer((req, res) => {
@@ -575,13 +647,15 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   return {
     port,
     token: token(),
-    store, agent, robot, mcp, wa, memory, projects, skills, camera,
+    store, agent, robot, mcp, wa, memory, projects, skills, camera, remote, jobs,
     async close() {
       for (const c of clients) try { c.close(); } catch {}
       wss.close();
       await new Promise((r) => front.close(r));
       server.close(); redirect.close();
       robot.close();
+      remote.closeAll();
+      jobs.stopAll();
       await mcp.closeAll();
       await agent.muse.close();
       await wa.close();

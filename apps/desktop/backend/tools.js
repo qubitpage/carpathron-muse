@@ -41,7 +41,7 @@ const BUILTIN = [
     description: IS_WIN
       ? 'Run a PowerShell command on this Windows PC and return its output. Runs in the workspace folder unless cwd is given. Non-interactive: never start commands that wait for input.'
       : 'Run a shell command (bash) and return its output. Runs in the workspace folder unless cwd is given.',
-    parameters: { type: 'object', properties: { command: { type: 'string' }, cwd: { type: 'string' }, timeout_seconds: { type: 'integer', description: 'default 120, max 900' } }, required: ['command'] },
+    parameters: { type: 'object', properties: { command: { type: 'string' }, cwd: { type: 'string' }, timeout_seconds: { type: 'integer', description: 'default 120, max 3600. For servers/watchers that never end use job_start instead.' } }, required: ['command'] },
   },
   {
     name: 'web_fetch', risk: 'read',
@@ -171,8 +171,68 @@ function runCommand(command, cwd, timeoutMs, signal) {
   });
 }
 
+// When a chat works on a remote server, the file and command tools run there (over SSH/SFTP).
+const REMOTE_ROUTED = new Set(['list_dir', 'read_file', 'write_file', 'edit_file', 'search', 'run_command']);
+async function execRemote(name, args, ctx) {
+  const { remote } = ctx;
+  const srv = ctx.remoteServer;
+  const P = (p) => remote.resolve(srv, p, ctx.remotePath);
+  switch (name) {
+    case 'list_dir': {
+      const dir = await P(args.path);
+      const list = await remote.list(srv, dir);
+      list.sort((a, b) => (b.longname[0] === 'd') - (a.longname[0] === 'd') || a.filename.localeCompare(b.filename));
+      const lines = list.slice(0, 500).map((e) => (e.longname[0] === 'd' ? `[dir]  ${e.filename}` : `       ${e.filename} (${e.attrs.size} bytes)`));
+      return `${dir} (on ${remote.need(srv).name})\n${lines.join('\n') || '(empty)'}${list.length > 500 ? `\n… ${list.length - 500} more` : ''}`;
+    }
+    case 'read_file': {
+      const file = await P(args.path);
+      const st = await remote.stat(srv, file);
+      if (st.size > 20 * 1024 * 1024) return `File is too large to read (${st.size} bytes).`;
+      const buf = await remote.readFile(srv, file);
+      if (buf.subarray(0, 8000).includes(0)) return `Binary file (${st.size} bytes), not shown.`;
+      const lines = buf.toString('utf8').split(/\r?\n/);
+      const start = Math.max(1, Number(args.offset) || 1);
+      const limit = Math.min(2000, Math.max(1, Number(args.limit) || 400));
+      let res = lines.slice(start - 1, start - 1 + limit).map((l, i) => `${String(start + i).padStart(5)}  ${l}`).join('\n');
+      if (start - 1 + limit < lines.length) res += `\n… (${lines.length} lines total; continue with offset=${start + limit})`;
+      return clip(res);
+    }
+    case 'write_file': {
+      const file = await P(args.path);
+      await remote.writeFile(srv, file, Buffer.from(String(args.content ?? ''), 'utf8'));
+      return `Wrote ${Buffer.byteLength(String(args.content ?? ''))} bytes to ${file} on ${remote.need(srv).name}`;
+    }
+    case 'edit_file': {
+      const file = await P(args.path);
+      const text = (await remote.readFile(srv, file)).toString('utf8');
+      const oldS = String(args.old_string ?? '');
+      if (!oldS) throw new Error('old_string is empty');
+      const count = text.split(oldS).length - 1;
+      if (count === 0) throw new Error('old_string was not found in the file. Read the file and copy the text exactly.');
+      if (count > 1 && !args.replace_all) throw new Error(`old_string matches ${count} places; add more surrounding text or set replace_all.`);
+      const out = args.replace_all ? text.split(oldS).join(String(args.new_string)) : text.replace(oldS, () => String(args.new_string));
+      await remote.writeFile(srv, file, Buffer.from(out, 'utf8'));
+      return `Edited ${file} on ${remote.need(srv).name}`;
+    }
+    case 'search': {
+      const root = await P(args.path);
+      const { shq } = require('./remote');
+      const inc = args.file_glob ? ` --include=${shq(args.file_glob)}` : '';
+      return remote.exec(srv, `grep -rnIiE${inc} --exclude-dir={node_modules,.git,dist,build,__pycache__,.venv,venv} -m 50 ${shq(args.pattern)} ${shq(root)} | head -200 | cut -c1-300`, { timeoutMs: 60000, signal: ctx.signal });
+    }
+    case 'run_command': {
+      const cwd = await P(args.cwd);
+      const t = Math.min(3600, Math.max(1, Number(args.timeout_seconds) || 120)) * 1000;
+      return remote.exec(srv, String(args.command), { cwd, timeoutMs: t, signal: ctx.signal });
+    }
+    default: return null;
+  }
+}
+
 async function execBuiltin(name, args, ctx) {
   const ws = ctx.workspace;
+  if (ctx.remoteServer && ctx.remote && REMOTE_ROUTED.has(name)) return execRemote(name, args, ctx);
   switch (name) {
     case 'list_dir': {
       const dir = resolvePath(ws, args.path);
@@ -245,7 +305,7 @@ async function execBuiltin(name, args, ctx) {
     }
     case 'run_command': {
       const cwd = resolvePath(ws, args.cwd);
-      const t = Math.min(900, Math.max(1, Number(args.timeout_seconds) || 120)) * 1000;
+      const t = Math.min(3600, Math.max(1, Number(args.timeout_seconds) || 120)) * 1000;
       return runCommand(String(args.command), cwd, t, ctx.signal);
     }
     case 'web_fetch': {
@@ -312,6 +372,31 @@ function describeCall(name, args) {
     case 'search': return `Search "${a.pattern}"${a.path ? ' in ' + a.path : ''}`;
     case 'web_fetch': return `Fetch ${a.url}`;
     case 'delegate': return `Delegate ${(a.tasks || []).length} task(s): ${(a.tasks || []).map((t) => t.title).join(', ')}`;
+    case 'ssh_exec': return `SSH ${a.server}: ${a.command}`;
+    case 'ssh_shell': return `SSH shell ${a.action}${a.server ? ' on ' + a.server : ''}${a.input ? ': ' + clip(a.input, 200) : ''}`;
+    case 'ssh_upload': return `Upload ${a.local_path} → ${a.server}:${a.remote_path}`;
+    case 'ssh_download': return `Download ${a.server}:${a.remote_path} → ${a.local_path}`;
+    case 'ssh_save_server': return `Save server ${a.name || a.host} (${a.username}@${a.host})`;
+    case 'ssh_servers': return 'List remote servers';
+    case 'read_document': return `Read document ${a.path}${a.pages ? ' pages ' + a.pages : ''}`;
+    case 'view_image': return `Look at ${a.path}`;
+    case 'create_pdf': return `Create PDF ${a.output_path}`;
+    case 'screenshot_page': return `Screenshot ${a.target}${a.width ? ' @' + a.width + 'px' : ''}`;
+    case 'web_search': return `Web search: ${a.query}`;
+    case 'deep_research': return `Deep research (${a.depth || 'standard'}): ${a.question}`;
+    case 'job_start': return `Start background job${a.server ? ' on ' + a.server : ''}: ${a.command}`;
+    case 'job_output': return `Job output ${a.job_id || '(list)'}`;
+    case 'job_stop': return `Stop job ${a.job_id}`;
+    case 'arduino_setup': return `Arduino setup${(a.cores || []).length ? ': ' + a.cores.join(', ') : ''}`;
+    case 'arduino_boards': return a.search ? `Find boards "${a.search}"` : 'List connected boards';
+    case 'arduino_compile': return `Compile ${a.sketch_path} (${a.fqbn})`;
+    case 'arduino_upload': return `Flash ${a.sketch_path} to ${a.port} (${a.fqbn})`;
+    case 'serial_monitor': return `Serial monitor ${a.port} @${a.baud || 115200}`;
+    case 'arduino_cli': return `arduino-cli ${a.args}`;
+    case 'open_arduino_ide': return `Open Arduino IDE${a.path ? ' with ' + a.path : ''}`;
+    case 'generate_image': return `Generate image → ${a.output_path}: ${clip(a.prompt, 120)}`;
+    case 'segment_image': return `Find "${a.prompt}" in ${a.path} (SAM 3.1)`;
+    case 'transcribe_audio': return `Transcribe ${a.path}`;
     default: return `${name} ${clip(JSON.stringify(a), 300)}`;
   }
 }

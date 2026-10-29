@@ -117,8 +117,16 @@ Pick an engine at the top of a chat:
 | **Meta API key** | Settings → *Meta API key* → paste key → *Test* | Everything: vision, voice, room maps, WhatsApp, Quest |
 | **Meta account (Muse Code)** | Settings → *Install Muse Code* → *Sign in* (and *Set up sandbox* once, click Yes) | Using your Meta account instead of a key |
 
-Choose the model in the model picker (for example *muse-spark-1.3*). **Mode**:
-**Ask** (approve every action), **Auto** (safe actions run, risky ones ask), **Plan** (the agent proposes, you approve).
+Choose the model in the model picker (for example *muse-spark-1.3* or *muse-wonder-1.0*). Under the header you see
+what that model can do (images, video, audio, PDF, tools, reasoning, web search) and, for Spark/Wonder, the
+**reasoning effort**. Pick **muse-image-1.0** to draw pictures, **sam-3.1** to find objects in a photo, or
+**muse-voice-transcribe-1.0** to turn an audio file into text — your message is then the prompt.
+
+**Mode**: **Ask** (approve changes, commands and robot moves), **Auto** (everything runs without asking),
+**Full** (everything runs; Muse Code also gets its full-access profile, so no sandbox is needed), **Plan** (read-only).
+
+If Muse Code says it needs the Windows sandbox: click *Set up sandbox* (click **Yes** on the Windows prompt), or use
+**Full** mode, or the API-key engine (it runs commands itself and needs no sandbox).
 
 ## 8. Chat and the agent
 
@@ -127,6 +135,29 @@ MCP servers (Settings → MCP), drive the robot and take photos, and split big j
 Every action appears as a card; risky ones ask for **Allow / Allow for this chat / Deny**.
 
 The **Activity** page shows what ran **locally** (your PC) and what went to the **cloud** (Meta API).
+
+**Stop** (■ or **Esc**) ends the current answer within a few seconds, even if a command or the model hangs.
+
+### Work on a server (VPS / dedicated)
+
+1. Settings → **Remote servers** → *Add server*: host, user, password **or** key (file or pasted), default folder → *Save & connect*.
+   Credentials are encrypted with your Windows account; the server's host key is remembered and a change is reported.
+2. In a chat click **🖥 This PC** → pick the server and a folder → *Use this server*. Now files and commands run **on the server**.
+3. Useful: *"/server-setup install nginx and a certificate for example.com"*, *"tail the app logs"*, *"deploy this folder"* (upload).
+   The agent can keep an interactive shell open (`ssh_shell`) for programs that ask questions, and run long jobs in the background.
+
+### Documents, PDFs, websites, research
+
+- Attach or point to PDF / Word / Excel / PowerPoint files: the agent reads them (`read_document`).
+- `/design-pdf` makes a designed PDF from HTML + CSS and checks the result; `/design-website` builds a site and checks it with
+  screenshots at desktop and phone width.
+- `/research <question>` searches the web, reads the sources and saves a cited report in your workspace (`research/`).
+
+### Firmware (Arduino / ESP32)
+
+`/firmware <what you want>`: the agent finds or downloads **arduino-cli** (Arduino IDE 2 already contains it), installs the
+core (e.g. `esp32:esp32`), writes the sketch, **compiles**, fixes errors, **flashes** the board on its COM port and reads the
+**serial monitor** to verify. ESP32 that does not connect: hold **BOOT** while it says *Connecting…*.
 
 ## 9. Memory, projects and skills
 

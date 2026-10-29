@@ -6,6 +6,9 @@ const os = require('os');
 const { BUILTIN, DELEGATE, execBuiltin, describeCall, clip } = require('./tools');
 const { ApiEngine, compactHistory } = require('./engines/api');
 const { MuseEngine, subjectSummary } = require('./engines/muse');
+const { XTOOLS, execX } = require('./xtools');
+const models = require('./models');
+const XNAMES = new Set(XTOOLS.map((t) => t.name));
 
 const fs = require('fs');
 const path = require('path');
@@ -35,15 +38,19 @@ function folderTree(root, maxEntries = 150, maxDepth = 2) {
 
 function systemPrompt(settings, conv, ctx = {}) {
   const { sub = false, memory = '', project = null, projectText = null, skills = [] } = ctx;
+  ctx.remote = ctx.remote || null;
   const lines = [
     sub
       ? 'You are a sub-agent of Muse Carpathron. Complete only the task you were given, using tools as needed, then reply with a concise final report of what you did and found.'
       : 'You are Muse Carpathron, an agentic assistant running on the user\'s computer, powered by Meta Muse models. You work like a local bridge: you see the user\'s files through tools, decide what to do, and your tool calls are executed on the user\'s PC.',
     `Operating system: ${os.type()} ${os.release()} (${process.platform}). Shell for run_command: ${process.platform === 'win32' ? 'Windows PowerShell' : 'bash'}.`,
-    `Attached folder (workspace): ${conv.workspace}. Relative paths are inside it.`,
+    ctx.remote
+      ? `WORKING ON REMOTE SERVER "${ctx.remote.name}" (${ctx.remote.username}@${ctx.remote.host}, ${ctx.remote.os || 'linux'}) over SSH. list_dir, read_file, write_file, edit_file, search and run_command run ON THAT SERVER, in ${ctx.remote.path} (relative paths are there). Use ssh_upload / ssh_download to move files between this PC (${conv.workspace}) and the server. Be careful with destructive commands on servers (rm -rf, firewall, reboots): say what you will do first.`
+      : `Attached folder (workspace): ${conv.workspace}. Relative paths are inside it.`,
     `Today: ${new Date().toISOString().slice(0, 10)}.`,
     'Work step by step: inspect before you change things, prefer small precise edits (edit_file) over rewriting whole files, and verify your work (run it, read it back).',
     'Tool calls may need the user\'s approval; if one is denied, do not retry the same action — adapt or ask.',
+    'Capabilities: full shell access (run_command, background jobs with job_start), remote servers over SSH (ssh_servers, ssh_exec, interactive ssh_shell, ssh_upload/ssh_download), documents (read_document for PDF/Word/Excel/PowerPoint, create_pdf with designed HTML+CSS, view_image), web (web_search, web_fetch, deep_research for cited reports), design (build HTML/CSS sites and PDFs, then check them visually with screenshot_page at desktop 1366 px and phone 390 px and fix what looks wrong; generate_image for illustrations/logos), firmware (arduino_setup, arduino_boards, arduino_compile, arduino_upload, serial_monitor, arduino_cli, open_arduino_ide — ESP32 FQBN esp32:esp32:esp32, ESP32-CAM esp32:esp32:esp32cam), vision (segment_image with SAM 3.1), speech (transcribe_audio). For multi-step engineering work: plan, do it step by step, build/run/test after each change, read errors and fix them until it works.',
     'You can drive the Baby Carpathron robot car with robot_drive / robot_stop. Its camera is fixed to the car like a robot head: to look left/right/behind use robot_look (the car turns its body, photographs, turns back); robot_turn turns by degrees; robot_scan_room makes a room map. Voice notes from WhatsApp arrive as transcribed text.',
     'Answer in the user\'s language. Use Markdown. Be concise when reporting.',
   ];
@@ -52,6 +59,8 @@ function systemPrompt(settings, conv, ctx = {}) {
     lines.push('Memory: when the user tells you a lasting fact or preference (name, projects, how they like answers, hardware they own), save it with memory_save. Use search_chats to recall details from earlier conversations and memory_search for saved facts. Never save passwords, keys or card numbers.');
   }
   if ((conv.mode || settings.mode) === 'plan') lines.push('PLAN MODE: you may only read and research. Do not try to change files, run commands or move the robot; propose a plan instead.');
+  if ((conv.mode || settings.mode) === 'full') lines.push('FULL ACCESS MODE: the user gave you full access to this PC and the saved servers — act without asking for routine steps, but still confirm before irreversible destruction of data.');
+  if (ctx.modelCaps && !ctx.modelCaps.includes('vision')) lines.push('This model cannot see images: do not rely on photos or screenshots.');
   if (settings.systemPrompt) lines.push('', '## User instructions', settings.systemPrompt);
   if (memory) lines.push('', '## What you remember about the user (long-term memory)', memory);
   if (project) {
@@ -75,8 +84,12 @@ const KNOWLEDGE_TOOLS = [
 const KNOWLEDGE_SEARCH = { name: 'knowledge_search', risk: 'read', description: 'Search this project\'s uploaded knowledge files (RAG) and return the most relevant passages with file names.', parameters: { type: 'object', properties: { query: { type: 'string' }, max_results: { type: 'integer' } }, required: ['query'] } };
 
 class Agent {
-  constructor({ store, robot, mcp, emit, log, memory, projects, skills, camera }) {
+  constructor({ store, robot, mcp, emit, log, memory, projects, skills, camera, remote, jobs, dataDir }) {
     this.camera = camera;
+    this.remote = remote;
+    this.jobs = jobs;
+    this.dataDir = dataDir;
+    this.shown = new Set(); // image files the agent showed in chats (served to the UI)
     this.memory = memory;
     this.projects = projects;
     this.skills = skills;
@@ -87,6 +100,7 @@ class Agent {
     this.log = log;
     this.api = new ApiEngine({ getSettings: () => this.store.settings });
     this.muse = new MuseEngine({ getSettings: () => this.store.settings, log });
+    this.media = new models.Media({ getSettings: () => this.store.settings });
     this.runtime = new Map(); // convId -> { running, abort, turnId }
     this.approvals = new Map(); // approvalId -> { convId, resolve, msg, choices }
     this.activity = []; // what went to the cloud and what ran locally (transparency view)
@@ -125,7 +139,10 @@ class Agent {
       } catch {}
     }
     ctx.skills = this.skills.list();
-    ctx.tree = folderTree(conv.workspace);
+    const rs = conv.remote && this.remote && this.remote.find(conv.remote.serverId);
+    if (rs) ctx.remote = { name: rs.name, host: rs.host, username: rs.username, os: rs.os, path: conv.remote.path || rs.defaultPath || '~' };
+    else ctx.tree = folderTree(conv.workspace);
+    ctx.modelCaps = models.capsFor(conv.model || this.settings().model).caps;
     return ctx;
   }
 
@@ -257,7 +274,7 @@ class Agent {
     const mode = conv.mode || s.mode;
     if (risk === 'read') return Promise.resolve({ approved: true, auto: true });
     if (mode === 'plan') return Promise.resolve({ approved: false, note: 'Plan mode is read-only.' });
-    if (mode === 'auto') return Promise.resolve({ approved: true, auto: true });
+    if (mode === 'auto' || mode === 'full') return Promise.resolve({ approved: true, auto: true });
     if (tool && conv.allowed && conv.allowed.includes(tool)) return Promise.resolve({ approved: true, auto: true });
     const id = uid();
     const msg = this.addMsg(conv, {
@@ -320,8 +337,13 @@ class Agent {
     const exp = this.expandSkill(text);
     let modelText = exp.text;
     if (exp.skill) this.addMsg(conv, { role: 'info', text: `Using skill /${exp.skill}` });
-    for (const a of attachments.slice(0, 10)) modelText += `\n\n<attached_file name="${String(a.name).replace(/"/g, '')}">\n${clip(a.text || '', 60000)}\n</attached_file>`;
-    const rt = { running: true, abort: new AbortController(), toolCalls: 0 };
+    const imageAtt = attachments.filter((a) => a.path && /^image\//.test(a.mime || ''));
+    for (const a of attachments.slice(0, 10)) {
+      if (imageAtt.includes(a)) { modelText += `\n\n[attached image "${a.name}", saved at ${a.path}]`; continue; }
+      if (a.path && /^(audio|video)\//.test(a.mime || '')) { modelText += `\n\n[attached ${a.mime.split('/')[0]} "${a.name}", saved at ${a.path}]`; continue; }
+      modelText += `\n\n<attached_file name="${String(a.name).replace(/"/g, '')}"${a.path ? ` saved_at="${a.path}"` : ''}>\n${clip(a.text || '', 60000)}\n</attached_file>`;
+    }
+    const rt = { running: true, abort: new AbortController(), toolCalls: 0, finished: false };
     this.runtime.set(convId, rt);
     conv.lastQuery = text;
     conv.turnImages = [];
@@ -332,9 +354,11 @@ class Agent {
     const startedAt = Date.now();
     try {
       this.store.pinned.add(convId);
+      const kind = models.capsFor(conv.model || this.settings().model).kind;
       if (engine === 'muse') await this.runMuse(conv, modelText, rt, text);
+      else if (kind !== 'chat') await this.runMedia(conv, text, attachments, rt, kind);
       else {
-        const reply = await this.runApi(conv, modelText, rt);
+        const reply = await this.runApi(conv, modelText, rt, imageAtt);
         if (!rt.abort.signal.aborted) {
           this.autoMemory(conv, text, reply);
           if (rt.toolCalls >= 3) this.autoSkill(conv, text);
@@ -343,45 +367,75 @@ class Agent {
     } catch (e) {
       if (!rt.abort.signal.aborted) this.addMsg(conv, { role: 'error', text: e.message || String(e) });
     } finally {
-      if (rt.abort.signal.aborted) this.addMsg(conv, { role: 'info', text: 'Stopped.' });
-      rt.running = false;
-      this.store.pinned.delete(convId);
-      // keep saved history small: photos stay on disk, not inside the chat history
-      for (const m of conv.llm || []) if (m._image) { m.content = '[photo shown to the model earlier]'; delete m._image; }
-      this.cancelApprovals(convId);
-      this.runtime.delete(convId);
-      this.store.touch(conv);
-      this.emit('turn:status', { convId, text: '', ts: Date.now() });
-      this.emit('turn:state', { convId, running: false, ms: Date.now() - startedAt });
-      this.emit('conv:update', { id: conv.id, title: conv.title, updatedAt: conv.updatedAt });
+      this.finishTurn(conv, rt, startedAt);
     }
     // final assistant text (for WhatsApp replies)
     const last = [...conv.messages].reverse().find((m) => m.role === 'assistant' || m.role === 'error');
     return last ? last.text : '';
   }
 
+  // Ends a turn exactly once (normal end, or forced by Stop when an engine does not react).
+  finishTurn(conv, rt, startedAt = Date.now()) {
+    if (rt.finished) return;
+    rt.finished = true;
+    const convId = conv.id;
+    {
+      if (rt.abort.signal.aborted) this.addMsg(conv, { role: 'info', text: 'Stopped.' });
+      rt.running = false;
+      for (const m of conv.messages.slice(-60)) {
+        if (m.role === 'tool' && m.status === 'running') this.patchMsg(conv, m, { status: rt.abort.signal.aborted ? 'denied' : 'error', output: (m.output || '') + (rt.abort.signal.aborted ? '\n[stopped]' : '') });
+        if (m.role === 'assistant' && m.streaming) this.patchMsg(conv, m, { streaming: false });
+      }
+      this.store.pinned.delete(convId);
+      // keep saved history small: photos stay on disk, not inside the chat history
+      for (const m of conv.llm || []) if (m._image) { m.content = '[photo shown to the model earlier]'; delete m._image; }
+      this.cancelApprovals(convId);
+      if (this.runtime.get(convId) === rt) this.runtime.delete(convId);
+      this.store.touch(conv);
+      this.emit('turn:status', { convId, text: '', ts: Date.now() });
+      this.emit('turn:state', { convId, running: false, ms: Date.now() - startedAt });
+      this.emit('conv:update', { id: conv.id, title: conv.title, updatedAt: conv.updatedAt });
+    }
+  }
+
   async stop(convId) {
     const rt = this.runtime.get(convId);
-    if (!rt) return false;
+    const conv = this.store.get(convId);
+    this.robot.cancelPlan('chat stopped');
+    if (!rt) {
+      // Nothing running here: make sure every client shows the chat as idle (fixes a stuck Stop button).
+      this.emit('turn:status', { convId, text: '', ts: Date.now() });
+      this.emit('turn:state', { convId, running: false });
+      return false;
+    }
     rt.abort.abort();
     this.cancelApprovals(convId);
-    const conv = this.store.get(convId);
-    if (conv && conv.engineUsed === 'muse' && conv.museSessionId) await this.muse.interrupt(conv.museSessionId);
-    this.robot.cancelPlan('chat stopped');
+    if (conv && conv.engineUsed === 'muse' && conv.museSessionId) this.muse.interrupt(conv.museSessionId).catch(() => {});
+    this.status(conv || { id: convId }, 'Stopping…');
+    // If the engine or a tool does not react, end the turn anyway after a short grace period.
+    setTimeout(() => {
+      if (!rt.finished && conv) { this.log(`Stop: forcing the turn to end (${conv.engineUsed || 'api'} did not react)`); this.finishTurn(conv, rt); }
+      if (conv && conv.engineUsed === 'muse' && rt.museStuck) this.muse.dropSession(conv);
+    }, 2500);
     return true;
   }
 
   // ---------------------------------------------------------------- API-key engine
   toolSpecs(conv, { sub = false } = {}) {
-    const specs = [...BUILTIN, ...KNOWLEDGE_TOOLS, ...this.mcp.toolSpecs()];
+    const specs = [...BUILTIN, ...XTOOLS, ...KNOWLEDGE_TOOLS, ...this.mcp.toolSpecs()];
     if (conv.projectId) specs.push(KNOWLEDGE_SEARCH);
     if (!sub) specs.push(DELEGATE);
     return specs;
   }
 
-  async runApi(conv, text, rt) {
+  async runApi(conv, text, rt, images = []) {
     conv.llm = conv.llm || [];
-    conv.llm.push({ role: 'user', content: text });
+    const model = conv.model || this.settings().model;
+    if (images.length && (models.has(model, 'vision') || !models.KNOWN[model])) {
+      const parts = [{ type: 'text', text }];
+      for (const im of images.slice(0, 6)) { try { parts.push({ type: 'image_url', image_url: { url: models.dataUrl(fs.readFileSync(im.path), im.mime) } }); } catch {} }
+      conv.llm.push({ role: 'user', content: parts, _image: true });
+    } else conv.llm.push({ role: 'user', content: text });
     const final = await this.agentLoop(conv, conv.llm, rt, { sub: false });
     return final;
   }
@@ -389,7 +443,7 @@ class Agent {
   async agentLoop(conv, llm, rt, { sub, label }) {
     const s = this.settings();
     const model = conv.model || s.model;
-    const maxSteps = Math.max(1, Math.min(200, Number(s.maxSteps) || 40));
+    const maxSteps = Math.max(1, Math.min(500, Number(s.maxSteps) || 100));
     const specs = this.toolSpecs(conv, { sub });
     const ctx = this.promptContext(conv, { sub });
     const byName = new Map(specs.map((t) => [t.name, t]));
@@ -409,6 +463,7 @@ class Agent {
       };
       const callModel = () => this.api.complete({
         model,
+        effort: conv.effort || s.effort || undefined,
         messages: [{ role: 'system', content: systemPrompt(s, conv, ctx) }, ...llm.map(({ _image, ...m }) => m)],
         tools: specs,
         signal: rt.abort.signal,
@@ -443,12 +498,12 @@ class Agent {
         llm.push({ role: 'tool', tool_call_id: call.id, content: output });
       }
       // Let the model see photos it just took (Muse Spark accepts images).
-      if (rt.newImages && rt.newImages.length && s.vision !== false) {
-        const parts = [{ type: 'text', text: `[${rt.newImages.length} photo(s) from the ${rt.newImages[0].source}. Describe what you see if it helps the task.]` }];
-        for (const ph of rt.newImages.slice(-2)) parts.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${ph.buffer.toString('base64')}` } });
+      if (rt.newImages && rt.newImages.length && s.vision !== false && (models.has(model, 'vision') || !models.KNOWN[model])) {
+        const parts = [{ type: 'text', text: `[${rt.newImages.length} image(s): ${rt.newImages.map((x) => x.source).join(', ')}. Look at them if it helps the task.]` }];
+        for (const ph of rt.newImages.slice(-3)) parts.push({ type: 'image_url', image_url: { url: `data:${ph.mime || 'image/jpeg'};base64,${ph.buffer.toString('base64')}` } });
         llm.push({ role: 'user', content: parts, _image: true });
-        rt.newImages = [];
       }
+      rt.newImages = [];
     }
     const msg = `Reached the step limit (${maxSteps}). Say "continue" to keep going.`;
     if (!sub) this.addMsg(conv, { role: 'info', text: msg });
@@ -482,20 +537,28 @@ class Agent {
       let out;
       this.status(conv, `Running: ${prefix}${describeCall(call.name, args)}`);
       this.track({ kind: 'local', convId: conv.id, text: `${prefix}Ran locally: ${describeCall(call.name, args)}` });
-      const k = await this.execKnowledgeTool(conv, call.name, args);
-      if (k !== null) out = k;
-      else if (call.name === 'delegate') out = await this.runDelegate(conv, args, rt, card);
-      else if (spec._mcp) out = await this.mcp.call(spec._mcp.server, spec._mcp.tool, args);
-      else {
-        out = await execBuiltin(call.name, args, {
-          workspace: conv.workspace, robot: this.robot, camera: this.camera, mapper: this.mapper, signal: rt.abort.signal,
-          onPhoto: (ph) => {
-            conv.turnImages = [...(conv.turnImages || []), ph.path];
-            if (!ph.noVision) (rt.newImages = rt.newImages || []).push(ph);
-            this.patchMsg(conv, card, { image: ph.path });
-          },
-        });
-      }
+      const onPhoto = (ph) => {
+        conv.turnImages = [...(conv.turnImages || []), ph.path];
+        this.shown.add(path.resolve(ph.path));
+        if (!ph.noVision) (rt.newImages = rt.newImages || []).push(ph);
+        this.patchMsg(conv, card, { image: ph.path });
+      };
+      const work = (async () => {
+        const k = await this.execKnowledgeTool(conv, call.name, args);
+        if (k !== null) return k;
+        if (call.name === 'delegate') return this.runDelegate(conv, args, rt, card);
+        if (spec._mcp) return this.mcp.call(spec._mcp.server, spec._mcp.tool, args);
+        const ctx = this.toolCtx(conv, rt, { onPhoto, status: (t) => { if (!sub) this.status(conv, t); } });
+        if (XNAMES.has(call.name)) return execX(call.name, args, ctx);
+        return execBuiltin(call.name, args, ctx);
+      })();
+      // Stop must win even if a tool ignores the abort signal.
+      const stopped = new Promise((resolve) => {
+        if (rt.abort.signal.aborted) resolve('__stopped__');
+        else rt.abort.signal.addEventListener('abort', () => setTimeout(() => resolve('__stopped__'), 1200), { once: true });
+      });
+      out = await Promise.race([work, stopped]);
+      if (out === '__stopped__') { work.catch(() => {}); this.patchMsg(conv, card, { status: 'denied', output: 'Stopped by user' }); return 'Stopped by user.'; }
       out = clip(out);
       this.patchMsg(conv, card, { status: 'done', output: out });
       return out;
@@ -504,6 +567,89 @@ class Agent {
       this.patchMsg(conv, card, { status: 'error', output: err });
       return err;
     }
+  }
+
+  // Everything a tool may need: where to work (this PC or a remote server), engines, devices.
+  toolCtx(conv, rt, extra = {}) {
+    const s = this.settings();
+    const rs = conv.remote && this.remote ? this.remote.find(conv.remote.serverId) : null;
+    return {
+      workspace: conv.workspace, robot: this.robot, camera: this.camera, mapper: this.mapper, signal: rt.abort.signal,
+      remote: this.remote, remoteServer: rs ? rs.id : null, remotePath: rs ? (conv.remote.path || rs.defaultPath || '') : null,
+      media: this.media, api: this.api, jobs: this.jobs, settings: s, dataDir: this.dataDir, model: conv.model || s.model,
+      ...extra,
+    };
+  }
+
+  // ---------------------------------------------------------------- non-chat models picked in the model menu
+  async runMedia(conv, text, attachments, rt, kind) {
+    const model = conv.model || this.settings().model;
+    const signal = rt.abort.signal;
+    const mediaDir = path.join(this.dataDir, 'media');
+    fs.mkdirSync(mediaDir, { recursive: true });
+    const show = (file) => this.shown.add(path.resolve(file));
+    if (kind === 'image') {
+      this.status(conv, `${model} is drawing…`);
+      const inputs = attachments.filter((a) => a.path && /^image\//.test(a.mime || '')).map((a) => a.path);
+      const sizeM = text.match(/\b(\d{3,4})\s*[x×]\s*(\d{3,4})\b/);
+      const r = await this.media.image({ prompt: text, inputs, size: sizeM ? `${sizeM[1]}x${sizeM[2]}` : undefined, model, signal, format: 'png' });
+      const outDir = path.join(conv.workspace, 'images');
+      fs.mkdirSync(outDir, { recursive: true });
+      const files = r.images.map((buf, i) => { const f = path.join(outDir, `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}${r.images.length > 1 ? '-' + (i + 1) : ''}.${r.format === 'jpeg' ? 'jpg' : r.format}`); fs.writeFileSync(f, buf); show(f); return f; });
+      for (const f of files) this.addMsg(conv, { role: 'assistant', text: `${inputs.length ? 'Edited' : 'Created'} with ${model} → \`${f}\``, image: f });
+      return;
+    }
+    if (kind === 'segment') {
+      let file = (attachments.find((a) => a.path && /^(image|video)\//.test(a.mime || '')) || {}).path;
+      if (!file) { this.status(conv, 'No image attached — taking a robot photo…'); const ph = await this.camera.capture(); file = ph.path; }
+      this.status(conv, `SAM 3.1 is looking for "${text}"…`);
+      const out = await execX('segment_image', { path: file, prompt: text }, this.toolCtx(conv, rt, { onPhoto: (ph) => { show(ph.path); this.addMsg(conv, { role: 'assistant', text: `Segmentation overlay for "${text}"`, image: ph.path }); }, status: (t) => this.status(conv, t) }));
+      this.addMsg(conv, { role: 'assistant', text: out });
+      return;
+    }
+    if (kind === 'transcribe') {
+      const a = attachments.find((x) => x.path && /^audio\//.test(x.mime || '') || /\.(wav|ogg|opus|oga)$/i.test(x.name || ''));
+      if (!a) { this.addMsg(conv, { role: 'error', text: `${model} turns speech into text: attach a WAV or OGG audio file.` }); return; }
+      this.status(conv, 'Transcribing…');
+      const t = await this.media.transcribe(a.path);
+      this.addMsg(conv, { role: 'assistant', text: t ? `**Transcript of ${a.name}:**\n\n${t}` : 'No speech found.' });
+      return;
+    }
+    this.addMsg(conv, { role: 'error', text: `${model} is not a chat model and this app does not know how to use it yet. Pick a Muse Spark or Muse Wonder model for chat.` });
+  }
+
+  // ---------------------------------------------------------------- tools for Muse Code (MCP bridge)
+  bridgeFor(conv) {
+    const b = this.bridgeInfo;
+    if (!b || this.settings().museBridge === false) return null;
+    return {
+      transport: 'stdio', command: process.execPath, args: [path.join(__dirname, 'bridge.js')], mode: 'optional',
+      env: { ELECTRON_RUN_AS_NODE: '1', MC_URL: `https://127.0.0.1:${b.port}`, MC_TOKEN: b.token, MC_CONV: conv.id, MC_CA: b.ca },
+    };
+  }
+  bridgeTools() {
+    return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...KNOWLEDGE_TOOLS]
+      .map(({ name, description, parameters }) => ({ name, description, parameters }));
+  }
+  async bridgeCall(convId, name, args) {
+    const conv = this.store.get(convId) || { id: convId, workspace: this.settings().workspace, messages: [] };
+    const rt = this.runtime.get(convId) || { abort: new AbortController() };
+    const images = [];
+    const onPhoto = (ph) => {
+      this.shown.add(path.resolve(ph.path));
+      if (ph.buffer && !ph.noVision) images.push({ data: Buffer.from(ph.buffer).toString('base64'), mime: ph.mime || 'image/jpeg' });
+      if (conv.messages && this.store.get(convId)) this.addMsg(conv, { role: 'info', text: `🖼 ${ph.source || 'image'}: ${ph.path}`, image: ph.path });
+    };
+    this.track({ kind: 'local', convId, text: `Muse Code used app tool: ${describeCall(name, args)}` });
+    try {
+      const k = await this.execKnowledgeTool(conv, name, args);
+      let output = k;
+      if (output === null) {
+        const ctx = this.toolCtx(conv, rt, { onPhoto, status: (t) => this.status(conv, t) });
+        output = XNAMES.has(name) ? await execX(name, args, ctx) : await execBuiltin(name, args, ctx);
+      }
+      return { output: clip(output), images: images.slice(-3) };
+    } catch (e) { return { output: `Error: ${e.message || e}`, isError: true, images }; }
   }
 
   async runDelegate(conv, args, rt, card) {
@@ -562,7 +708,14 @@ class Agent {
       return { choiceId: chosen || choices[0].id };
     };
     this.status(conv, this.muse.client ? 'Opening Muse Code session…' : 'Starting Muse Code (first message takes a few seconds)…');
-    const session = await this.muse.session(conv, { onApproval, model: conv.museModel || s.museModel || undefined, mode });
+    const abortWait = (graceMs) => new Promise((resolve) => {
+      if (rt.abort.signal.aborted) resolve({ kind: 'aborted' });
+      else rt.abort.signal.addEventListener('abort', () => setTimeout(() => resolve({ kind: 'aborted' }), graceMs), { once: true });
+    });
+    const sessionP = this.muse.session(conv, { onApproval, model: conv.museModel || s.museModel || undefined, mode, bridge: this.bridgeFor ? this.bridgeFor(conv) : null });
+    const opened = await Promise.race([sessionP, abortWait(0)]);
+    if (opened && opened.kind === 'aborted') { sessionP.catch(() => {}); return; }
+    const session = opened;
     this.store.touch(conv);
     if (conv._museMode !== mode) { conv._museMode = mode; await this.muse.setMode(session.sessionId, mode); }
 
@@ -570,12 +723,16 @@ class Agent {
     conv._museTurns = (conv._museTurns || 0) + 1;
     const full = this.museContext(conv, displayText, firstTurn) + text;
     this.track({ kind: 'cloud', convId: conv.id, text: `Sent to Muse Code (Meta account): message ~${Math.round(full.length / 1024)} KB incl. memory/project context` });
-    const turn = await session.sendUserTurn({ input: [{ type: 'text', text: full }], displayText });
+    const turnP = session.sendUserTurn({ input: [{ type: 'text', text: full }], displayText });
+    const started = await Promise.race([turnP, abortWait(0)]);
+    if (started && started.kind === 'aborted') { turnP.then(() => this.muse.interrupt(session.sessionId)).catch(() => {}); return; }
+    const turn = started;
+    let closed = false;
     this.status(conv, 'Muse is thinking…');
     const byItem = new Map(); // itemId -> display msg
 
     const render = (item) => {
-      if (item.kind === 'userMessage') return;
+      if (closed || item.kind === 'userMessage') return;
       let m = byItem.get(item.itemId);
       const base = { museItem: item.itemId };
       let patch;
@@ -614,6 +771,7 @@ class Agent {
     const consumeItems = (async () => { for await (const item of turn.items()) render(item); })();
     const consumeDeltas = (async () => {
       for await (const d of turn.deltas()) {
+        if (closed) break;
         const m = byItem.get(d.itemId);
         if (!m) continue;
         const field = !d.field || d.field === 'text' || d.field.startsWith('summary') ? 'text' : d.field === 'output' ? 'output' : null;
@@ -622,8 +780,14 @@ class Agent {
     })();
     const onAbort = () => { this.muse.interrupt(session.sessionId); };
     rt.abort.signal.addEventListener('abort', onAbort, { once: true });
-    const outcome = await turn.completed;
+    const outcome = await Promise.race([turn.completed, abortWait(2000)]);
     rt.abort.signal.removeEventListener('abort', onAbort);
+    if (outcome.kind === 'aborted') {
+      // Muse did not confirm the interrupt in time: stop listening and use a fresh session next time.
+      closed = true; rt.museStuck = true;
+      this.muse.dropSession(conv);
+      return;
+    }
     await Promise.race([Promise.allSettled([consumeItems, consumeDeltas]), new Promise((r) => setTimeout(r, 1500))]);
     if (outcome.kind === 'completed') {
       const p = outcome.params || {};

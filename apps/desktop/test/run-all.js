@@ -77,7 +77,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const b = await api('/api/bootstrap');
     assert.ok(Array.isArray(b.convs) && b.skills.length >= 4);
     const m = await api('/api/models?engine=api');
-    assert.deepStrictEqual(m.models.map((x) => x.id), ['muse-spark-1.3', 'muse-spark-test']);
+    assert.deepStrictEqual(m.models.map((x) => x.id).slice(0, 2), ['muse-spark-1.3', 'muse-spark-test']);
+    const ids = m.models.map((x) => x.id);
+    for (const id of ['muse-wonder-1.0', 'muse-image-1.0', 'sam-3.1', 'muse-voice-transcribe-1.0']) assert.ok(ids.includes(id), `known model ${id} listed`);
+    const sam = m.models.find((x) => x.id === 'sam-3.1');
+    assert.strictEqual(sam.kind, 'segment');
+    assert.ok(m.models.find((x) => x.id === 'muse-spark-1.3').caps.includes('vision'));
   });
 
   await step('MCP server starts and exposes its tool', async () => {

@@ -12,7 +12,7 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 
 | | What it is | Where |
 |---|---|---|
-| 🧠 **Muse Carpathron** | Windows desktop app: chat + agent on **Meta Muse** (Muse Spark via the Meta Model API, or your Meta account via **Muse Code**), tools, MCP, sub-agents, RAG memory, projects, skills, WhatsApp remote, robot control, room mapping, browser VR | [`apps/desktop`](apps/desktop) |
+| 🧠 **Muse Carpathron** | Windows desktop app: chat + agent on **Meta Muse** (Muse Spark / Wonder via the Meta Model API, or your Meta account via **Muse Code**) with full PC access, **SSH servers**, documents & designed PDFs, web research, **Arduino/ESP32 firmware**, Muse Image, SAM 3.1, MCP, sub-agents, RAG memory, projects, skills, WhatsApp remote, robot control, room mapping, browser VR | [`apps/desktop`](apps/desktop) |
 | 🥽 **Carpathron Avatar** | Native **Meta Quest** app (OpenXR, Godot): see through the robot's eyes, drive with the controllers, turn your head and the robot turns with you, talk to Muse | [`apps/quest-avatar`](apps/quest-avatar) |
 | 🚗 **Baby Carpathron firmware** | ESP32-CAM car (KUONGSHUN AD174 4WD kit): live video, drive, photo, Wi-Fi setup, RC-style control | [`firmware/carpathron_car`](firmware/carpathron_car) |
 | 🔌 **Carpathron Robot Protocol** | Small open HTTP protocol: any robot that speaks it works with every app | [`protocol/ROBOT-PROTOCOL.md`](protocol/ROBOT-PROTOCOL.md) |
@@ -21,17 +21,30 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/download/v1/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_(127_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.4.0_(128_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.4.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.3.0) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/download/v1/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.4.0) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.4) | [**CarpathronAvatar-1.1.4.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. The Meta Horizon Store version is in review. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 
-All files of this version: **[Release v1](https://github.com/qubitpage/carpathron-muse/releases/tag/v1)** · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.4.0](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.4.0)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+
+## What's new in 1.4.0
+
+- **Remote servers over SSH:** save a VPS or dedicated server once (password or key, encrypted with your Windows account; host key checked). Switch any chat to a server with **🖥 This PC → my-vps**: files and commands then run on the server. Tools: `ssh_exec`, interactive `ssh_shell` (sudo prompts, REPLs, `tail -f`), `ssh_upload` / `ssh_download`, background jobs on the server.
+- **Full access mode:** Ask · Auto · **Full** · Plan. Full runs everything without approvals and picks Muse Code's full-access permission profile when it offers one (no sandbox).
+- **Documents:** reads PDF (by page), Word, Excel (all sheets + formulas), PowerPoint. **Designed PDFs** from HTML/CSS or Markdown with the built-in Chromium (`create_pdf`), **page screenshots** at desktop and phone width so the agent can check and fix websites and layouts it builds (`screenshot_page`, `view_image`).
+- **Web search + deep research:** Meta search grounding with sources (DuckDuckGo fallback); `deep_research` plans searches, reads the sources and writes a cited Markdown report.
+- **Firmware like a developer:** `arduino_setup` (finds Arduino IDE 2's arduino-cli or downloads it, installs ESP32/AVR/RP2040 cores and libraries), `arduino_boards`, `arduino_compile` (errors with file:line), `arduino_upload`, `serial_monitor`, `open_arduino_ide`.
+- **Every Muse model, used for what it can do:** the model menu shows each model's capabilities (images, video, audio, PDF, tools, reasoning, web search). **Muse Wonder** and reasoning effort (minimal … max). Pick **Muse Image** to draw or edit pictures, **SAM 3.1** to find objects (boxes + overlay, works on robot photos), **Muse Voice Transcribe** for audio files. Chat models can call them as tools too (`generate_image`, `segment_image`, `transcribe_audio`). Attached images go to vision models as images.
+- **Muse Code gets the same tools:** an MCP bridge gives Meta-account sessions the app's SSH, PDF, research, Arduino, image, SAM and robot tools.
+- **Stop works every time:** Stop (or Esc) ends the turn within seconds even if the model or a command hangs; long commands are killed.
+- **New skills:** `/design-website`, `/design-pdf`, `/research`, `/firmware`, `/server-setup`, `/carpathron-build` (the whole robot → app → Avatar → server process).
+- 57 backend tests (35 + 22 new, incl. a real SSH/SFTP test server and the MCP bridge) + Electron tests for PDF, screenshots and overlays.
 
 ## How Meta Muse powers every app
 
@@ -39,7 +52,10 @@ All files of this version: **[Release v1](https://github.com/qubitpage/carpathro
 |---|---|---|
 | **Muse Spark** (Meta Model API) | Chat + agent with tools, sub-agents, vision ("what do you see?"), room-map analysis, auto-memory and auto-skills | Desktop, WhatsApp, Quest |
 | **Muse Voice Transcribe** | WhatsApp voice notes and Quest push-to-talk → text → robot commands or the agent | WhatsApp, Quest |
-| **Muse Code** (`muse serve`) | Sign in with your Meta account instead of an API key; same chat, tools and approvals | Desktop |
+| **Muse Code** (`muse serve`) | Sign in with your Meta account instead of an API key; same chat, tools and approvals (+ app tools via MCP bridge) | Desktop |
+| **Muse Wonder** | Hardest reasoning tasks, reasoning effort up to max | Desktop |
+| **Muse Image** | Logos, illustrations, website images, image edits | Desktop |
+| **SAM 3.1** | Find and outline objects in photos/video (robot vision) | Desktop |
 
 ```
               ┌──────────────── Meta Model API ────────────────┐
@@ -64,14 +80,14 @@ All files of this version: **[Release v1](https://github.com/qubitpage/carpathro
 - **Be the robot:** in the Quest app the robot's camera fills your view; turn your head and the car turns with you.
 - **Robot head:** the camera is fixed, so "look left / behind" turns the car's body, takes the photo and turns back.
 - **Room mapping:** the car turns a full circle, Muse Spark names what it sees and how far, and you get a top-down map (also on WhatsApp and saved to memory).
-- **Real agent:** file and PowerShell tools, MCP servers, parallel sub-agents, approvals (Ask / Auto / Plan), live activity showing what ran locally vs in the cloud.
+- **Real agent:** full PowerShell + file tools, SSH servers, documents and PDFs, web research, Arduino firmware, MCP servers, parallel sub-agents, approvals (Ask / Auto / Full / Plan), live activity showing what ran locally vs in the cloud.
 - **Memory that grows:** BM25 RAG over chats, projects with knowledge files, auto-learned memories and skills.
-- **Production details:** single standalone Windows installer (Win 10/11/Server), safety auto-stop on the robot, token-protected LAN access, PIN pairing, 35 backend tests + UI tests + a headless end-to-end Quest test.
+- **Production details:** single standalone Windows installer (Win 10/11/Server), safety auto-stop on the robot, token-protected LAN access, PIN pairing, 57 backend tests + Electron/UI tests + a headless end-to-end Quest test.
 
 ## Quick start
 
 1. **Car:** assemble the kit, flash [`firmware/carpathron_car`](firmware/carpathron_car) with Arduino IDE (esp32 core **2.0.12**), put it on your Wi-Fi ([CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md)).
-2. **PC:** install Muse Carpathron ([Muse-Carpathron-Setup.exe](https://github.com/qubitpage/carpathron-muse/releases/download/v1/Muse-Carpathron-Setup.exe), or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
+2. **PC:** install Muse Carpathron ([Muse-Carpathron-Setup.exe](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe), or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
 3. **Phone:** Settings → WhatsApp → scan the QR. Send `/help` or a voice note.
 4. **Quest 3S:** sideload [`CarpathronAvatar-1.1.4.apk`](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk) (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
 

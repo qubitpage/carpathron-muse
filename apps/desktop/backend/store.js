@@ -12,9 +12,15 @@ const DEFAULT_SETTINGS = {
   apiBase: 'https://api.meta.ai/v1',
   model: 'muse-spark-1.3',
   museModel: '',
-  mode: 'ask', // ask | auto | plan
+  mode: 'ask', // ask | auto | full | plan
   workspace: '',
-  maxSteps: 40,
+  maxSteps: 100,
+  effort: '', // reasoning effort for Muse Spark / Wonder: '', minimal, low, medium, high, xhigh, max
+  servers: [], // SSH servers (passwords/keys encrypted, see secrets.js)
+  museBridge: true, // give Muse Code sessions the app's tools through the MCP bridge
+  musePermissionProfile: '', // Muse Code permission profile ('' = host default, full mode picks a full-access one)
+  arduinoCli: '',
+  webSearch: 'auto', // auto (Meta search grounding, then DuckDuckGo) | duckduckgo
   autoMemory: true,
   autoSkills: true,
   port: 8443,
@@ -124,6 +130,7 @@ class Store {
     s.whatsapp.cloud.hasAccessToken = !!s.whatsapp.cloud.accessToken; delete s.whatsapp.cloud.accessToken;
     s.whatsapp.cloud.hasAppSecret = !!s.whatsapp.cloud.appSecret; delete s.whatsapp.cloud.appSecret;
     delete s.accessToken;
+    delete s.servers;
     s.avatarLinked = (s.avatarTokens || []).map((x) => ({ device: x.device, at: x.at })); delete s.avatarTokens;
     return s;
   }

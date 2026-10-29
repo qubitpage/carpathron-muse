@@ -59,7 +59,8 @@
       "!**/tests/**",
       "!**/__tests__/**",
       "!**/*.d.ts",
-      "!**/*.d.mts"
+      "!**/*.d.mts",
+      "public/guide.md"
     ],
     "asarUnpack": [],
     "afterPack": "build/afterPack.js",

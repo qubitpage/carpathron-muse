@@ -7,7 +7,7 @@ taskkill /im "Muse Carpathron.exe" /f >nul 2>&1
 del /q Muse-Carpathron-Setup.exe 2>nul
 copy /b /y Muse-Carpathron-Setup.part0+Muse-Carpathron-Setup.part1+Muse-Carpathron-Setup.part2+Muse-Carpathron-Setup.part3+Muse-Carpathron-Setup.part4 Muse-Carpathron-Setup.exe >nul
 if errorlevel 1 goto fail
-certutil -hashfile Muse-Carpathron-Setup.exe SHA256 | findstr /i /c:"8507e4a593a507239ee9abdbb1717ac4abc185d841206c2a6cc09acfca1cecbb" >nul
+certutil -hashfile Muse-Carpathron-Setup.exe SHA256 | findstr /i /c:"dcb9af2a06b48f830685034042ba4caa5b1467fd6dbc49413876afb923863a50" >nul
 if errorlevel 1 (
   echo  The installer file is damaged. Copy the parts again.
   goto fail

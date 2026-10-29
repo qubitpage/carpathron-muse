@@ -476,6 +476,10 @@
 
   // --- message rendering
   const ICON = { running: '◌', done: '✓', error: '✕', denied: '⊘' };
+  function zoomImage(src) {
+    const ov = h('div', { class: 'zoom-ov', onclick: () => ov.remove() }, h('img', { src }));
+    document.body.append(ov);
+  }
   function renderMsg(m) {
     let el;
     switch (m.role) {
@@ -503,7 +507,11 @@
           h('div', { class: 'body' },
             args && args !== '{}' ? h('pre', { class: 'muted' }, args.length > 4000 ? args.slice(0, 4000) + '…' : args) : null,
             out ? h('pre', {}, out) : (m.status === 'running' ? h('span', { class: 'muted small' }, 'running…') : null)));
-        if (m.image) { el.open = true; $('.body', el).prepend(h('img', { class: 'photo', src: window.MCphotoUrl(m.image), alt: 'image', onclick: () => isDesktop && window.desktop.openPath(m.image) })); }
+        if (m.image && /^(computer|browser)_/.test(m.name || '')) {
+          // screen steps: a small thumbnail in the line (click to enlarge), the full picture inside the card
+          $('summary', el).append(h('img', { class: 'thumb', src: window.MCphotoUrl(m.image), alt: 'screenshot', title: 'Click to enlarge', onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); zoomImage(window.MCphotoUrl(m.image)); } }));
+          $('.body', el).prepend(h('img', { class: 'photo', src: window.MCphotoUrl(m.image), alt: 'screenshot', onclick: () => zoomImage(window.MCphotoUrl(m.image)) }));
+        } else if (m.image) { el.open = true; $('.body', el).prepend(h('img', { class: 'photo', src: window.MCphotoUrl(m.image), alt: 'image', onclick: () => isDesktop && window.desktop.openPath(m.image) })); }
         if (m.status === 'error' && SANDBOX_RE.test(out || '')) { const wrap = h('div', {}, el, sandboxFix()); el.dataset.id = m.id; wrap.dataset.id = m.id; return wrap; }
         break;
       }
@@ -568,7 +576,7 @@
       } else {
         const wasOpen = old.open;
         const n = renderMsg(m);
-        if (old.tagName === 'DETAILS' && n.tagName === 'DETAILS') n.open = wasOpen || !!m.image;
+        if (old.tagName === 'DETAILS' && n.tagName === 'DETAILS') n.open = wasOpen || (!!m.image && !/^(computer|browser)_/.test(m.name || ''));
         old.replaceWith(n);
       }
       if (near) scrollDown();

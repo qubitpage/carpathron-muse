@@ -21,19 +21,23 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.6.0_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.6.1_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.5.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.5.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.6.0) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.6.1) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.5) | [**CarpathronAvatar-1.1.5.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.5.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. The Meta Horizon Store version is in review. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 
-All files of this version: **[Release v1.6.0](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.6.0)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.6.1](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.6.1)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
 
-## What's new in 1.6.0
+## What's new in 1.6.1
+
+- Computer use, tested on Windows: after opening an app it waits for the window and brings it to the front before typing; held Windows/Ctrl/Alt/Shift keys are released before typing and clicking (no accidental shortcuts); screenshots in the chat are small thumbnails (click to enlarge).
+
+### 1.6.0
 
 - **Write while it works:** the message box stays open while Muse works. **⚡ Now** adds your message to the running job (it keeps every earlier task and finishes them all unless you say stop); **⏳ Queue** runs it afterwards. Queued messages can be sent now, edited or removed. Works with both engines (Muse Code uses its native *steer*).
 - **Task list:** multi-step jobs show a live task list above the message box; Muse keeps working until every task is done (stops only when blocked or making no progress).

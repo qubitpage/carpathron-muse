@@ -1,7 +1,7 @@
 {
   "name": "muse-carpathron",
   "productName": "Muse Carpathron",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Agentic desktop assistant for Meta Muse models: full PC and SSH server access, documents and PDFs, web research, firmware, robot control and WhatsApp remote.",
   "main": "main.js",
   "author": "Carpathron",

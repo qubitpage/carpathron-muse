@@ -55,6 +55,14 @@ public static class MC {
   [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
   [DllImport("shcore.dll")] static extern int SetProcessDpiAwareness(int v);
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
+  // A modifier left "down" (Windows key, Ctrl, Alt, Shift) turns typing into shortcuts (e.g. Win+F opens Feedback Hub):
+  // release any that are held before typing, clicking or pressing a combo.
+  static void ReleaseModifiers() {
+    foreach (int vk in new int[] { 0x5B, 0x5C, 0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x10, 0x11, 0x12 }) {
+      if ((GetAsyncKeyState(vk) & 0x8000) != 0) Key((ushort)vk, true, vk == 0x5B || vk == 0x5C || vk == 0xA3 || vk == 0xA5);
+    }
+  }
 
   public static void Init() { try { SetProcessDpiAwareness(2); } catch { try { SetProcessDPIAware(); } catch {} } }
   static string Q(string s) { if (s == null) return "\"\""; var b = new StringBuilder("\""); foreach (char c in s) { if (c == '"' || c == '\\') b.Append('\\').Append(c); else if (c < 32) b.Append("\\u" + ((int)c).ToString("x4")); else b.Append(c); } return b.Append('"').ToString(); }
@@ -93,7 +101,7 @@ public static class MC {
   static void Mouse(uint flags, uint data) { var i = new INPUT[1]; i[0].type = 0; i[0].u.mi.dwFlags = flags; i[0].u.mi.mouseData = data; SendInput(1, i, Marshal.SizeOf(typeof(INPUT))); }
   public static string Move(int x, int y) { SetCursorPos(x, y); return "{\"ok\":true}"; }
   public static string Click(int x, int y, string button, int count) {
-    SetCursorPos(x, y); System.Threading.Thread.Sleep(40);
+    ReleaseModifiers(); SetCursorPos(x, y); System.Threading.Thread.Sleep(40);
     uint d = 0x2, u = 0x4; if (button == "right") { d = 0x8; u = 0x10; } else if (button == "middle") { d = 0x20; u = 0x40; }
     for (int k = 0; k < count; k++) { Mouse(d, 0); System.Threading.Thread.Sleep(30); Mouse(u, 0); System.Threading.Thread.Sleep(60); }
     return "{\"ok\":true}";
@@ -111,6 +119,7 @@ public static class MC {
   }
   static void Key(ushort vk, bool up, bool ext) { var i = new INPUT[1]; i[0].type = 1; i[0].u.ki.vk = vk; i[0].u.ki.flags = (up ? 2u : 0u) | (ext ? 1u : 0u); SendInput(1, i, Marshal.SizeOf(typeof(INPUT))); }
   public static string Type(string text) {
+    ReleaseModifiers(); System.Threading.Thread.Sleep(30);
     foreach (char ch in text) {
       if (ch == '\r') continue;
       if (ch == '\n') { Key(0x0D, false, false); Key(0x0D, true, false); continue; }
@@ -123,6 +132,7 @@ public static class MC {
   // combo like "ctrl+shift+s": press all, release in reverse
   public static string Combo(string vks, string exts) {
     var parts = vks.Split(','); var ex = exts.Split(',');
+    ReleaseModifiers();
     for (int k = 0; k < parts.Length; k++) Key(ushort.Parse(parts[k]), false, ex[k] == "1");
     System.Threading.Thread.Sleep(40);
     for (int k = parts.Length - 1; k >= 0; k--) Key(ushort.Parse(parts[k]), true, ex[k] == "1");
@@ -431,13 +441,24 @@ async function execComputer(name, args, ctx) {
         let target = app;
         if (!/[\\/]/.test(app) && !/\.(exe|bat|cmd|lnk|msc)$/i.test(app) && !/^[a-z]+:/i.test(app)) target = (await findStartMenuApp(app)) || app;
         const ps = `Start-Process -FilePath ${JSON.stringify(target).replace(/`/g, '``')}${args.args ? ` -ArgumentList ${JSON.stringify(String(args.args))}` : ''}`;
+        const before = new Set((await desktop.call('windows').catch(() => [])).map((w) => w.hwnd));
         await new Promise((resolve, reject) => {
           const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true });
           let err = ''; p.stderr.on('data', (d) => (err += d));
           p.on('exit', (c) => (c === 0 ? resolve() : reject(new Error(`could not open "${app}": ${err.trim().split('\n')[0]}`))));
           p.on('error', reject);
         });
-        await sleep(2500); did = `opened ${target}`; break;
+        // wait for its window, then bring it to the front so typing goes into it
+        const want = path.basename(app).replace(/\.(exe|lnk)$/i, '').toLowerCase();
+        let win = null;
+        for (let k = 0; k < 20 && !win; k++) {
+          await sleep(500);
+          const list = await desktop.call('windows').catch(() => []);
+          win = list.find((w) => !before.has(w.hwnd) && (w.app.toLowerCase().includes(want) || w.title.toLowerCase().includes(want)))
+            || (k >= 6 ? list.find((w) => !before.has(w.hwnd) && !/muse carpathron/i.test(w.title)) : null);
+        }
+        if (win) { await desktop.call('focus', { hwnd: win.hwnd }).catch(() => {}); await sleep(400); }
+        did = win ? `opened ${target} — window "${win.title}" is in front` : `started ${target} (no new window seen yet: take a screenshot, it may still be loading or reuse an open window)`; break;
       }
       case 'wait': await sleep(Math.max(0.2, Math.min(30, Number(args.seconds) || 1)) * 1000); did = `waited ${args.seconds || 1}s`; break;
       default: throw new Error(`unknown action ${a}`);

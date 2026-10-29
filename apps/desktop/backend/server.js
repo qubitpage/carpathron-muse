@@ -22,6 +22,7 @@ const { MuseEngine, protectedFolder } = require('./engines/muse');
 const { Camera } = require('./camera');
 const { Secrets } = require('./secrets');
 const { Remote } = require('./remote');
+const { GitHub } = require('./github');
 const { Jobs, findArduinoCli } = require('./xtools');
 const models = require('./models');
 const render = require('./render');
@@ -56,6 +57,7 @@ const BUILTIN_SKILLS = [
   { name: 'research', description: 'Research a topic on the web and write a cited report', body: 'Use deep_research with depth "standard" (or "deep" if the user wants thoroughness) on the request. Then read the report, check the most important claims against the sources with web_fetch, correct anything unsupported, and give the user a short answer plus the report path.' },
   { name: 'firmware', description: 'Write, build and flash ESP32/Arduino firmware, then verify on the serial monitor', body: 'Firmware workflow:\n1. arduino_setup (with the core needed, e.g. esp32:esp32) if arduino_compile is not available yet.\n2. arduino_boards to find the port and board.\n3. Write or edit the sketch in its own folder (folder name = sketch name, file <name>.ino). Keep pins, Wi-Fi credentials and constants at the top.\n4. arduino_compile; read errors (file:line) and fix until BUILD OK.\n5. arduino_upload to the port (ESP32: if it cannot connect, tell the user to hold BOOT).\n6. serial_monitor for 10 s to verify it boots and prints what is expected (IP address, sensor values). Fix and repeat if needed.' },
   { name: 'carpathron-build', description: 'The Carpathron process: robot firmware + control app + Avatar (VR) + docs, end to end', body: 'Work like the Carpathron project:\n1. Hardware: list parts and pins; write the robot firmware (ESP32, HTTP/WebSocket protocol like protocol/ROBOT-PROTOCOL.md) and flash it with the /firmware steps.\n2. Control: connect the robot in Muse Carpathron (Robot page → Find my car), test robot_status, robot_drive, robot_photo.\n3. Apps: extend the desktop control center or the Quest Avatar app; build, run, and test after every change.\n4. Server: if the user wants it online, deploy to the chosen SSH server (ssh_upload, ssh_exec, job_start for long processes).\n5. Documentation: README with setup steps and a designed PDF (/design-pdf) for partners.\nAfter each step report what works and what is next.' },
+  { name: 'github-publish', description: 'Publish a folder to GitHub (create the repo if needed) and optionally make a release with files', body: 'Publish to GitHub:\n1. github_account to know the owner (or use the owner/name the user gave).\n2. Make sure a good .gitignore exists (node_modules, dist, build outputs, .env, keys, *.keystore) and that no secrets (API keys, passwords, tokens, keystores) are inside the folder — search for them first and stop if you find any.\n3. Add or update README.md if missing.\n4. github_publish with a clear commit message (private repo unless the user says public).\n5. If the user wants downloadable apps: github_release with a version tag (e.g. v1.0.0), release notes, and the installer/APK files.\n6. Report the repository and download links.' },
   { name: 'server-setup', description: 'Set up or fix a VPS / dedicated server over SSH', body: 'On the chosen server (ssh_servers to list):\n1. Inspect first: OS, disk, memory, running services (ssh_exec: uname -a; df -h; free -m; systemctl --failed; ss -tlnp).\n2. Say what you will change, then do it step by step: updates, firewall (keep SSH open!), users, nginx/caddy, certificates, docker, databases, app deployment with systemd or docker compose.\n3. Use ssh_shell for interactive programs. Verify each step (curl the site, check logs).\n4. Summarise what was changed and how to undo it.' },
 ];
 function seedSkills(skills) {
@@ -107,8 +109,9 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   const secrets = new Secrets(dataDir);
   const remote = new Remote({ store, secrets, log: logFn, emit });
   const jobs = new Jobs(dataDir);
+  const github = new GitHub({ store, secrets, log: logFn });
   seedSkills(skills);
-  const agent = new Agent({ store, robot, mcp, emit, log: logFn, memory, projects, skills, camera, remote, jobs, dataDir });
+  const agent = new Agent({ store, robot, mcp, emit, log: logFn, memory, projects, skills, camera, remote, jobs, dataDir, github });
   const mapper = new Mapper({ robot, camera, api: agent.api, memory, getSettings: () => store.settings, emit, log: logFn });
   agent.mapper = mapper;
   wa = new WhatsApp({ store, agent, emit, log: logFn, dataDir });
@@ -190,6 +193,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       lanIps: lanIps(),
       platform: process.platform,
       servers: remote.publicList(),
+      github: github.publicInfo(),
       features: { render: render.available(), arduinoCli: findArduinoCli(dataDir, store.settings.arduinoCli) || '' },
     };
   }
@@ -278,7 +282,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/settings' && m === 'POST') {
       const b = await readJson(req);
       const patch = {};
-      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel']) if (k in b) patch[k] = b[k];
+      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'museSandbox', 'museTrustWorkspace', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel']) if (k in b) patch[k] = b[k];
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey.trim();
       if (b.clearApiKey) patch.apiKey = '';
       if (b.workspace) {
@@ -311,7 +315,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       if (b.robot) robot.connect();
       if (b.mcpServers) mcp.sync(store.settings.mcpServers).then(() => emit('mcp:status', mcp.status()));
       if (b.whatsapp) await wa.applySettings();
-      if (b.museBin !== undefined) await agent.muse.close();
+      if (b.museBin !== undefined || b.museSandbox !== undefined || b.museTrustWorkspace !== undefined) { agent.muse.noSandboxNext = false; await agent.muse.close(); }
       const pub = store.publicSettings();
       emit('settings:update', pub);
       return send(res, 200, pub);
@@ -357,6 +361,35 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       } catch (e) { return send(res, 200, { error: e.message }); }
     }
     if ((mm = p.match(/^\/api\/servers\/([\w-]+)\/disconnect$/)) && m === 'POST') { remote.disconnect(mm[1]); emit('remote:status', remote.publicList()); return send(res, 200, { ok: true }); }
+
+    // SSH keys
+    if (p === '/api/keys' && m === 'GET') return send(res, 200, remote.keyList());
+    if (p === '/api/keys/generate' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, remote.generateKey(b)); } catch (e) { return send(res, 400, { error: e.message }); } }
+    if (p === '/api/keys/import' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, remote.importKey(b)); } catch (e) { return send(res, 400, { error: e.message }); } }
+    if ((mm = p.match(/^\/api\/keys\/([\w-]+)$/)) && m === 'DELETE') { try { remote.deleteKey(mm[1]); return send(res, 200, { ok: true }); } catch (e) { return send(res, 400, { error: e.message }); } }
+    if ((mm = p.match(/^\/api\/keys\/([\w-]+)\/export$/)) && m === 'POST') { try { return send(res, 200, { file: remote.exportKey(mm[1]) }); } catch (e) { return send(res, 400, { error: e.message }); } }
+    if ((mm = p.match(/^\/api\/servers\/([\w-]+)\/install-key$/)) && m === 'POST') {
+      const b = await readJson(req);
+      try { const msg = await remote.installKey(mm[1], String(b.keyId || ''), { use: b.use !== false, removePassword: !!b.removePassword }); emit('remote:status', remote.publicList()); return send(res, 200, { ok: true, message: msg }); }
+      catch (e) { return send(res, 200, { ok: false, error: e.message }); }
+    }
+    // Remote terminal (interactive shell sessions)
+    if ((mm = p.match(/^\/api\/servers\/([\w-]+)\/shell$/)) && m === 'POST') {
+      try { const id = await remote.shellStart(mm[1]); const output = await remote.shellRead(id, { waitMs: 1500 }); return send(res, 200, { id, output }); }
+      catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    if ((mm = p.match(/^\/api\/shells\/([\w-]+)$/))) {
+      try {
+        if (m === 'POST') { const b = await readJson(req); return send(res, 200, { output: await remote.shellSend(mm[1], b.input ?? '', { waitMs: Number(b.waitMs) || 1200 }) }); }
+        if (m === 'GET') return send(res, 200, { output: await remote.shellRead(mm[1], { waitMs: Number(url.searchParams.get('wait')) || 300 }) });
+        if (m === 'DELETE') return send(res, 200, { ok: remote.shellClose(mm[1]) });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    // GitHub plugin
+    if (p === '/api/github' && m === 'GET') return send(res, 200, github.publicInfo());
+    if (p === '/api/github/connect' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await github.connect(String(b.token || '').trim(), b)); } catch (e) { return send(res, 400, { error: e.message }); } }
+    if (p === '/api/github/author' && m === 'POST') { const b = await readJson(req); return send(res, 200, github.updateAuthor(b)); }
+    if (p === '/api/github' && m === 'DELETE') { github.disconnect(); return send(res, 200, { ok: true }); }
 
     // Muse Code ↔ app tools (MCP bridge, called by backend/bridge.js)
     if (p === '/api/bridge/tools') return send(res, 200, { tools: agent.bridgeTools() });
@@ -647,7 +680,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   return {
     port,
     token: token(),
-    store, agent, robot, mcp, wa, memory, projects, skills, camera, remote, jobs,
+    store, agent, robot, mcp, wa, memory, projects, skills, camera, remote, jobs, github,
     async close() {
       for (const c of clients) try { c.close(); } catch {}
       wss.close();

@@ -21,6 +21,7 @@ const XTOOLS = [
   { name: 'ssh_shell', risk: 'exec', description: 'Interactive terminal on a remote server that stays open (for programs that ask questions, REPLs, sudo prompts, top, tail -f, editors). action=start returns a shell_id; action=send types input (add {ctrl-c}, {enter}, {tab} if needed) and returns new output; action=read waits for more output; action=close ends it.', parameters: obj({ server: { type: 'string' }, action: { type: 'string', enum: ['start', 'send', 'read', 'close', 'list'] }, shell_id: { type: 'string' }, input: { type: 'string' }, wait_ms: { type: 'integer', description: 'how long to wait for output (default 1500, max 120000)' } }, ['action']) },
   { name: 'ssh_upload', risk: 'write', description: 'Copy a file or folder from this PC to a remote server (SFTP). Folders are copied recursively without node_modules/.git.', parameters: obj({ server: { type: 'string' }, local_path: { type: 'string' }, remote_path: { type: 'string' } }, ['server', 'local_path', 'remote_path']) },
   { name: 'ssh_download', risk: 'write', description: 'Copy a file from a remote server to this PC (SFTP).', parameters: obj({ server: { type: 'string' }, remote_path: { type: 'string' }, local_path: { type: 'string' } }, ['server', 'remote_path', 'local_path']) },
+  { name: 'ssh_key', risk: 'write', description: 'SSH keys: action=list shows keys (app keys and ~/.ssh); action=generate creates a new ed25519 key (stored encrypted); action=install adds a key to a server\'s authorized_keys and switches that server to key login.', parameters: obj({ action: { type: 'string', enum: ['list', 'generate', 'install'] }, name: { type: 'string', description: 'key name (generate) or key name/id (install)' }, server: { type: 'string' }, remove_password: { type: 'boolean' } }, ['action']) },
   { name: 'ssh_save_server', risk: 'write', description: 'Save a remote server (only when the user gives you the details). Credentials are stored encrypted on this PC.', parameters: obj({ name: { type: 'string' }, host: { type: 'string' }, port: { type: 'integer' }, username: { type: 'string' }, password: { type: 'string' }, private_key_path: { type: 'string' }, default_path: { type: 'string' } }, ['host', 'username']) },
   // ---------- documents
   { name: 'read_document', risk: 'read', description: 'Read a document and return its text: PDF (with page numbers), Word .docx, Excel .xlsx/.xls/.csv/.ods (every sheet as a table), PowerPoint .pptx (text per slide), HTML, Markdown, code. For images use view_image.', parameters: obj({ path: { type: 'string' }, pages: { type: 'string', description: 'PDF pages, e.g. "1-5" or "3,7"' }, max_chars: { type: 'integer' } }, ['path']) },
@@ -279,6 +280,16 @@ async function execX(name, args, ctx) {
     case 'ssh_download': {
       const srv = remote.need(args.server || ctx.remoteServer);
       return remote.download(srv.id, await remote.resolve(srv.id, args.remote_path, srv.defaultPath), resolveLocal(ws, args.local_path));
+    }
+    case 'ssh_key': {
+      if (args.action === 'list') { const l = remote.keyList(); return l.length ? l.map((k) => `- ${k.name} (${k.type}, ${k.fingerprint}) ${k.source === 'app' ? 'stored in the app' : k.source}${k.usedBy && k.usedBy.length ? ' · used by ' + k.usedBy.join(', ') : ''}\n  ${k.public}`).join('\n') : 'No SSH keys yet.'; }
+      if (args.action === 'generate') { const k = remote.generateKey({ name: args.name }); return `Generated ${k.name} (${k.fingerprint}). Public key:\n${k.public}`; }
+      if (args.action === 'install') {
+        const k = remote.keyList().find((x) => x.id === args.name || x.name === args.name) || remote.keyList()[0];
+        if (!k) throw new Error('No key: generate one first.');
+        return remote.installKey(args.server || ctx.remoteServer, k.id, { use: true, removePassword: !!args.remove_password });
+      }
+      throw new Error('Unknown action');
     }
     case 'ssh_save_server': {
       const s = remote.save({ name: args.name, host: args.host, port: args.port, username: args.username, password: args.password, keyPath: args.private_key_path, defaultPath: args.default_path });

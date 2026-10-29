@@ -140,11 +140,19 @@ The **Activity** page shows what ran **locally** (your PC) and what went to the 
 
 ### Work on a server (VPS / dedicated)
 
-1. Settings → **Remote servers** → *Add server*: host, user, password **or** key (file or pasted), default folder → *Save & connect*.
+1. Left menu → **Remote** → *Add server*: host, user, password **or** key, default folder → *Save & connect*.
+   Recommended: **SSH keys → Generate key**, then on the server row **🔑 Install key** — the app adds the key to the
+   server's `authorized_keys`, switches to key login and can remove the saved password. **⌨ Terminal** opens a shell in the app.
    Credentials are encrypted with your Windows account; the server's host key is remembered and a change is reported.
 2. In a chat click **🖥 This PC** → pick the server and a folder → *Use this server*. Now files and commands run **on the server**.
 3. Useful: *"/server-setup install nginx and a certificate for example.com"*, *"tail the app logs"*, *"deploy this folder"* (upload).
    The agent can keep an interactive shell open (`ssh_shell`) for programs that ask questions, and run long jobs in the background.
+
+### GitHub
+
+Left menu → **Plugins → GitHub**: create a token (link on the page), paste it, set the commit author → *Connect*.
+Then ask for example *"/github-publish this folder as qubitpage/robot-app"* or *"make release v1.2.0 with dist/Setup.exe"*.
+The agent checks for secrets and a `.gitignore` before pushing and never force-pushes unless you ask.
 
 ### Documents, PDFs, websites, research
 

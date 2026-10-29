@@ -42,7 +42,28 @@ function tinyPdf(pages) {
 
 (async () => {
   await fake.start(18631);
-  await fakeSsh.start(18632);
+  const sshHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mc14-home-'));
+  await fakeSsh.start(18632, { home: sshHome });
+  process.env.MC_GITHUB_API = 'http://127.0.0.1:18633'; process.env.MC_GITHUB_UPLOADS = 'http://127.0.0.1:18633/uploads';
+  const gh = { repos: new Map(), releases: [], assets: [], issues: [] };
+  await new Promise((r) => require('http').createServer((req, res) => {
+    let b = []; req.on('data', (d) => b.push(d)); req.on('end', () => {
+      const body = Buffer.concat(b); const J = (c, o) => { res.writeHead(c, { 'Content-Type': 'application/json', 'x-oauth-scopes': 'repo, workflow' }); res.end(JSON.stringify(o)); };
+      if (req.headers.authorization !== 'Bearer ghp_test') return J(401, { message: 'Bad credentials' });
+      const u = req.url;
+      if (u === '/user') return J(200, { login: 'msrusu87', id: 7, name: 'Mircea', public_repos: 3, total_private_repos: 2 });
+      if (u === '/user/emails') return J(200, [{ email: 'm@example.com', primary: true }]);
+      if (u === '/user/orgs') return J(200, [{ login: 'qubitpage' }]);
+      let mm;
+      if ((mm = u.match(/^\/repos\/([^/]+)\/([^/]+)$/)) && req.method === 'GET') { const r = gh.repos.get(`${mm[1]}/${mm[2]}`); return r ? J(200, r) : J(404, { message: 'Not Found' }); }
+      if ((u === '/user/repos' || /^\/orgs\/[^/]+\/repos$/.test(u)) && req.method === 'POST') { const j = JSON.parse(body); const owner = u === '/user/repos' ? 'msrusu87' : u.split('/')[2]; const r = { full_name: `${owner}/${j.name}`, html_url: `https://github.com/${owner}/${j.name}`, private: j.private, default_branch: 'main' }; gh.repos.set(r.full_name, r); return J(201, r); }
+      if (/\/releases\/tags\//.test(u)) return J(404, { message: 'Not Found' });
+      if (/\/releases$/.test(u) && req.method === 'POST') { const j = JSON.parse(body); const rel = { id: 55, tag_name: j.tag_name, name: j.name, html_url: `https://github.com/x/releases/tag/${j.tag_name}`, assets: [] }; gh.releases.push(j); return J(201, rel); }
+      if (u.startsWith('/uploads/')) { const name = new URL(u, 'http://x').searchParams.get('name'); gh.assets.push({ name, size: body.length }); return J(201, { name, browser_download_url: `https://github.com/x/releases/download/v9/${name}` }); }
+      if (/\/issues$/.test(u) && req.method === 'POST') { const j = JSON.parse(body); gh.issues.push(j); return J(201, { number: 12, html_url: 'https://github.com/x/issues/12' }); }
+      J(404, { message: 'Not Found ' + u });
+    });
+  }).listen(18633, r));
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc14-'));
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'mc14-ws-'));
   const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc14-remote-'));
@@ -328,6 +349,88 @@ function tinyPdf(pages) {
     const r2 = await client.callTool({ name: 'view_image', arguments: { path: path.join(__dirname, 'sample.jpg') } });
     assert.ok(r2.content.some((x) => x.type === 'image'), 'image returned to Muse Code');
     await client.close();
+  });
+
+  await step('SSH keys: generate, install on the server, then log in with the key (password removed)', async () => {
+    const k = await api('/api/keys/generate', { name: 'test-key-1' });
+    assert.ok(k.public.startsWith('ssh-ed25519 ') && k.fingerprint.startsWith('SHA256:'));
+    const keys = await api('/api/keys');
+    assert.ok(keys.some((x) => x.id === k.id && x.source === 'app'));
+    const saved = JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'));
+    assert.ok(saved.sshKeys[0].private.startsWith('aes:') && !JSON.stringify(saved).includes('OPENSSH PRIVATE'), 'private key encrypted');
+    assert.strictEqual((await api('/api/settings')).sshKeys, undefined, 'keys never sent to the UI');
+    const r = await api(`/api/servers/${server.id}/install-key`, { keyId: k.id, use: true, removePassword: true });
+    assert.ok(r.ok, JSON.stringify(r));
+    assert.ok(fs.readFileSync(path.join(sshHome, '.ssh', 'authorized_keys'), 'utf8').includes(k.public.split(' ')[1]));
+    const s2 = srv.store.settings.servers.find((x) => x.id === server.id);
+    assert.strictEqual(s2.keyId, k.id); assert.ok(!s2.password, 'password removed');
+    srv.remote.disconnect(server.id);
+    const t = await api(`/api/servers/${server.id}/test`, {});
+    assert.ok(t.ok, `key login works: ${t.error}`);
+    await assert.rejects(api(`/api/keys/${k.id}`, null, 'DELETE'), /used by a server/);
+  });
+
+  await step('remote terminal: open a shell, run a command, close', async () => {
+    const r = await api(`/api/servers/${server.id}/shell`, {});
+    assert.ok(r.id, JSON.stringify(r));
+    const x = await api(`/api/shells/${r.id}`, { input: 'echo term-$((6*7))', waitMs: 3000 });
+    assert.ok(/term-42/.test(x.output), x.output);
+    assert.ok((await api(`/api/shells/${r.id}`, null, 'DELETE')).ok);
+  });
+
+  await step('GitHub plugin: connect (token encrypted), create repo, release with installer upload, issue', async () => {
+    await assert.rejects(api('/api/github/connect', { token: 'wrong' }), /refused/);
+    const g = await api('/api/github/connect', { token: 'ghp_test' });
+    assert.strictEqual(g.login, 'msrusu87'); assert.strictEqual(g.email, 'm@example.com');
+    const saved = JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'));
+    assert.ok(saved.github.token.startsWith('aes:') && !JSON.stringify(saved).includes('ghp_test'));
+    assert.deepStrictEqual((await api('/api/settings')).github, { connected: true, login: 'msrusu87', name: 'Mircea', email: 'm@example.com' });
+    const { execGitHub } = require('../backend/github');
+    const ctx = srv.agent.toolCtx({ id: 'x', workspace: ws }, { abort: new AbortController() });
+    assert.ok(/qubitpage/.test(await execGitHub('github_account', {}, ctx)));
+    assert.ok(/msrusu87\/robot-app \(private\)/.test(await execGitHub('github_create_repo', { name: 'robot-app' }, ctx)));
+    fs.writeFileSync(path.join(ws, 'Setup.exe'), Buffer.alloc(300000, 7));
+    const rel = await execGitHub('github_release', { repo: 'msrusu87/robot-app', tag: 'v1.0.0', notes: '# First', files: ['Setup.exe'] }, ctx);
+    assert.ok(/Uploaded Setup\.exe/.test(rel) && /releases\/latest\/download/.test(rel), rel);
+    assert.strictEqual(gh.assets[0].size, 300000);
+    assert.strictEqual(gh.releases[0].tag_name, 'v1.0.0');
+    assert.ok(/#12/.test(await execGitHub('github_issues', { repo: 'msrusu87/robot-app', action: 'create', title: 'Bug' }, ctx)));
+    // publish a folder (git init, commit, push) and clone it back
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'mc14-git-'));
+    fs.mkdirSync(path.join(bare, 'msrusu87'));
+    require('child_process').execSync(`git init --bare -q -b main ${path.join(bare, 'msrusu87', 'robot-app.git')}`);
+    process.env.MC_GITHUB_GIT = `file://${bare}`;
+    const proj = path.join(ws, 'robot-app'); fs.mkdirSync(proj); fs.writeFileSync(path.join(proj, 'README.md'), '# Robot app');
+    const pub = await execGitHub('github_publish', { path: 'robot-app', repo: 'msrusu87/robot-app', message: 'First version' }, ctx);
+    assert.ok(/Published/.test(pub), pub);
+    const logOut = require('child_process').execSync(`git --git-dir=${path.join(bare, 'msrusu87', 'robot-app.git')} log --format=%an%n%ae%n%s main`).toString();
+    assert.ok(/Mircea\nm@example\.com\nFirst version/.test(logOut), logOut);
+    fs.writeFileSync(path.join(proj, 'b.txt'), 'two');
+    assert.ok(/Published/.test(await execGitHub('github_publish', { path: 'robot-app', repo: 'msrusu87/robot-app', message: 'Second' }, ctx)));
+    const cl = await execGitHub('github_clone', { repo: 'msrusu87/robot-app', path: 'clone-test' }, ctx);
+    assert.ok(fs.existsSync(path.join(ws, 'clone-test', 'b.txt')), cl);
+    const tools = srv.agent.bridgeTools().map((t) => t.name);
+    assert.ok(tools.includes('github_publish') && tools.includes('ssh_key'));
+  });
+
+  await step('projects: create a project and put a chat in it (no browser prompt needed)', async () => {
+    const p = await api('/api/projects', { name: 'EU funding' });
+    const c = await conv();
+    const r = await api(`/api/convs/${c.id}`, { projectId: p.id }, 'PATCH');
+    assert.strictEqual(r.projectId, p.id);
+    const appJs = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
+    assert.ok(!/[^.\w]prompt\(/.test(appJs), 'no window.prompt in the UI (it does not work in Electron)');
+  });
+
+  await step('Muse engine: every method the app calls exists (guards against broken refactors)', async () => {
+    const { MuseEngine } = require('../backend/engines/muse');
+    const m = new MuseEngine({ getSettings: () => ({}), log: () => {} });
+    const src = ['agent.js', 'server.js'].map((f) => fs.readFileSync(path.join(__dirname, '..', 'backend', f), 'utf8')).join('\n');
+    const used = new Set([...src.matchAll(/\.muse\.(\w+)\(/g)].map((x) => x[1]));
+    for (const name of used) assert.strictEqual(typeof m[name], 'function', `MuseEngine.${name} missing`);
+    assert.ok(used.size >= 8, [...used].join(','));
+    assert.strictEqual(typeof MuseEngine.openInstaller, 'function');
+    assert.strictEqual(await m.pickFullProfile(), null, 'no crash without Muse Code');
   });
 
   await step('PDF and screenshots report clearly outside the desktop app', async () => {

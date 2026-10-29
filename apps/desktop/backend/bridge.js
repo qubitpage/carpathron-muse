@@ -39,7 +39,7 @@ function call(method, p, body, timeoutMs = 3600000) {
 }
 
 async function main() {
-  const server = new Server({ name: 'carpathron', version: '1.4.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'carpathron', version: '1.5.0' }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const r = await call('GET', `/api/bridge/tools?conv=${encodeURIComponent(CONV)}`);
     return { tools: r.tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.parameters || { type: 'object', properties: {} } })) };

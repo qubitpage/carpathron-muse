@@ -7,6 +7,8 @@ const { BUILTIN, DELEGATE, execBuiltin, describeCall, clip } = require('./tools'
 const { ApiEngine, compactHistory } = require('./engines/api');
 const { MuseEngine, subjectSummary } = require('./engines/muse');
 const { XTOOLS, execX } = require('./xtools');
+const { GH_TOOLS, execGitHub } = require('./github');
+const GHNAMES = new Set(GH_TOOLS.map((t) => t.name));
 const models = require('./models');
 const XNAMES = new Set(XTOOLS.map((t) => t.name));
 
@@ -51,6 +53,7 @@ function systemPrompt(settings, conv, ctx = {}) {
     'Work step by step: inspect before you change things, prefer small precise edits (edit_file) over rewriting whole files, and verify your work (run it, read it back).',
     'Tool calls may need the user\'s approval; if one is denied, do not retry the same action — adapt or ask.',
     'Capabilities: full shell access (run_command, background jobs with job_start), remote servers over SSH (ssh_servers, ssh_exec, interactive ssh_shell, ssh_upload/ssh_download), documents (read_document for PDF/Word/Excel/PowerPoint, create_pdf with designed HTML+CSS, view_image), web (web_search, web_fetch, deep_research for cited reports), design (build HTML/CSS sites and PDFs, then check them visually with screenshot_page at desktop 1366 px and phone 390 px and fix what looks wrong; generate_image for illustrations/logos), firmware (arduino_setup, arduino_boards, arduino_compile, arduino_upload, serial_monitor, arduino_cli, open_arduino_ide — ESP32 FQBN esp32:esp32:esp32, ESP32-CAM esp32:esp32:esp32cam), vision (segment_image with SAM 3.1), speech (transcribe_audio). For multi-step engineering work: plan, do it step by step, build/run/test after each change, read errors and fix them until it works.',
+    'GitHub (when connected in Plugins): github_account, github_repos, github_create_repo, github_publish (commit + push a folder, creates the repo), github_clone, github_release (create a release and upload installers/APKs), github_issues, github_pulls, github_api. Never force-push unless the user asks.',
     'You can drive the Baby Carpathron robot car with robot_drive / robot_stop. Its camera is fixed to the car like a robot head: to look left/right/behind use robot_look (the car turns its body, photographs, turns back); robot_turn turns by degrees; robot_scan_room makes a room map. Voice notes from WhatsApp arrive as transcribed text.',
     'Answer in the user\'s language. Use Markdown. Be concise when reporting.',
   ];
@@ -84,8 +87,9 @@ const KNOWLEDGE_TOOLS = [
 const KNOWLEDGE_SEARCH = { name: 'knowledge_search', risk: 'read', description: 'Search this project\'s uploaded knowledge files (RAG) and return the most relevant passages with file names.', parameters: { type: 'object', properties: { query: { type: 'string' }, max_results: { type: 'integer' } }, required: ['query'] } };
 
 class Agent {
-  constructor({ store, robot, mcp, emit, log, memory, projects, skills, camera, remote, jobs, dataDir }) {
+  constructor({ store, robot, mcp, emit, log, memory, projects, skills, camera, remote, jobs, dataDir, github }) {
     this.camera = camera;
+    this.github = github;
     this.remote = remote;
     this.jobs = jobs;
     this.dataDir = dataDir;
@@ -422,7 +426,7 @@ class Agent {
 
   // ---------------------------------------------------------------- API-key engine
   toolSpecs(conv, { sub = false } = {}) {
-    const specs = [...BUILTIN, ...XTOOLS, ...KNOWLEDGE_TOOLS, ...this.mcp.toolSpecs()];
+    const specs = [...BUILTIN, ...XTOOLS, ...GH_TOOLS, ...KNOWLEDGE_TOOLS, ...this.mcp.toolSpecs()];
     if (conv.projectId) specs.push(KNOWLEDGE_SEARCH);
     if (!sub) specs.push(DELEGATE);
     return specs;
@@ -550,6 +554,7 @@ class Agent {
         if (spec._mcp) return this.mcp.call(spec._mcp.server, spec._mcp.tool, args);
         const ctx = this.toolCtx(conv, rt, { onPhoto, status: (t) => { if (!sub) this.status(conv, t); } });
         if (XNAMES.has(call.name)) return execX(call.name, args, ctx);
+        if (GHNAMES.has(call.name)) return execGitHub(call.name, args, ctx);
         return execBuiltin(call.name, args, ctx);
       })();
       // Stop must win even if a tool ignores the abort signal.
@@ -576,7 +581,7 @@ class Agent {
     return {
       workspace: conv.workspace, robot: this.robot, camera: this.camera, mapper: this.mapper, signal: rt.abort.signal,
       remote: this.remote, remoteServer: rs ? rs.id : null, remotePath: rs ? (conv.remote.path || rs.defaultPath || '') : null,
-      media: this.media, api: this.api, jobs: this.jobs, settings: s, dataDir: this.dataDir, model: conv.model || s.model,
+      media: this.media, api: this.api, jobs: this.jobs, settings: s, dataDir: this.dataDir, model: conv.model || s.model, github: this.github,
       ...extra,
     };
   }
@@ -628,7 +633,7 @@ class Agent {
     };
   }
   bridgeTools() {
-    return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...KNOWLEDGE_TOOLS]
+    return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...GH_TOOLS, ...KNOWLEDGE_TOOLS]
       .map(({ name, description, parameters }) => ({ name, description, parameters }));
   }
   async bridgeCall(convId, name, args) {
@@ -646,7 +651,7 @@ class Agent {
       let output = k;
       if (output === null) {
         const ctx = this.toolCtx(conv, rt, { onPhoto, status: (t) => this.status(conv, t) });
-        output = XNAMES.has(name) ? await execX(name, args, ctx) : await execBuiltin(name, args, ctx);
+        output = XNAMES.has(name) ? await execX(name, args, ctx) : GHNAMES.has(name) ? await execGitHub(name, args, ctx) : await execBuiltin(name, args, ctx);
       }
       return { output: clip(output), images: images.slice(-3) };
     } catch (e) { return { output: `Error: ${e.message || e}`, isError: true, images }; }
@@ -759,6 +764,12 @@ class Agent {
           patch = { role: 'info', text: `${item.kind}: ${t}` };
         }
       }
+      if (patch.role === 'tool' && patch.status === 'error' && /sandbox enforcement unavailable|setup_required|sandbox setup has not run/i.test(patch.output || '') && (this.settings().museSandbox || 'auto') === 'auto' && !this.muse.noSandboxNext) {
+        // The sandbox claimed to work but commands fail: use a host without it from now on.
+        this.muse.noSandboxNext = true;
+        rt.restartMuse = true;
+        this.log('Muse Code: shell blocked by the Windows sandbox — the next message runs Muse Code without it.');
+      }
       if (!m) {
         m = this.addMsg(conv, { ...base, ...patch }); byItem.set(item.itemId, m);
         if (patch.role === 'tool') { this.track({ kind: 'local', convId: conv.id, text: `Muse Code ran: ${patch.summary}` }); this.status(conv, `Running: ${patch.summary}`); }
@@ -789,6 +800,11 @@ class Agent {
       return;
     }
     await Promise.race([Promise.allSettled([consumeItems, consumeDeltas]), new Promise((r) => setTimeout(r, 1500))]);
+    if (rt.restartMuse) {
+      this.addMsg(conv, { role: 'info', text: '🛡 Muse Code\'s Windows sandbox blocked the command. Muse Code was restarted without the sandbox (your approval mode still applies) — send the message again.' });
+      conv.museSessionId = null;
+      this.muse.close().catch(() => {});
+    }
     if (outcome.kind === 'completed') {
       const p = outcome.params || {};
       if (p.terminal && p.terminal !== 'completed' && p.terminal !== 'cancelled') {

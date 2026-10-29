@@ -102,7 +102,7 @@
       case 'camera:photo': window.MCRobot && window.MCRobot.onPhoto && window.MCRobot.onPhoto(d); break;
       case 'robot:status': case 'robot:motors': case 'robot:scan': case 'robot:map': window.MCRobot && window.MCRobot.onEvent(ev, d); break;
       case 'avatar:link': avatarLinkPrompt(d); break;
-      case 'remote:status': S.boot.servers = d; if (S.view === 'chat') renderHead(); if (S.view === 'settings') renderServers(); break;
+      case 'remote:status': S.boot.servers = d; if (S.view === 'chat') renderHead(); if (S.view === 'remote') renderServerList(); break;
       default: break;
     }
   }
@@ -152,6 +152,8 @@
     if (view === 'activity') renderActivity();
     if (view === 'settings') renderSettings();
     if (view === 'robot') window.MCRobot && window.MCRobot.show(S);
+    if (view === 'remote') renderRemote();
+    if (view === 'plugins') renderPlugins();
     renderChatList();
   }
   $$('#nav button').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
@@ -351,6 +353,25 @@
   // ---- modal
   function modal(...kids) { const box = $('#modalBox'); box.innerHTML = ''; box.append(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false)); $('#modal').hidden = false; }
   function closeModal() { $('#modal').hidden = true; }
+  // Text / choice dialogs (window.prompt does not work inside the desktop app).
+  function askText(title, value = '', { multiline = false, placeholder = '', hint = '' } = {}) {
+    return new Promise((resolve) => {
+      const inp = multiline ? h('textarea', { class: 'dlg-input', rows: 6, placeholder }) : h('input', { class: 'dlg-input', placeholder });
+      inp.value = value || '';
+      const done = (v) => { closeModal(); resolve(v); };
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !multiline) { e.preventDefault(); done(inp.value.trim() || null); } if (e.key === 'Escape') done(null); });
+      modal(h('h3', {}, title), hint ? h('p', { class: 'small muted' }, hint) : null, inp,
+        h('div', { class: 'row', style: 'margin-top:10px' }, h('button', { class: 'btn primary', onclick: () => done(inp.value.trim() || null) }, 'OK'), h('button', { class: 'btn', onclick: () => done(null) }, 'Cancel')));
+      setTimeout(() => inp.focus(), 30);
+    });
+  }
+  function askChoice(title, options) {
+    return new Promise((resolve) => {
+      modal(h('h3', {}, title), ...options.map((o) => h('div', { class: 'opt' + (o.on ? ' on' : ''), onclick: () => { closeModal(); resolve(o.value); } }, h('div', {}, h('b', {}, o.label), o.sub ? h('div', { class: 'small muted' }, o.sub) : null))),
+        h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => { closeModal(); resolve(undefined); } }, 'Cancel')));
+    });
+  }
+  window.MCask = askText;
   $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
   // ---- where does this chat work: this PC or a server
   $('#chipWhere').onclick = () => {
@@ -392,16 +413,14 @@
   $('#chipFolder').onclick = async () => {
     let p = null;
     if (isDesktop) p = await window.desktop.pickFolder(S.conv.workspace || S.settings.workspace);
-    else p = prompt('Folder path on the PC:', S.conv.workspace || S.settings.workspace);
+    else p = await askText('Folder path on the PC', S.conv.workspace || S.settings.workspace);
     if (p) { await patchConv({ workspace: p }); toast('Folder attached'); }
   };
   $('#chipProject').onclick = async () => {
-    const opts = ['(none)', ...S.projects.map((p) => p.name)];
-    const pick = prompt(`Put this chat in a project. Type a number:\n${opts.map((o, i) => `${i}. ${o}`).join('\n')}`, '0');
-    if (pick === null) return;
-    const i = Number(pick);
-    if (!(i >= 0 && i < opts.length)) return;
-    await patchConv({ projectId: i === 0 ? null : S.projects[i - 1].id });
+    const pick = await askChoice('Put this chat in a project', [{ label: 'No project', value: null, on: !S.conv.projectId }, ...S.projects.map((p) => ({ label: p.name, sub: `${p.files.length} files`, value: p.id, on: S.conv.projectId === p.id })), { label: '＋ New project…', value: '__new' }]);
+    if (pick === undefined) return;
+    if (pick === '__new') { const name = await askText('Project name'); if (!name) return; const np = await api('/api/projects', { body: { name } }); await refreshProjects(); await patchConv({ projectId: np.id }); return; }
+    await patchConv({ projectId: pick });
   };
 
   // --- message rendering
@@ -457,7 +476,7 @@
   const SANDBOX_RE = /sandbox (setup has not run|enforcement unavailable)|setup_required/i;
   function sandboxFix() {
     return h('div', { class: 'fixbar' },
-      h('span', {}, '🛡 Muse Code needs a one-time Windows sandbox setup before it can run commands.'),
+      h('span', {}, '🛡 Muse Code\'s Windows sandbox blocked this command. The app now restarts Muse Code without the sandbox — just send the message again. Or set the sandbox up:'),
       h('button', { class: 'btn primary', onclick: async () => { try { await api('/api/muse/sandbox', { body: {} }); toast('A setup window opened. Click YES on the Windows prompt, then send your message again.'); } catch (e) { toast(e.message, true); } } }, 'Set up sandbox'),
       h('button', { class: 'btn', title: 'Muse Code full-access profile (no sandbox) for this chat', onclick: () => patchConv({ mode: 'full' }).then(() => toast('Full access for this chat — send the message again')) }, 'Use Full access'),
       S.settings.hasApiKey ? h('button', { class: 'btn', title: 'The API-key engine runs commands directly with this app (no Muse sandbox)', onclick: () => patchConv({ engine: 'api' }).then(() => toast('Switched this chat to the API-key engine')) }, 'Use API engine') : null);
@@ -686,7 +705,7 @@
       h('div', { class: 'list' }, chats.map((c) => h('div', { class: 'item', style: 'cursor:pointer', onclick: () => openConv(c.id) }, h('div', { class: 'grow' }, c.title), h('span', { class: 'meta' }, fmtDate(c.updatedAt)))))));
   }
   $('#btnNewProject').onclick = async () => {
-    const name = prompt('Project name:');
+    const name = await askText('New project', '', { placeholder: 'Project name, e.g. Carpathron EU funding' });
     if (!name) return;
     const p = await api('/api/projects', { body: { name } });
     await refreshProjects();
@@ -703,7 +722,7 @@
     for (const m of [...items].reverse()) {
       list.append(h('div', { class: 'item' },
         h('div', { class: 'grow' }, h('div', {}, m.text), h('div', { class: 'meta' }, `${m.source === 'auto' ? 'learned automatically' : m.source === 'agent' ? 'saved by the assistant' : 'added by you'} · ${fmtDate(m.createdAt)}`)),
-        h('button', { class: 'btn tiny', onclick: async () => { const t = prompt('Edit memory:', m.text); if (t) { await api(`/api/memory/${m.id}`, { method: 'PATCH', body: { text: t } }); renderMemory(); } } }, 'Edit'),
+        h('button', { class: 'btn tiny', onclick: async () => { const t = await askText('Edit memory', m.text, { multiline: true }); if (t) { await api(`/api/memory/${m.id}`, { method: 'PATCH', body: { text: t } }); renderMemory(); } } }, 'Edit'),
         h('button', { class: 'btn tiny', onclick: async () => { await api(`/api/memory/${m.id}`, { method: 'DELETE' }); renderMemory(); } }, 'Delete')));
     }
   }
@@ -755,15 +774,18 @@
   // ------------------------------------------------------------ settings
   function field(label, el, hint) { return h('label', {}, label, el, hint ? h('span', { class: 'small muted' }, hint) : null); }
   async function renderSettings() {
+    const rtok = (renderSettings.tok = (renderSettings.tok || 0) + 1);
     const s = S.settings = await api('/api/settings');
     const eng = S.boot.engines = await api('/api/engines');
+    if (rtok !== renderSettings.tok) return; // a newer render started (prevents duplicated cards)
     const body = $('#settingsBody');
     body.innerHTML = '';
 
     // --- engines
     const museState = h('div', { class: 'status-line' },
       h('span', { class: 'pill ' + (eng.muse.installed ? 'ok' : 'warn') }, eng.muse.installed ? `Installed${eng.muse.version ? ' ' + eng.muse.version : ''}` : 'Not installed'),
-      eng.muse.bin ? h('span', { class: 'small muted' }, eng.muse.bin) : null);
+      eng.muse.bin ? h('span', { class: 'small muted' }, eng.muse.bin) : null,
+      eng.muse.connected && eng.muse.sandbox ? h('span', { class: 'pill' + (/off/.test(eng.muse.sandbox) ? ' warn' : ' ok') }, `sandbox: ${eng.muse.sandbox}`) : null);
     const museOut = h('div', { class: 'small muted' }, eng.muse.lastError || '');
     const museBin = h('input', { value: s.museBin || '', placeholder: 'Auto-detect (leave empty)' });
     const apiKey = h('input', { type: 'password', placeholder: s.hasApiKey ? '•••••••• saved (type to replace)' : 'Paste your Meta Model API key' });
@@ -825,11 +847,9 @@
 
     // --- remote servers
     body.append(h('div', { class: 'card', id: 'srvCard' },
-      h('h3', {}, 'Remote servers (SSH)'),
-      h('p', { class: 'muted small' }, 'Save your VPS / dedicated servers once. Passwords and keys are encrypted with your Windows account. In a chat click 🖥 This PC to switch the chat to a server: then files and commands run there, and the agent can also use ssh_exec, an interactive ssh_shell, uploads and downloads on any saved server.'),
-      h('div', { id: 'srvList', class: 'list' }),
-      h('button', { class: 'btn primary', onclick: () => editServer(null) }, '＋ Add server')));
-    renderServers();
+      h('h3', {}, 'Remote servers, SSH keys and GitHub'),
+      h('p', { class: 'muted small' }, `${(S.boot.servers || []).length} server(s) saved. Manage servers, terminals and SSH keys on the Remote page; GitHub and other connections on the Plugins page.`),
+      h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => show('remote') }, '🌐 Open Remote'), h('button', { class: 'btn', onclick: () => show('plugins') }, '🧩 Open Plugins'))));
 
     // --- tools & models
     const effSel = h('select', {}, ...['', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map((e) => h('option', { value: e }, e || 'Model default')));
@@ -838,6 +858,9 @@
     webSel.value = s.webSearch || 'auto';
     const cliIn = h('input', { value: s.arduinoCli || '', placeholder: S.boot.features && S.boot.features.arduinoCli ? `Found: ${S.boot.features.arduinoCli}` : 'Not found — the agent can download it (arduino_setup)' });
     const bridgeOn = h('input', { type: 'checkbox' }); bridgeOn.checked = s.museBridge !== false;
+    const sbSel = h('select', {}, h('option', { value: 'auto' }, 'Automatic — use it when it works, otherwise run without it'), h('option', { value: 'on' }, 'Always sandbox (commands fail if it is not available)'), h('option', { value: 'off' }, 'Off — Muse Code runs commands directly (like the API engine)'));
+    sbSel.value = s.museSandbox || 'auto';
+    const trustOn = h('input', { type: 'checkbox' }); trustOn.checked = s.museTrustWorkspace !== false;
     const profSel = h('select', {}, h('option', { value: '' }, 'Muse Code default'));
     if (s.musePermissionProfile) profSel.append(h('option', { value: s.musePermissionProfile }, s.musePermissionProfile));
     profSel.value = s.musePermissionProfile || '';
@@ -849,11 +872,13 @@
       field('Web search', webSel),
       field('arduino-cli path (optional)', cliIn),
       h('label', { class: 'inline toggle' }, bridgeOn, ' Give Muse Code (Meta account engine) the app tools: SSH, PDF, research, Arduino, robot, Muse Image, SAM'),
+      field('Muse Code Windows sandbox for commands', sbSel, 'Approvals (Ask / Auto / Full / Plan) apply in every option.'),
+      h('label', { class: 'inline toggle' }, trustOn, ' Trust the chat folder in Muse Code (loads its skills and rules, allows sub-agents)'),
       h('div', { class: 'row' }, field('Muse Code permission profile', profSel, 'Full mode picks a full-access profile automatically if Muse Code offers one.'),
         h('button', { class: 'btn', style: 'align-self:flex-end', onclick: async () => { profOut.textContent = 'Loading…'; const r = await api('/api/muse/profiles'); const cur = profSel.value; profSel.innerHTML = ''; profSel.append(h('option', { value: '' }, 'Muse Code default')); for (const p of r.profiles || []) profSel.append(h('option', { value: p.id, disabled: p.available === false }, `${p.label}${p.description ? ' — ' + p.description : ''}`)); profSel.value = cur; profOut.textContent = r.profiles && r.profiles.length ? `${r.profiles.length} profiles` : (r.error || 'This Muse Code version lists no profiles'); } }, 'Load profiles')),
       profOut,
       h('button', { class: 'btn primary', onclick: async () => {
-        S.settings = await api('/api/settings', { body: { effort: effSel.value, webSearch: webSel.value, arduinoCli: cliIn.value.trim(), museBridge: bridgeOn.checked, musePermissionProfile: profSel.value } });
+        S.settings = await api('/api/settings', { body: { effort: effSel.value, webSearch: webSel.value, arduinoCli: cliIn.value.trim(), museBridge: bridgeOn.checked, musePermissionProfile: profSel.value, museSandbox: sbSel.value, museTrustWorkspace: trustOn.checked } });
         toast('Saved');
       } }, 'Save')));
 
@@ -931,23 +956,149 @@
     body.append(h('div', { class: 'card' }, h('h3', {}, 'About'),
       h('p', { class: 'small muted' }, `Muse Carpathron ${S.boot.version} · ${S.boot.platform} · Data stays on this PC except what is sent to Meta's model for each message (see Activity).`)));
   }
-  function renderServers() {
-    const el = $('#srvList');
+  // ------------------------------------------------------------ Remote page
+  async function renderRemote() {
+    S.boot.servers = await api('/api/servers');
+    renderServerList();
+    renderKeys();
+  }
+  function renderServerList() {
+    const el = $('#remoteList');
     if (!el) return;
     el.innerHTML = '';
     const list = S.boot.servers || [];
-    if (!list.length) el.append(h('div', { class: 'muted small' }, 'No servers yet.'));
+    if (!list.length) el.append(h('div', { class: 'card muted' }, 'No servers yet. Click ＋ Add server: host (IP or domain), user and a password or SSH key. Then use “Install key” to switch to key login.'));
     for (const sv of list) {
       const out = h('div', { class: 'small muted' });
       el.append(h('div', { class: 'item' },
-        h('span', { class: 'pill ' + (sv.connected ? 'ok' : '') }, sv.connected ? 'connected' : sv.os || 'saved'),
-        h('div', { class: 'grow' }, h('b', {}, sv.name), h('div', { class: 'meta' }, `${sv.username}@${sv.host}:${sv.port} · ${sv.auth}${sv.defaultPath ? ' · ' + sv.defaultPath : ''}${sv.fingerprint ? ' · host key ' + sv.fingerprint.slice(0, 12) + '…' : ''}`), out),
+        h('span', { class: 'pill ' + (sv.connected ? 'ok' : '') }, sv.connected ? 'connected' : (sv.os || 'saved')),
+        h('div', { class: 'grow' }, h('b', {}, sv.name), h('div', { class: 'meta' }, `${sv.username}@${sv.host}:${sv.port} · login: ${sv.auth}${sv.defaultPath ? ' · ' + sv.defaultPath : ''}${sv.fingerprint ? ' · host key ' + sv.fingerprint.slice(0, 12) + '…' : ''}`), out),
+        h('button', { class: 'btn tiny', onclick: () => openTerminal(sv) }, '⌨ Terminal'),
         h('button', { class: 'btn tiny', onclick: async () => { out.textContent = 'Connecting…'; const r = await api(`/api/servers/${sv.id}/test`, { body: {} }); out.textContent = r.ok ? `✓ ${r.output.split('\n').slice(0, 4).join(' · ')}` : `✕ ${r.error}`; S.boot.servers = await api('/api/servers'); } }, 'Test'),
+        sv.connected ? h('button', { class: 'btn tiny', onclick: async () => { await api(`/api/servers/${sv.id}/disconnect`, { body: {} }); } }, 'Disconnect') : null,
+        h('button', { class: 'btn tiny', onclick: () => installKeyDialog(sv) }, '🔑 Install key'),
+        h('button', { class: 'btn tiny', onclick: async () => { await newChat(); await patchConv({ remote: { serverId: sv.id, path: sv.defaultPath || '' } }); toast(`New chat working on ${sv.name}`); } }, 'Chat here'),
         h('button', { class: 'btn tiny', onclick: () => editServer(sv) }, 'Edit'),
-        h('button', { class: 'btn tiny', onclick: async () => { if (confirm(`Delete server "${sv.name}" and its saved credentials?`)) { await api(`/api/servers/${sv.id}`, { method: 'DELETE' }); S.boot.servers = await api('/api/servers'); renderServers(); } } }, 'Delete')));
+        h('button', { class: 'btn tiny', onclick: async () => { if (confirm(`Delete server "${sv.name}" and its saved credentials?`)) { await api(`/api/servers/${sv.id}`, { method: 'DELETE' }); S.boot.servers = await api('/api/servers'); renderServerList(); } } }, 'Delete')));
     }
   }
-  function editServer(sv) {
+  $('#btnAddServer').onclick = () => editServer(null);
+  // terminal
+  const T = { id: null, poll: null };
+  async function openTerminal(sv) {
+    closeTerminal();
+    $('#termCard').hidden = false;
+    $('#termTitle').textContent = `Terminal — ${sv.name} (${sv.username}@${sv.host})`;
+    const out = $('#termOut');
+    out.textContent = 'Connecting…\n';
+    const r = await api(`/api/servers/${sv.id}/shell`, { body: {} });
+    if (r.error) { out.textContent += `✕ ${r.error}\n`; return; }
+    T.id = r.id;
+    out.textContent = r.output === '(no new output)' ? '' : r.output + '\n';
+    T.poll = setInterval(async () => {
+      if (!T.id) return;
+      const x = await api(`/api/shells/${T.id}`).catch(() => ({}));
+      if (x.output && x.output !== '(no new output)') { out.textContent += x.output + '\n'; out.scrollTop = out.scrollHeight; }
+      if (x.error || /\[shell closed\]/.test(x.output || '')) { clearInterval(T.poll); T.id = null; }
+    }, 1500);
+    $('#termIn').focus();
+    $('#termCard').scrollIntoView({ behavior: 'smooth' });
+  }
+  function closeTerminal() { if (T.id) api(`/api/shells/${T.id}`, { method: 'DELETE' }).catch(() => {}); clearInterval(T.poll); T.id = null; $('#termCard').hidden = true; }
+  $('#termClose').onclick = closeTerminal;
+  $('#termCtrlC').onclick = async () => { if (T.id) { const x = await api(`/api/shells/${T.id}`, { body: { input: '{ctrl-c}' } }); $('#termOut').textContent += (x.output || '') + '\n'; } };
+  $('#termForm').onsubmit = async (e) => {
+    e.preventDefault();
+    if (!T.id) return toast('Terminal is not connected', true);
+    const v = $('#termIn').value; $('#termIn').value = '';
+    const out = $('#termOut');
+    const x = await api(`/api/shells/${T.id}`, { body: { input: v, waitMs: 1500 } });
+    if (x.error) out.textContent += `✕ ${x.error}\n`;
+    else if (x.output && x.output !== '(no new output)') out.textContent += x.output + '\n';
+    out.scrollTop = out.scrollHeight;
+  };
+  // SSH keys
+  async function renderKeys() {
+    const el = $('#keyList');
+    el.innerHTML = '';
+    const keys = await api('/api/keys');
+    if (!keys.length) el.append(h('div', { class: 'muted small' }, 'No SSH keys yet. Generate one, then install it on your servers.'));
+    for (const k of keys) {
+      el.append(h('div', { class: 'item' },
+        h('div', { class: 'grow' }, h('b', {}, `🔑 ${k.name}`), h('div', { class: 'meta' }, `${k.type} · ${k.fingerprint} · ${k.source === 'app' ? 'stored encrypted in the app' : k.source}${(k.usedBy || []).length ? ' · used by ' + k.usedBy.join(', ') : ''}`), h('div', { class: 'keypub' }, k.public)),
+        h('button', { class: 'btn tiny', onclick: () => { navigator.clipboard.writeText(k.public); toast('Public key copied'); } }, 'Copy public key'),
+        k.source === 'app' ? h('button', { class: 'btn tiny', title: 'Write it to %USERPROFILE%\\.ssh so git, VS Code or other tools can use it', onclick: async () => { try { const r = await api(`/api/keys/${k.id}/export`, { body: {} }); toast(`Saved ${r.file}`); renderKeys(); } catch (e) { toast(e.message, true); } } }, 'Export to .ssh') : null,
+        k.source === 'app' ? h('button', { class: 'btn tiny', onclick: async () => { if (confirm(`Delete key ${k.name}?`)) { try { await api(`/api/keys/${k.id}`, { method: 'DELETE' }); renderKeys(); } catch (e) { toast(e.message, true); } } } }, 'Delete') : null));
+    }
+  }
+  $('#btnGenKey').onclick = async () => {
+    const name = await askText('Generate an SSH key (ed25519)', `muse-${new Date().toISOString().slice(0, 10)}`, { hint: 'Name for the key. It is stored encrypted in the app; you can export it to .ssh later.' });
+    if (!name) return;
+    try { const k = await api('/api/keys/generate', { body: { name } }); navigator.clipboard.writeText(k.public).catch(() => {}); toast('Key generated — public key copied'); renderKeys(); }
+    catch (e) { toast(e.message, true); }
+  };
+  $('#btnImportKey').onclick = async () => {
+    const text = await askText('Import a private key', '', { multiline: true, placeholder: '-----BEGIN OPENSSH PRIVATE KEY----- …  (or a file path like C:\\Users\\me\\.ssh\\id_ed25519)', hint: 'Paste the private key text, or a path to the key file. If it has a passphrase you will be asked next.' });
+    if (!text) return;
+    const name = await askText('Name for this key', /BEGIN/.test(text) ? 'imported-key' : text.split(/[\\/]/).pop());
+    const pass = await askText('Passphrase (leave empty if none)', '');
+    try { await api('/api/keys/import', { body: /BEGIN/.test(text) ? { name, privateKey: text, passphrase: pass || '' } : { name, path: text, passphrase: pass || '' } }); toast('Key imported'); renderKeys(); }
+    catch (e) { toast(e.message, true); }
+  };
+  async function installKeyDialog(sv) {
+    let keys = await api('/api/keys');
+    if (!keys.length) { const k = await api('/api/keys/generate', { body: { name: `muse-${new Date().toISOString().slice(0, 10)}` } }); keys = [k]; }
+    const pick = await askChoice(`Install an SSH key on ${sv.name}`, keys.map((k) => ({ label: k.name, sub: `${k.fingerprint}${k.source && k.source !== 'app' ? ' · ' + k.source : ''}`, value: k.id })));
+    if (!pick) return;
+    const removePw = sv.hasPassword && confirm('Key login works? Then remove the saved password for this server (recommended)? The app only removes it if the key login succeeds.');
+    toast('Installing key…');
+    const r = await api(`/api/servers/${sv.id}/install-key`, { body: { keyId: pick, use: true, removePassword: removePw } });
+    toast(r.ok ? r.message : r.error, !r.ok);
+    S.boot.servers = await api('/api/servers'); renderServerList(); renderKeys();
+  }
+
+  // ------------------------------------------------------------ Plugins page
+  async function renderPlugins() {
+    const body = $('#pluginsBody');
+    body.innerHTML = '';
+    const gh = await api('/api/github');
+    const tok = h('input', { type: 'password', placeholder: gh.connected ? '•••••• connected (paste a new token to replace)' : 'GitHub token (ghp_… or github_pat_…)', style: 'width:100%' });
+    const nm = h('input', { value: gh.name || '', placeholder: 'Commit author name' });
+    const em = h('input', { value: gh.email || '', placeholder: 'Commit author e-mail' });
+    const out = h('div', { class: 'small muted' }, gh.connected ? `✓ Connected as ${gh.login}` : 'Not connected');
+    body.append(h('div', { class: 'card plugin-card' },
+      h('div', { class: 'head' }, h('span', { class: 'logo' }, '🐙'), h('div', { class: 'grow' }, h('h3', { style: 'margin:0' }, 'GitHub'), h('div', { class: 'small muted' }, 'Create repositories, publish folders (commit + push), clone, releases with installer uploads, issues and pull requests — the agent uses these as tools. Commits are made with the author below.')),
+        h('span', { class: 'pill ' + (gh.connected ? 'ok' : '') }, gh.connected ? gh.login : 'off')),
+      h('p', { class: 'small' }, '1. Create a token: ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); const u = 'https://github.com/settings/tokens/new?scopes=repo,workflow,read:org,write:packages&description=Muse%20Carpathron'; if (isDesktop) window.desktop.openExternal(u); else window.open(u); } }, 'github.com → New token (classic) with repo + workflow'), ' (or a fine-grained token with Contents, Metadata, Issues, Pull requests and Administration: read & write). 2. Paste it here and Connect.'),
+      tok, h('div', { class: 'row' }, nm, em), out,
+      h('div', { class: 'row' },
+        h('button', { class: 'btn primary', onclick: async () => {
+          try {
+            if (tok.value.trim()) { const r = await api('/api/github/connect', { body: { token: tok.value.trim(), name: nm.value, email: em.value } }); out.textContent = `✓ Connected as ${r.login}. Author: ${r.name} <${r.email}>`; tok.value = ''; }
+            else { const r = await api('/api/github/author', { body: { name: nm.value, email: em.value } }); out.textContent = `Saved author: ${r.name} <${r.email}>`; }
+            toast('GitHub saved');
+          } catch (e) { out.textContent = `✕ ${e.message}`; }
+        } }, gh.connected ? 'Save' : 'Connect'),
+        gh.connected ? h('button', { class: 'btn', onclick: async () => { if (confirm('Disconnect GitHub and delete the saved token?')) { await api('/api/github', { method: 'DELETE' }); renderPlugins(); } } }, 'Disconnect') : null,
+        gh.connected ? h('button', { class: 'btn', onclick: () => { newChat(); setTimeout(() => { $('#input').value = '/github-publish '; autoGrow(); $('#input').focus(); }, 50); } }, 'Publish a folder…') : null)));
+    const e = S.boot.engines || {};
+    const f = S.boot.features || {};
+    const rows = [
+      ['🌐', 'Remote servers (SSH)', `${(S.boot.servers || []).length} saved`, () => show('remote'), 'Open'],
+      ['🔌', 'MCP servers', `${Object.keys(S.settings.mcpServers || {}).length} configured`, () => show('settings'), 'Configure'],
+      ['🔧', 'Arduino / ESP32', f.arduinoCli ? `arduino-cli: ${f.arduinoCli}` : 'arduino-cli not found yet — the agent downloads it with arduino_setup', null, null],
+      ['🧠', 'Muse Code (Meta account)', e.muse && e.muse.installed ? `installed ${e.muse.version || ''}${e.muse.sandbox ? ' · sandbox ' + e.muse.sandbox : ''}` : 'not installed', () => show('settings'), 'Settings'],
+      ['💬', 'WhatsApp', S.boot.wa ? `personal: ${S.boot.wa.personal.status}` : '', () => show('settings'), 'Settings'],
+    ];
+    for (const [icon, name, state, go, label] of rows) {
+      body.append(h('div', { class: 'card plugin-card' }, h('div', { class: 'head' }, h('span', { class: 'logo' }, icon), h('div', { class: 'grow' }, h('b', {}, name), h('div', { class: 'small muted' }, state)), go ? h('button', { class: 'btn', onclick: go }, label) : null)));
+    }
+  }
+
+  async function editServer(sv) {
+    const appKeys = (await api('/api/keys').catch(() => [])).filter((k) => k.source === 'app');
+    const keySel = h('select', {}, h('option', { value: '' }, '— no app key (password / key file / agent) —'), ...appKeys.map((k) => h('option', { value: k.id }, `${k.name} (${k.fingerprint.slice(0, 20)}…)`)));
+    keySel.value = (sv && sv.keyId) || '';
     const f = (name, attrs = {}) => h('input', { name, ...attrs });
     const name = f('name', { value: sv ? sv.name : '', placeholder: 'e.g. my-vps' });
     const host = f('host', { value: sv ? sv.host : '', placeholder: 'IP or domain' });
@@ -960,7 +1111,7 @@
     const dpath = f('dpath', { value: sv ? sv.defaultPath : '', placeholder: 'Default folder, e.g. /var/www (optional)' });
     const out = h('div', { class: 'small muted' });
     const save = async (test) => {
-      const b = { id: sv ? sv.id : undefined, name: name.value.trim(), host: host.value.trim(), port: Number(port.value) || 22, username: user.value.trim(), keyPath: keyPath.value.trim(), defaultPath: dpath.value.trim() };
+      const b = { id: sv ? sv.id : undefined, name: name.value.trim(), host: host.value.trim(), port: Number(port.value) || 22, username: user.value.trim(), keyPath: keyPath.value.trim(), defaultPath: dpath.value.trim(), keyId: keySel.value };
       if (pass.value) b.password = pass.value;
       if (keyText.value.trim()) b.privateKey = keyText.value.trim();
       if (phrase.value) b.passphrase = phrase.value;
@@ -968,7 +1119,7 @@
         const saved = await api('/api/servers', { body: b });
         S.boot.servers = await api('/api/servers');
         if (test) { out.textContent = 'Connecting…'; const r = await api(`/api/servers/${saved.id}/test`, { body: {} }); out.textContent = r.ok ? `✓ Connected (${r.os}). ${r.output.split('\n').slice(0, 3).join(' · ')}` : `✕ ${r.error}`; if (!r.ok) return; S.boot.servers = await api('/api/servers'); }
-        renderServers(); if (!test) closeModal(); else setTimeout(closeModal, 1600);
+        renderServerList(); if (!test) closeModal(); else setTimeout(closeModal, 1600);
         toast('Server saved');
       } catch (e) { out.textContent = `✕ ${e.message}`; }
     };
@@ -977,6 +1128,7 @@
         h('label', {}, 'Name', name), h('label', {}, 'Host', host),
         h('label', {}, 'User', user), h('label', {}, 'Port', port),
         h('label', { class: 'full' }, 'Password', pass),
+        h('label', { class: 'full' }, 'SSH key from the app (Remote → SSH keys)', keySel),
         h('label', { class: 'full' }, 'Private key file', keyPath),
         h('label', { class: 'full' }, 'Private key text', keyText),
         h('label', {}, 'Key passphrase', phrase), h('label', {}, 'Default folder', dpath)),

@@ -18,6 +18,8 @@ const DEFAULT_SETTINGS = {
   effort: '', // reasoning effort for Muse Spark / Wonder: '', minimal, low, medium, high, xhigh, max
   servers: [], // SSH servers (passwords/keys encrypted, see secrets.js)
   museBridge: true, // give Muse Code sessions the app's tools through the MCP bridge
+  museSandbox: 'auto', // auto | on | off — Muse Code OS sandbox for shell commands
+  museTrustWorkspace: true, // let Muse Code load skills/rules from the chat folder
   musePermissionProfile: '', // Muse Code permission profile ('' = host default, full mode picks a full-access one)
   arduinoCli: '',
   webSearch: 'auto', // auto (Meta search grounding, then DuckDuckGo) | duckduckgo
@@ -131,6 +133,8 @@ class Store {
     s.whatsapp.cloud.hasAppSecret = !!s.whatsapp.cloud.appSecret; delete s.whatsapp.cloud.appSecret;
     delete s.accessToken;
     delete s.servers;
+    delete s.sshKeys;
+    if (s.github) s.github = { connected: !!s.github.token, login: s.github.login || '', name: s.github.name || '', email: s.github.email || '' };
     s.avatarLinked = (s.avatarTokens || []).map((x) => ({ device: x.device, at: x.at })); delete s.avatarTokens;
     return s;
   }

@@ -6,20 +6,32 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { Server, utils: { sftp: { STATUS_CODE, OPEN_MODE } } } = require('ssh2');
 
-function start(port, { user = 'tester', password = 'secret' } = {}) {
+function start(port, { user = 'tester', password = 'secret', home } = {}) {
+  const env = { ...process.env, ...(home ? { HOME: home } : {}) };
   const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs1', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
   const hostKey = null;
   const srv = new Server({ hostKeys: [privateKey] }, (client) => {
     client.on('authentication', (ctx) => {
       if (ctx.username === user && ctx.method === 'password' && ctx.password === password) return ctx.accept();
-      ctx.reject(['password']);
+      if (ctx.username === user && ctx.method === 'publickey' && home) {
+        let lines = [];
+        try { lines = fs.readFileSync(path.join(home, '.ssh', 'authorized_keys'), 'utf8').split('\n').filter(Boolean); } catch {}
+        const { utils } = require('ssh2');
+        for (const l of lines) {
+          const k = utils.parseKey(l);
+          if (k instanceof Error || k.type !== ctx.key.algo || !k.getPublicSSH().equals(ctx.key.data)) continue;
+          if (!ctx.signature) return ctx.accept(); // key check before signing
+          if (k.verify(ctx.blob, ctx.signature, ctx.hashAlgo) === true) return ctx.accept();
+        }
+      }
+      ctx.reject(['password', 'publickey']);
     });
     client.on('ready', () => {
       client.on('session', (accept) => {
         const session = accept();
         session.on('exec', (acc, _rej, info) => {
           const stream = acc();
-          const p = spawn('bash', ['-c', info.command]);
+          const p = spawn('bash', ['-c', info.command], { env });
           p.stdout.on('data', (d) => stream.write(d));
           p.stderr.on('data', (d) => stream.stderr.write(d));
           p.on('close', (code) => { stream.exit(code || 0); stream.end(); });
@@ -29,7 +41,7 @@ function start(port, { user = 'tester', password = 'secret' } = {}) {
         session.on('pty', (acc) => acc && acc());
         session.on('shell', (acc) => {
           const stream = acc();
-          const p = spawn('bash', ['-i'], { env: { ...process.env, PS1: '$ ' } });
+          const p = spawn('bash', ['-i'], { env: { ...env, PS1: '$ ' } });
           p.stdout.on('data', (d) => stream.write(d));
           p.stderr.on('data', (d) => stream.write(d));
           stream.on('data', (d) => p.stdin.write(d));

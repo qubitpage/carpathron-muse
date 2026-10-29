@@ -284,3 +284,11 @@ body[data-view="chat"] .mobile-menu { display: none !important; }
 .srv-form label{display:flex;flex-direction:column;font-size:12px;gap:3px}
 .srv-form .full{grid-column:1/-1}
 .srv-form textarea{min-height:70px;font-family:Consolas,monospace;font-size:11px}
+
+/* 1.4.1: remote page, terminal, plugins */
+.term{background:#050607;border:1px solid var(--line);border-radius:8px;padding:10px;height:340px;overflow:auto;white-space:pre-wrap;font-family:var(--mono,Consolas,monospace);font-size:12px;color:#d7dde5;margin:8px 0}
+.term-card .row input{font-family:var(--mono,Consolas,monospace)}
+.keypub{font-family:var(--mono,Consolas,monospace);font-size:11px;word-break:break-all;color:var(--muted)}
+.plugin-card .head{display:flex;align-items:center;gap:10px}
+.plugin-card .logo{font-size:26px}
+.dlg-input{width:100%}

@@ -138,28 +138,48 @@ class MuseEngine {
       const bin = this.resolveBin();
       if (!bin) throw new Error('Muse Code is not installed (muse.exe not found). Install it from Settings → "Install Muse Code", or set its path.');
       const sdk = await import('@muse-code/sdk');
-      const stderr = [];
-      const hs = sdk.spawnMspConnection({
-        command: bin,
-        args: ['serve'],
-        cwd: safeCwd(this.getSettings().workspace),
-        onStderr: (c) => { stderr.push(c); if (stderr.length > 50) stderr.shift(); },
-      });
-      let spawned;
-      try {
-        spawned = await hs.initialize({ clientInfo: { name: 'muse_carpathron', title: 'Muse Carpathron', version: '1.0.0' } });
-      } catch (e) {
-        await hs.close().catch(() => {});
-        throw new Error(`Could not start Muse Code (${bin}): ${e.message}${stderr.length ? '\n' + stderr.join('').slice(-800) : ''}`);
+      const s = this.getSettings();
+      // museSandbox: 'auto' (default) = use the OS sandbox when the host can enforce it, otherwise run without it;
+      // 'on' = always sandbox (commands fail if it is unavailable); 'off' = never sandbox.
+      const mode = s.museSandbox || 'auto';
+      const start = async (noSandbox) => {
+        const stderr = [];
+        const args = ['serve'];
+        if (noSandbox) args.push('--disable-sandbox');
+        if (s.museTrustWorkspace !== false) args.push('--trust-workspace');
+        const hs = sdk.spawnMspConnection({
+          command: bin, args, cwd: safeCwd(s.workspace),
+          onStderr: (c) => { stderr.push(c); if (stderr.length > 50) stderr.shift(); },
+        });
+        try {
+          // sessionMcp: lets sessions receive the app's tools (MCP bridge). userInputDialogs: false — this app cannot
+          // show Muse's question dialogs, so Muse must not wait on one (it would hang the turn).
+          return await hs.initialize({ clientInfo: { name: 'muse_carpathron', title: 'Muse Carpathron', version: '1.5.0' }, capabilities: { requestedCapabilities: ['sessionMcp'], userInputDialogs: false } });
+        } catch (e) {
+          await hs.close().catch(() => {});
+          throw new Error(`Could not start Muse Code (${bin}): ${e.message}${stderr.length ? '\n' + stderr.join('').slice(-800) : ''}`);
+        }
+      };
+      const off = mode === 'off' || (mode === 'auto' && this.noSandboxNext);
+      let spawned = await start(off);
+      this.sandbox = off ? (mode === 'off' ? 'off' : 'off (sandbox failed)') : (spawned.initializeResult.sandboxAvailability || 'unknown');
+      // Muse Code's stdio host on Windows can report the sandbox as unavailable even after
+      // "muse sandbox windows setup" succeeded; then every shell command fails. Run without it instead.
+      if (mode === 'auto' && spawned.initializeResult.sandboxAvailability === 'unavailable') {
+        this.log(`Muse Code: OS sandbox unavailable for the app host${spawned.initializeResult.sandboxUnavailableReason ? ` (${spawned.initializeResult.sandboxUnavailableReason})` : ''} — restarting it without the sandbox (approvals still apply).`);
+        try { await spawned.close(); } catch {}
+        spawned = await start(true);
+        this.sandbox = 'off (unavailable)';
       }
       this.conn = spawned.connection;
       this.info = spawned.initializeResult;
+      this.granted = spawned.initializeResult.grantedCapabilities || [];
       this.client = new sdk.MuseClient(spawned.connection, { durability: sdk.readSessionDurability(spawned.initializeResult), host: spawned });
       this.client.exit.then((x) => {
         this.log(`Muse Code host exited (${x.kind})`);
         this.client = null; this.conn = null; this.sessions.clear();
       }).catch(() => {});
-      this.log(`Muse Code connected: ${this.info.serverInfo?.name || 'muse'} ${this.info.serverInfo?.version || ''} (${bin})`);
+      this.log(`Muse Code connected: ${this.info.serverInfo?.name || 'muse'} ${this.info.serverInfo?.version || ''} (${bin}), sandbox: ${this.sandbox}, capabilities: ${(this.granted || []).join(', ') || 'none'}`);
       return this.client;
     })();
     try { return await this.starting; }
@@ -169,7 +189,7 @@ class MuseEngine {
 
   async status() {
     const bin = this.resolveBin();
-    return { installed: !!bin, bin, connected: !!this.client, version: this.info?.serverInfo?.version || '', lastError: this.lastError };
+    return { installed: !!bin, bin, connected: !!this.client, version: this.info?.serverInfo?.version || '', lastError: this.lastError, sandbox: this.sandbox || '' };
   }
 
   async listModels(sessionId) {
@@ -196,7 +216,7 @@ class MuseEngine {
     if (!session) {
       const opts = { workspaceRoot: path.resolve(conv.workspace) };
       if (model) opts.modelId = model;
-      if (bridge) opts.config = { mcpServers: { carpathron: bridge } };
+      if (bridge && (this.granted || []).includes('sessionMcp')) opts.config = { mcpServers: { carpathron: bridge } };
       const profile = mode === 'full' ? await this.pickFullProfile() : (this.getSettings().musePermissionProfile || null);
       if (profile) opts.permissionProfile = profile;
       const attempts = [
@@ -235,53 +255,61 @@ class MuseEngine {
     try { await this.conn.command('turn/interrupt', { sessionId }); } catch (e) { this.log(`Interrupt failed: ${e.message}`); }
   }
 
-  // Opens a visible PowerShell window running Muse Code so the user can sign in with Meta.
+  // Opens a visible PowerShell window with a script. (Not "cmd /c start": Node quotes the window title so
+  // Windows tried to run the title words — "Windows cannot find 'sandbox'".)
+  static openConsole(name, lines, cwd) {
+    const file = path.join(os.tmpdir(), `muse-carpathron-${name}.ps1`);
+    fs.writeFileSync(file, '\ufeff' + [`$Host.UI.RawUI.WindowTitle = 'Muse Carpathron - ${name}'`, ...lines].join('\r\n'), 'utf8');
+    const child = spawn('powershell.exe', ['-NoLogo', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', file], { cwd, detached: true, windowsHide: false, stdio: 'ignore' });
+    child.on('error', () => {});
+    child.unref();
+  }
+
+  // Opens a PowerShell window running Muse Code so the user can sign in with Meta.
   openLogin() {
     const bin = this.resolveBin();
     if (!bin) throw new Error('Muse Code is not installed.');
-    if (IS_WIN) {
-      const cwd = safeCwd(this.getSettings().workspace);
-      spawn('cmd.exe', ['/c', 'start', '"Muse Code sign-in"', '/D', cwd, 'powershell.exe', '-NoExit', '-Command', `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'; Write-Host 'Sign in with your Meta account below. When you see the Muse prompt you are signed in: type /exit and close this window.' -ForegroundColor Green; & '${bin.replace(/'/g, "''")}'`], { cwd, detached: true, windowsHide: false, stdio: 'ignore' }).unref();
-    } else {
-      spawn(bin, [], { cwd: safeCwd(this.getSettings().workspace), detached: true, stdio: 'ignore' }).unref();
-    }
+    const cwd = safeCwd(this.getSettings().workspace);
+    if (!IS_WIN) { spawn(bin, [], { cwd, detached: true, stdio: 'ignore' }).unref(); return; }
+    const q = (x) => x.replace(/'/g, "''");
+    MuseEngine.openConsole('sign-in', [
+      `Set-Location -LiteralPath '${q(cwd)}'`,
+      "Write-Host 'Sign in with your Meta account below. When you see the Muse prompt you are signed in: type /exit and close this window.' -ForegroundColor Green",
+      `& '${q(bin)}'`,
+    ], cwd);
   }
 
-  // One-time Windows sandbox setup: Muse needs a visible window to show the administrator (UAC) prompt.
+  // One-time Windows sandbox setup ("muse sandbox windows setup" asks for administrator rights once).
   openSandboxSetup() {
     const bin = this.resolveBin();
     if (!bin) throw new Error('Muse Code is not installed.');
     if (!IS_WIN) throw new Error('Only needed on Windows.');
     const cwd = safeCwd(this.getSettings().workspace);
     const q = (x) => x.replace(/'/g, "''");
-    const script = [
+    MuseEngine.openConsole('sandbox-setup', [
       `Set-Location -LiteralPath '${q(cwd)}'`,
       "Write-Host 'Muse Code - one-time Windows sandbox setup' -ForegroundColor Green",
-      "Write-Host 'If Windows asks for permission (UAC), click YES. This lets Muse run commands safely.' -ForegroundColor Yellow",
-      `$m='${q(bin)}'`,
-      '$help = (& $m --help 2>&1 | Out-String)',
-      "$ok = $false",
-      // 1) a dedicated sandbox command, if this Muse Code version has one
-      "if ($help -match '(?m)^\\s*sandbox\\b') { Write-Host '> muse sandbox setup' -ForegroundColor Cyan; & $m sandbox setup; if ($LASTEXITCODE -eq 0) { $ok = $true } }",
-      // 2) run one harmless command non-interactively (triggers the setup and the UAC prompt)
-      "if (-not $ok) { Write-Host '> muse exec (test command)' -ForegroundColor Cyan; & $m exec --approval-mode never 'Run this exact PowerShell command and show its output: Get-Date'; if ($LASTEXITCODE -eq 0) { $ok = $true } }",
-      "if (-not $ok) { & $m exec 'Run this exact PowerShell command and show its output: Get-Date'; if ($LASTEXITCODE -eq 0) { $ok = $true } }",
+      "Write-Host 'If Windows asks for permission (UAC), click YES.' -ForegroundColor Yellow",
+      `$m = '${q(bin)}'`,
+      '& $m sandbox windows setup',
       "Write-Host ''",
-      "if ($ok) { Write-Host 'Done. Go back to Muse Carpathron and send your message again. You can close this window.' -ForegroundColor Green }",
-      "else { Write-Host 'Automatic setup did not finish. Muse starts now: type  run Get-Date  and press Enter, approve the Windows prompt, then type /exit.' -ForegroundColor Yellow; Write-Host 'Alternative: in Muse Carpathron use Full access mode or the API-key engine (no sandbox needed).' -ForegroundColor Yellow; & $m }",
-    ].join('\r\n');
-    const file = path.join(os.tmpdir(), 'muse-carpathron-sandbox-setup.ps1');
-    fs.writeFileSync(file, '\ufeff' + script, 'utf8');
-    spawn('cmd.exe', ['/c', 'start', '"Muse sandbox setup"', '/D', cwd, 'powershell.exe', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', file], { cwd, detached: true, windowsHide: false, stdio: 'ignore' }).unref();
+      "Write-Host 'Check:' -ForegroundColor Cyan",
+      '& $m sandbox windows check',
+      "Write-Host ''",
+      "Write-Host 'Done. Go back to Muse Carpathron and press Settings -> Test (it restarts Muse Code). If commands still fail, the app runs Muse Code without the sandbox automatically.' -ForegroundColor Green",
+    ], cwd);
   }
 
   // Opens a PowerShell window that runs Meta's official installer.
   static openInstaller() {
     if (!IS_WIN) throw new Error('Installer helper is for Windows.');
     const cwd = safeCwd();
-    spawn('cmd.exe', ['/c', 'start', '"Install Muse Code"', '/D', cwd, 'powershell.exe', '-NoExit', '-ExecutionPolicy', 'Bypass', '-Command',
-      "Write-Host 'Installing Meta Muse Code (official installer from dev.meta.ai)...' -ForegroundColor Green; irm https://dev.meta.ai/install.ps1 | iex; Write-Host ''; Write-Host 'Done. Go back to Muse Carpathron and press Re-check.' -ForegroundColor Green"],
-    { cwd, detached: true, windowsHide: false, stdio: 'ignore' }).unref();
+    MuseEngine.openConsole('install-muse-code', [
+      "Write-Host 'Installing Meta Muse Code (official installer from dev.meta.ai)...' -ForegroundColor Green",
+      'irm https://dev.meta.ai/install.ps1 | iex',
+      "Write-Host ''",
+      "Write-Host 'Done. Go back to Muse Carpathron and press Re-check.' -ForegroundColor Green",
+    ], cwd);
   }
 
   // Forget a session that stopped responding; the next message starts a new one.
@@ -291,7 +319,7 @@ class MuseEngine {
     conv.museSessionId = null;
   }
 
-  // Permission profiles the Muse Code host offers (e.g. a full-access / no-sandbox profile).
+  // Permission profiles the Muse Code host offers (e.g. a full-access profile).
   async permissionProfiles() {
     await this.ensure();
     try {
@@ -302,11 +330,13 @@ class MuseEngine {
   }
 
   async pickFullProfile() {
-    const want = this.getSettings().musePermissionProfile;
-    const list = await this.permissionProfiles();
-    if (want) return list.find((p) => p.id === want) ? want : null;
-    const full = list.find((p) => p.available && /full|danger|unrestricted|bypass|yolo|no.?sandbox|trusted|unsandbox/i.test(`${p.id} ${p.label}`));
-    return full ? full.id : null;
+    try {
+      const want = this.getSettings().musePermissionProfile;
+      const list = await this.permissionProfiles();
+      if (want) return list.find((p) => p.id === want) ? want : null;
+      const full = list.find((p) => p.available && /full|danger|unrestricted|bypass|yolo|no.?sandbox|trusted|unsandbox/i.test(`${p.id} ${p.label}`));
+      return full ? full.id : null;
+    } catch { return null; }
   }
 
   async close() {

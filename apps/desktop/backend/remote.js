@@ -6,7 +6,7 @@ const fsp = fs.promises;
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { Client } = require('ssh2');
+const { Client, utils: sshUtils } = require('ssh2');
 
 const MAX_OUT = 60000;
 const posix = path.posix;
@@ -30,7 +30,7 @@ class Remote {
   publicList() {
     return this.servers().map((s) => ({
       id: s.id, name: s.name, host: s.host, port: s.port, username: s.username, defaultPath: s.defaultPath || '',
-      auth: s.privateKey || s.keyPath ? 'key' : s.password ? 'password' : 'agent', keyPath: s.keyPath || '',
+      auth: s.keyId ? `key: ${(this.keys().find((k) => k.id === s.keyId) || {}).name || '?'}` : s.privateKey || s.keyPath ? 'key' : s.password ? 'password' : 'agent', keyPath: s.keyPath || '', keyId: s.keyId || '',
       hasPassword: !!s.password, hasKey: !!s.privateKey, hasPassphrase: !!s.passphrase,
       fingerprint: s.fingerprint || '', os: s.os || '', connected: this.conns.has(s.id) && !!this.conns.get(s.id).ok,
       lastUsed: s.lastUsed || 0,
@@ -64,6 +64,7 @@ class Remote {
     s.username = String(input.username ?? s.username ?? 'root').trim() || 'root';
     s.defaultPath = String(input.defaultPath ?? s.defaultPath ?? '').trim();
     s.keyPath = String(input.keyPath ?? s.keyPath ?? '').trim();
+    if (input.keyId !== undefined) s.keyId = String(input.keyId || '');
     if (typeof input.password === 'string' && input.password) s.password = this.secrets.encrypt(input.password);
     if (typeof input.privateKey === 'string' && input.privateKey.trim()) s.privateKey = this.secrets.encrypt(input.privateKey.trim() + '\n');
     if (typeof input.passphrase === 'string' && input.passphrase) s.passphrase = this.secrets.encrypt(input.passphrase);
@@ -113,7 +114,9 @@ class Remote {
       };
       try {
         if (s.password) cfg.password = this.secrets.decrypt(s.password);
-        if (s.privateKey) cfg.privateKey = this.secrets.decrypt(s.privateKey);
+        const k = s.keyId ? this.keys().find((x) => x.id === s.keyId) : null;
+        if (k) { cfg.privateKey = this.secrets.decrypt(k.private); if (k.passphrase) cfg.passphrase = this.secrets.decrypt(k.passphrase); }
+        else if (s.privateKey) cfg.privateKey = this.secrets.decrypt(s.privateKey);
         else if (s.keyPath) cfg.privateKey = fs.readFileSync(s.keyPath.replace(/^~(?=$|[\\/])/, os.homedir()));
         if (s.passphrase) cfg.passphrase = this.secrets.decrypt(s.passphrase);
       } catch (e) { reject(new Error(`Cannot read the saved credentials for ${s.name}: ${e.message}`)); return; }
@@ -306,6 +309,83 @@ class Remote {
   }
   shellList() { return [...this.shells.values()].map((s) => ({ id: s.id, server: s.server, closed: s.closed, since: s.at })); }
 
+  // ------------------------------------------------------------ SSH keys (stored encrypted in the app)
+  keys() { return this.store.settings.sshKeys || (this.store.settings.sshKeys = []); }
+  keyList() {
+    const own = this.keys().map((k) => ({ id: k.id, name: k.name, type: k.type, public: k.public, fingerprint: k.fingerprint, created: k.created, source: 'app', usedBy: this.servers().filter((s) => s.keyId === k.id).map((s) => s.name) }));
+    const dir = path.join(os.homedir(), '.ssh');
+    let files = [];
+    try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.pub')); } catch {}
+    const ext = files.map((f) => {
+      try {
+        const pub = fs.readFileSync(path.join(dir, f), 'utf8').trim();
+        const priv = path.join(dir, f.slice(0, -4));
+        return { id: `file:${priv}`, name: f.slice(0, -4), type: pub.split(' ')[0], public: pub, fingerprint: fingerprintOf(pub), source: fs.existsSync(priv) ? priv : `${priv} (private key missing)`, usedBy: this.servers().filter((s) => s.keyPath === priv).map((s) => s.name) };
+      } catch { return null; }
+    }).filter(Boolean);
+    return [...own, ...ext];
+  }
+  generateKey({ name, type = 'ed25519', passphrase = '', comment } = {}) {
+    name = String(name || `muse-${os.hostname()}-${new Date().toISOString().slice(0, 10)}`).replace(/[^\w.@-]/g, '-').slice(0, 60);
+    const opts = { comment: comment || `${name}@muse-carpathron` };
+    if (passphrase) Object.assign(opts, { passphrase, cipher: 'aes256-ctr' });
+    const kp = type === 'rsa' ? sshUtils.generateKeyPairSync('rsa', { bits: 4096, ...opts }) : sshUtils.generateKeyPairSync('ed25519', opts);
+    const k = { id: crypto.randomUUID(), name, type: type === 'rsa' ? 'ssh-rsa' : 'ssh-ed25519', public: kp.public.trim(), private: this.secrets.encrypt(kp.private), passphrase: passphrase ? this.secrets.encrypt(passphrase) : undefined, fingerprint: fingerprintOf(kp.public), created: Date.now() };
+    this.keys().push(k);
+    this.store.saveSettings();
+    return { id: k.id, name: k.name, public: k.public, fingerprint: k.fingerprint };
+  }
+  importKey({ name, privateKey, path: file, passphrase = '' }) {
+    const text = privateKey || fs.readFileSync(String(file).replace(/^~(?=$|[\\/])/, os.homedir()), 'utf8');
+    const parsed = sshUtils.parseKey(text, passphrase || undefined);
+    if (parsed instanceof Error) throw new Error(`Not a valid private key: ${parsed.message}`);
+    const key = Array.isArray(parsed) ? parsed[0] : parsed;
+    const pub = `${key.type} ${key.getPublicSSH().toString('base64')} ${name || 'imported'}`;
+    const k = { id: crypto.randomUUID(), name: String(name || path.basename(String(file || 'imported'))), type: key.type, public: pub, private: this.secrets.encrypt(text), passphrase: passphrase ? this.secrets.encrypt(passphrase) : undefined, fingerprint: fingerprintOf(pub), created: Date.now() };
+    this.keys().push(k); this.store.saveSettings();
+    return { id: k.id, name: k.name, public: k.public, fingerprint: k.fingerprint };
+  }
+  deleteKey(id) {
+    if (this.servers().some((s) => s.keyId === id)) throw new Error('This key is used by a server. Switch that server to another login first.');
+    this.store.settings.sshKeys = this.keys().filter((k) => k.id !== id); this.store.saveSettings();
+  }
+  exportKey(id) {
+    const k = this.keys().find((x) => x.id === id);
+    if (!k) throw new Error('Unknown key');
+    const dir = path.join(os.homedir(), '.ssh');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, k.name);
+    if (fs.existsSync(file)) throw new Error(`${file} already exists`);
+    fs.writeFileSync(file, this.secrets.decrypt(k.private), { mode: 0o600 });
+    fs.writeFileSync(`${file}.pub`, k.public + '\n');
+    return file;
+  }
+  // Adds the public key to the server's authorized_keys (over the current login), then optionally switches the server to it.
+  async installKey(serverRef, keyId, { use = true, removePassword = false } = {}) {
+    const s = this.need(serverRef);
+    const k = this.keyList().find((x) => x.id === keyId);
+    if (!k) throw new Error('Unknown key');
+    const e = await this.connect(s);
+    const pub = k.public.trim();
+    let out;
+    if (e.os === 'windows') {
+      out = await this.exec(s.id, `$d=Join-Path $env:USERPROFILE '.ssh'; New-Item -ItemType Directory -Force $d | Out-Null; $f=Join-Path $d 'authorized_keys'; if (-not (Test-Path $f) -or -not (Select-String -LiteralPath $f -SimpleMatch ${psq(pub)} -Quiet)) { Add-Content -LiteralPath $f ${psq(pub)} }; 'installed'`);
+    } else {
+      out = await this.exec(s.id, `mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && (grep -qxF ${shq(pub)} ~/.ssh/authorized_keys || echo ${shq(pub)} >> ~/.ssh/authorized_keys) && echo installed`);
+    }
+    if (!/installed/.test(out)) throw new Error(`Could not install the key: ${out}`);
+    if (use) {
+      if (k.source === 'app') s.keyId = k.id; else { s.keyId = ''; s.keyPath = k.source; }
+      const savedPw = s.password;
+      if (removePassword) delete s.password;
+      this.store.saveSettings();
+      this.disconnect(s.id);
+      try { await this.connect(s); }
+      catch (err) { if (removePassword && savedPw) { s.password = savedPw; this.store.saveSettings(); } s.keyId = ''; this.store.saveSettings(); throw new Error(`Key installed, but logging in with it failed (${err.message}); the server keeps its previous login.`); }
+    }
+    return `Key "${k.name}" installed on ${s.name}${use ? ' and the server now logs in with it' : ''}${removePassword ? ' (saved password removed)' : ''}.`;
+  }
+
   async test(ref) {
     const s = typeof ref === 'object' ? ref : this.need(ref);
     this.disconnect(s.id);
@@ -315,4 +395,8 @@ class Remote {
   }
 }
 
-module.exports = { Remote, shq, psq };
+function fingerprintOf(pub) {
+  try { const k = sshUtils.parseKey(String(pub).trim()); const key = Array.isArray(k) ? k[0] : k; return 'SHA256:' + crypto.createHash('sha256').update(key.getPublicSSH()).digest('base64').replace(/=+$/, ''); } catch { return ''; }
+}
+
+module.exports = { Remote, shq, psq, fingerprintOf };

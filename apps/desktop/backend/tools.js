@@ -378,6 +378,16 @@ function describeCall(name, args) {
     case 'ssh_download': return `Download ${a.server}:${a.remote_path} → ${a.local_path}`;
     case 'ssh_save_server': return `Save server ${a.name || a.host} (${a.username}@${a.host})`;
     case 'ssh_servers': return 'List remote servers';
+    case 'ssh_key': return `SSH key ${a.action}${a.name ? ' ' + a.name : ''}${a.server ? ' on ' + a.server : ''}`;
+    case 'github_account': return 'GitHub account';
+    case 'github_repos': return `GitHub repos${a.owner ? ' of ' + a.owner : ''}${a.filter ? ' "' + a.filter + '"' : ''}`;
+    case 'github_create_repo': return `Create GitHub repo ${a.org ? a.org + '/' : ''}${a.name}${a.private === false ? ' (public)' : ' (private)'}`;
+    case 'github_publish': return `Publish ${a.path} → github.com/${a.repo}${a.force ? ' (FORCE push)' : ''}`;
+    case 'github_clone': return `Clone ${a.repo}`;
+    case 'github_release': return `GitHub release ${a.repo} ${a.tag}${(a.files || []).length ? ' + ' + a.files.length + ' file(s)' : ''}`;
+    case 'github_issues': return `GitHub issues ${a.action} ${a.repo}${a.number ? ' #' + a.number : ''}`;
+    case 'github_pulls': return `GitHub PRs ${a.action} ${a.repo}${a.number ? ' #' + a.number : ''}`;
+    case 'github_api': return `GitHub API ${a.method || 'GET'} ${a.path}`;
     case 'read_document': return `Read document ${a.path}${a.pages ? ' pages ' + a.pages : ''}`;
     case 'view_image': return `Look at ${a.path}`;
     case 'create_pdf': return `Create PDF ${a.output_path}`;

@@ -19,6 +19,8 @@
       <div class="search"><input id="search" placeholder="Search chats…" autocomplete="off"></div>
       <nav class="nav" id="nav">
         <button data-view="projects"><i>▦</i> Projects</button>
+        <button data-view="remote"><i>🌐</i> Remote</button>
+        <button data-view="plugins"><i>🧩</i> Plugins</button>
         <button data-view="memory"><i>◎</i> Memory</button>
         <button data-view="skills"><i>/</i> Skills</button>
         <button data-view="robot"><i>⚙</i> Robot</button>
@@ -80,6 +82,29 @@
         <p class="muted">A project keeps its own instructions and knowledge files. Small projects are read in full; big ones are searched (RAG) so only the relevant passages are used.</p>
         <div class="cards" id="projectList"></div>
         <div class="project-detail" id="projectDetail" hidden></div>
+      </section>
+
+      <!-- REMOTE -->
+      <section class="view page" id="view-remote" hidden>
+        <div class="page-head"><h1>Remote</h1><button class="btn primary" id="btnAddServer">＋ Add server</button></div>
+        <p class="muted">Your VPS and dedicated servers. Credentials and keys are encrypted with your Windows account. Open a terminal here, or switch a chat to a server with <b>🖥 This PC</b> at the top of the chat so the agent works there.</p>
+        <div class="list" id="remoteList"></div>
+        <div class="card term-card" id="termCard" hidden>
+          <div class="row"><b id="termTitle">Terminal</b><span class="grow"></span><button class="btn tiny" id="termCtrlC" title="Send Ctrl+C">Ctrl+C</button><button class="btn tiny" id="termClose">Close</button></div>
+          <pre class="term" id="termOut"></pre>
+          <form class="row" id="termForm"><input id="termIn" placeholder="Type a command and press Enter (sudo passwords, prompts and REPLs work)" autocomplete="off" spellcheck="false"><button class="btn">Send</button></form>
+        </div>
+        <div class="page-head" style="margin-top:22px"><h2>SSH keys</h2>
+          <div class="row"><button class="btn" id="btnImportKey">Import key</button><button class="btn primary" id="btnGenKey">＋ Generate key</button></div></div>
+        <p class="muted small">Keys made here are stored encrypted in the app. Use <b>Install on server</b> to add a key to a server's <code>authorized_keys</code> and switch that server to key login (safer than passwords). Keys from <code>%USERPROFILE%\.ssh</code> are listed too.</p>
+        <div class="list" id="keyList"></div>
+      </section>
+
+      <!-- PLUGINS -->
+      <section class="view page" id="view-plugins" hidden>
+        <div class="page-head"><h1>Plugins</h1></div>
+        <p class="muted">Connect services so the agent can work with them. Everything is stored encrypted on this PC.</p>
+        <div id="pluginsBody"></div>
       </section>
 
       <!-- MEMORY -->

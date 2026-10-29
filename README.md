@@ -21,19 +21,36 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.4.0_(128_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.5.1_(128_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.4.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.4.0) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.5.1) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.4) | [**CarpathronAvatar-1.1.4.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.4.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. The Meta Horizon Store version is in review. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 
-All files of this version: **[Release v1.4.0](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.4.0)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.5.1](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.5.1)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
 
-## What's new in 1.4.0
+## What's new in 1.5.1
+
+- Muse Code sessions now get the app tools (SSH, GitHub, PDF, research, Arduino, robot…) — tested on Windows with Muse Code 1.4.14, also in Full mode.
+- Muse Code can no longer get stuck waiting for a question dialog the app cannot show.
+
+### 1.5.0
+
+- **Remote** page (left menu): all your servers with live status, **terminal** in the app, Test / Disconnect, **Chat here** (new chat working on that server), edit and delete.
+- **SSH keys:** generate ed25519 keys (stored encrypted), import existing keys, copy the public key, export to `.ssh`, and **Install key** on a server — it adds the key to `authorized_keys`, switches the server to key login and can remove the saved password.
+- **Plugins** page with **GitHub**: connect a token (encrypted), then the agent can create repositories, **publish a folder** (commit + push, author = you), clone, make **releases with installer/APK uploads**, and manage issues and pull requests. New skill `/github-publish` (checks for secrets and a `.gitignore` before pushing).
+- **New project** and other dialogs work in the desktop app (they used the browser prompt, which Electron does not support).
+
+### 1.4.1
+
+- **Muse Code commands work on Windows:** Muse Code's app host reported the Windows sandbox as unavailable even after `muse sandbox windows setup`, so every command failed. The app now detects this and runs Muse Code without the sandbox (Settings → Tools & models → *Muse Code Windows sandbox*: Automatic / Always / Off); approvals still apply. *Set up sandbox* now runs the real `muse sandbox windows setup` (the old button failed with "Windows cannot find 'sandbox'").
+- Settings page no longer shows duplicated sections.
+
+### 1.4.0
 
 - **Remote servers over SSH:** save a VPS or dedicated server once (password or key, encrypted with your Windows account; host key checked). Switch any chat to a server with **🖥 This PC → my-vps**: files and commands then run on the server. Tools: `ssh_exec`, interactive `ssh_shell` (sudo prompts, REPLs, `tail -f`), `ssh_upload` / `ssh_download`, background jobs on the server.
 - **Full access mode:** Ask · Auto · **Full** · Plan. Full runs everything without approvals and picks Muse Code's full-access permission profile when it offers one (no sandbox).

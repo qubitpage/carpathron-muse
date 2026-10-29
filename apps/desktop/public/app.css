@@ -315,3 +315,23 @@ body[data-view="chat"] .mobile-menu { display: none !important; }
 .guide-body pre code { background: none; padding: 0; }
 .guide-body a { color: var(--accent); }
 @media (max-width: 860px) { .guide-wrap { grid-template-columns: 1fr; } .guide-toc { position: static; max-height: none; } }
+
+/* tasks + queue above the message box, send-while-working */
+.tasks, .queue { max-width: 820px; margin: 0 auto 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 6px 10px; font-size: 13px; }
+.tasks-head { all: unset; cursor: pointer; display: flex; align-items: center; gap: 6px; width: 100%; }
+.tasks-head .bar { flex: 1; height: 4px; background: var(--panel-2); border-radius: 4px; overflow: hidden; margin: 0 8px; }
+.tasks-head .bar i { display: block; height: 100%; background: var(--accent-2); }
+.tasks ol { list-style: none; margin: 6px 0 2px; padding: 0; max-height: 180px; overflow: auto; }
+.tasks li { display: flex; gap: 8px; padding: 2px 0; }
+.tasks li .ic { width: 16px; text-align: center; flex: none; }
+.tasks li.t-done { color: var(--muted); text-decoration: line-through; }
+.tasks li.t-in_progress { color: var(--accent); font-weight: 600; }
+.tasks li.t-blocked { color: var(--danger); }
+.tasks li small { color: var(--muted); text-decoration: none; }
+.queue .qitem { display: flex; gap: 6px; align-items: center; padding: 4px 0; border-top: 1px solid var(--line); }
+.queue .qtext { flex: 1; white-space: pre-wrap; overflow: hidden; max-height: 3.2em; }
+.when { flex: none; height: 36px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--text); cursor: pointer; font-size: 12.5px; }
+.when.queue { border-color: var(--warn); }
+.msg.user.steered { border: 1px dashed var(--accent); }
+.msg.assistant.draft, .msg.assistant.interim { opacity: .6; }
+.draft-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }

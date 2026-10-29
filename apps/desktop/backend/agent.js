@@ -8,6 +8,8 @@ const { ApiEngine, compactHistory } = require('./engines/api');
 const { MuseEngine, subjectSummary } = require('./engines/muse');
 const { XTOOLS, execX } = require('./xtools');
 const { GH_TOOLS, execGitHub } = require('./github');
+const { COMPUTER_TOOLS, COMPUTER_NAMES, execComputer, hideBanner } = require('./computer');
+const { DEV_TOOLS, DEV_NAMES, execDev } = require('./devtools');
 const GHNAMES = new Set(GH_TOOLS.map((t) => t.name));
 const models = require('./models');
 const XNAMES = new Set(XTOOLS.map((t) => t.name));
@@ -53,9 +55,13 @@ function systemPrompt(settings, conv, ctx = {}) {
     'Work step by step: inspect before you change things, prefer small precise edits (edit_file) over rewriting whole files, and verify your work (run it, read it back).',
     'Tool calls may need the user\'s approval; if one is denied, do not retry the same action — adapt or ask.',
     'Capabilities: full shell access (run_command, background jobs with job_start), remote servers over SSH (ssh_servers, ssh_exec, interactive ssh_shell, ssh_upload/ssh_download), documents (read_document for PDF/Word/Excel/PowerPoint, create_pdf with designed HTML+CSS, view_image), web (web_search, web_fetch, deep_research for cited reports), design (build HTML/CSS sites and PDFs, then check them visually with screenshot_page at desktop 1366 px and phone 390 px and fix what looks wrong; generate_image for illustrations/logos), firmware (arduino_setup, arduino_boards, arduino_compile, arduino_upload, serial_monitor, arduino_cli, open_arduino_ide — ESP32 FQBN esp32:esp32:esp32, ESP32-CAM esp32:esp32:esp32cam), vision (segment_image with SAM 3.1), speech (transcribe_audio). For multi-step engineering work: plan, do it step by step, build/run/test after each change, read errors and fix them until it works.',
+    'Hardware beyond Arduino: dev_environment (what is installed and connected: IDEs, SDKs, NVIDIA GPU/CUDA, boards on USB and on the network), dev_install, open_ide (Arduino, VS Code, Thonny, Raspberry Pi Imager, Nsight, SDK Manager), micropython (Pico/ESP32 MicroPython over USB with mpremote), pico_flash (.uf2 to a Pico in BOOTSEL), sd_card_image (Raspberry Pi SD cards — erases the drive, confirm first). Raspberry Pi and Jetson boards are worked on over SSH like servers. Security: security_check for servers and websites. Other models: ask_model gets a second opinion from another Muse model (e.g. muse-wonder-1.0 for hard reasoning or reviews).',
+    'Computer use: computer_view (screenshot / list_windows) and computer_act (click, type, key, scroll, drag, focus_window, open_app) control this Windows PC like a person — use them for desktop apps without an API (IDEs, installers, settings dialogs) and to test the apps you build; browser_view / browser_act drive the visible Muse Browser (open, elements, click by index, type, key, text) for websites and web apps. Always take a screenshot first, act, then check the new screenshot. Prefer direct tools (files, commands, APIs) when they can do the job — they are faster and more exact. Never type passwords, card or bank details, never solve CAPTCHAs, and ask before sending, deleting, buying or confirming anything irreversible.',
     'GitHub (when connected in Plugins): github_account, github_repos, github_create_repo, github_publish (commit + push a folder, creates the repo), github_clone, github_release (create a release and upload installers/APKs), github_issues, github_pulls, github_api. Never force-push unless the user asks.',
     'You can drive the Baby Carpathron robot car with robot_drive / robot_stop. Its camera is fixed to the car like a robot head: to look left/right/behind use robot_look (the car turns its body, photographs, turns back); robot_turn turns by degrees; robot_scan_room makes a room map. Voice notes from WhatsApp arrive as transcribed text.',
     'Answer in the user\'s language. Use Markdown. Be concise when reporting.',
+    '## Honesty (no hallucinations)\n- Never invent facts, file contents, command output, prices, versions, URLs, API behaviour or test results. If you did not see it in a tool result or the conversation, you do not know it: check with a tool (read_file, run_command, web_search, web_fetch) or say plainly that you are not sure.\n- Do not claim something works, was created, deployed or fixed unless a tool result in this conversation proves it. Say what you verified and what you assume.\n- For current facts (prices, versions, news, people, rules) search the web and cite the sources. If sources disagree, say so.\n- If a request is ambiguous or impossible, say so instead of guessing.',
+    '## How to work\n- For any job with more than one step keep the task list up to date with task_update (pass the full list each time: pending / in_progress / done / blocked). Mark a task done only after checking it.\n- New messages can arrive while you work. Unless a message explicitly says to stop or cancel, keep every earlier task, add the new request to the task list and finish ALL tasks before your final answer.\n- Test before delivery: build it, run the tests, start the app and check it (screenshot_page, browser, computer); fix what fails and test again. Never hand over untested work as done.\n- If you get stuck (the same error twice), do not repeat the same call: read the error carefully, check logs and docs, web_search the exact error message, try another approach or tool. Mark a task blocked only when you truly need the user, and say exactly what is needed.\n- Work clean and professionally: keep files in the project folder in a sensible structure, put temporary files in the scratch folder and delete them when done, remove debug leftovers, never hard-code secrets (use .env + .gitignore), and leave servers tidy (no stray files in web roots).\n- Security: after setting up or changing anything reachable from the internet (servers, websites, APIs, domains) run security_check on it and fix what it reports.',
   ];
   if (!sub) {
     lines.push('For big jobs that split into independent parts you may use the delegate tool to run sub-agents in parallel.');
@@ -74,6 +80,8 @@ function systemPrompt(settings, conv, ctx = {}) {
   }
   if (ctx.related) lines.push('', '## Possibly related earlier conversations (from chat history)', ctx.related);
   if (skills.length && !sub) lines.push('', '## Skills the user can call with /name', skills.map((k) => `- /${k.name}: ${k.description}`).join('\n'));
+  if (ctx.scratch && !sub) lines.push('', `Scratch folder for temporary files (deleted with this chat): ${ctx.scratch}`);
+  if (ctx.tasks && ctx.tasks.length && !sub) lines.push('', '## Your task list (keep it current with task_update)', ctx.tasks.map((t, i) => `${i + 1}. [${t.status}] ${t.title}${t.note ? ` — ${t.note}` : ''}`).join('\n'));
   if (ctx.tree) lines.push('', '## Attached folder contents (names only)', ctx.tree);
   return lines.join('\n');
 }
@@ -84,6 +92,16 @@ const KNOWLEDGE_TOOLS = [
   { name: 'memory_forget', risk: 'read', description: 'Delete a memory by id (from memory_search) when the user asks to forget it or it is wrong.', parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
   { name: 'search_chats', risk: 'read', description: 'Search the user\'s earlier conversations (chat history) for details, decisions, code or facts discussed before.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
 ];
+const TASK_TOOL = { name: 'task_update', risk: 'read', description: 'Set the task list shown to the user for this chat. Pass the FULL list every time (it replaces the old one). Use it for every multi-step job: add tasks (also for new requests that arrive while you work), mark one in_progress while you do it, done only after checking it, blocked with a note when you need the user.', parameters: { type: 'object', properties: { tasks: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, status: { type: 'string', enum: ['pending', 'in_progress', 'done', 'blocked'] }, note: { type: 'string', description: 'short: result, or what is needed when blocked' } }, required: ['title', 'status'] } } }, required: ['tasks'] } };
+const STEER_NOTE = '[New message from the user while you were working. Unless it explicitly says to stop or cancel, keep all your current tasks, add this request to the task list (task_update) and make sure everything is finished before your final answer.]\n';
+const MUSE_RULES = [
+  '- Never invent facts, file contents, command output or test results; check with tools or say you are not sure. Do not claim something works unless a tool result proves it.',
+  '- Keep the task list current with the app tool task_update (mcp__carpathron__task_update): full list each time, statuses pending / in_progress / done / blocked.',
+  '- Messages that arrive while you work add to the task list unless they say stop. Finish all tasks before the final answer.',
+  '- Test before delivery (build, run, check visually with screenshot_page / browser / computer). When stuck, change approach, search the exact error, do not repeat failing calls.',
+  '- Work clean: tidy project structure, temporary files removed, no secrets in code. Run security_check after changing anything public.',
+].join('\n');
+const openTasks = (conv) => (conv.tasks || []).filter((t) => t.status === 'pending' || t.status === 'in_progress');
 const KNOWLEDGE_SEARCH = { name: 'knowledge_search', risk: 'read', description: 'Search this project\'s uploaded knowledge files (RAG) and return the most relevant passages with file names.', parameters: { type: 'object', properties: { query: { type: 'string' }, max_results: { type: 'integer' } }, required: ['query'] } };
 
 class Agent {
@@ -147,6 +165,8 @@ class Agent {
     if (rs) ctx.remote = { name: rs.name, host: rs.host, username: rs.username, os: rs.os, path: conv.remote.path || rs.defaultPath || '~' };
     else ctx.tree = folderTree(conv.workspace);
     ctx.modelCaps = models.capsFor(conv.model || this.settings().model).caps;
+    ctx.tasks = conv.tasks || [];
+    if (!sub && this.dataDir && conv.id) ctx.scratch = path.join(this.dataDir, 'scratch', conv.id);
     return ctx;
   }
 
@@ -175,6 +195,16 @@ class Agent {
       case 'search_chats': {
         const r = this.searchChats(String(args.query || ''), conv.id);
         return r.length ? r.map((h) => `### "${h.conv}" (${h.date})\n${clip(h.text, 1500)}`).join('\n\n') : 'Nothing found in earlier chats.';
+      }
+      case 'task_update': {
+        const list = (Array.isArray(args.tasks) ? args.tasks : []).slice(0, 40).map((t) => ({
+          title: String(t.title || '').slice(0, 200), status: ['pending', 'in_progress', 'done', 'blocked'].includes(t.status) ? t.status : 'pending', note: t.note ? String(t.note).slice(0, 300) : '',
+        })).filter((t) => t.title);
+        conv.tasks = list;
+        this.emit('tasks:update', { convId: conv.id, tasks: list });
+        if (this.store.index[conv.id]) this.store.touch(conv);
+        const c = (st) => list.filter((t) => t.status === st).length;
+        return `Task list saved: ${c('done')} done, ${c('in_progress')} in progress, ${c('pending')} pending, ${c('blocked')} blocked.`;
       }
       case 'knowledge_search': {
         if (!conv.projectId) return 'This chat is not in a project.';
@@ -273,13 +303,15 @@ class Agent {
 
   // ---------------------------------------------------------------- approvals
   // Returns { approved: boolean, choiceId?, note? }
-  requestApproval(conv, { summary, detail, risk, choices, tool }) {
+  requestApproval(conv, { summary, detail, risk, choices, tool, always = false }) {
     const s = this.settings();
     const mode = conv.mode || s.mode;
     if (risk === 'read') return Promise.resolve({ approved: true, auto: true });
     if (mode === 'plan') return Promise.resolve({ approved: false, note: 'Plan mode is read-only.' });
-    if (mode === 'auto' || mode === 'full') return Promise.resolve({ approved: true, auto: true });
-    if (tool && conv.allowed && conv.allowed.includes(tool)) return Promise.resolve({ approved: true, auto: true });
+    // "always": actions that destroy data (erasing a drive) are confirmed by the user in every mode
+    if (!always && (mode === 'auto' || mode === 'full')) return Promise.resolve({ approved: true, auto: true });
+    if (!always && tool && conv.allowed && conv.allowed.includes(tool)) return Promise.resolve({ approved: true, auto: true });
+    if (always && !choices) choices = [{ id: 'allow', label: 'Yes, do it', approve: true }, { id: 'deny', label: 'No', approve: false }];
     const id = uid();
     const msg = this.addMsg(conv, {
       role: 'approval', approvalId: id, summary, detail: clip(detail || '', 4000), risk, tool,
@@ -319,12 +351,89 @@ class Agent {
   }
 
   // ---------------------------------------------------------------- turns
-  async send(convId, text, { from = 'app', attachments = [] } = {}) {
+  // Builds what the model sees for a user message with attachments.
+  modelInput(text, attachments = []) {
+    const exp = this.expandSkill(text);
+    let modelText = exp.text;
+    const imageAtt = attachments.filter((a) => a.path && /^image\//.test(a.mime || ''));
+    for (const a of attachments.slice(0, 10)) {
+      if (imageAtt.includes(a)) { modelText += `\n\n[attached image "${a.name}", saved at ${a.path}]`; continue; }
+      if (a.path && /^(audio|video)\//.test(a.mime || '')) { modelText += `\n\n[attached ${a.mime.split('/')[0]} "${a.name}", saved at ${a.path}]`; continue; }
+      modelText += `\n\n<attached_file name="${String(a.name).replace(/"/g, '')}"${a.path ? ` saved_at="${a.path}"` : ''}>\n${clip(a.text || '', 60000)}\n</attached_file>`;
+    }
+    return { modelText, imageAtt, skill: exp.skill };
+  }
+
+  publicQueue(conv) { return (conv.queue || []).map((q) => ({ id: q.id, text: q.text, from: q.from, at: q.at, files: (q.attachments || []).map((a) => a.name) })); }
+
+  // A message sent while the chat is working: "now" joins the current work, "queue" runs after it.
+  enqueue(conv, text, attachments = [], from = 'app') {
+    conv.queue = conv.queue || [];
+    const q = { id: uid(), text, attachments, from, at: Date.now() };
+    conv.queue.push(q);
+    this.store.touch(conv);
+    this.emit('queue:update', { convId: conv.id, queue: this.publicQueue(conv) });
+    return q;
+  }
+  removeQueued(conv, id) {
+    const i = (conv.queue || []).findIndex((q) => q.id === id);
+    if (i < 0) return null;
+    const [q] = conv.queue.splice(i, 1);
+    this.store.touch(conv);
+    this.emit('queue:update', { convId: conv.id, queue: this.publicQueue(conv) });
+    return q;
+  }
+  async steer(conv, text, attachments = [], from = 'app') {
+    const rt = this.runtime.get(conv.id);
+    const { modelText, imageAtt } = this.modelInput(text, attachments);
+    this.addMsg(conv, { role: 'user', text, from, steered: true, attachments: attachments.map((a) => ({ name: a.name, chars: (a.text || '').length })) });
+    if (conv.engineUsed === 'muse' && rt && rt.museSession) {
+      try {
+        await rt.museSession.sendUserTurn({ input: [{ type: 'text', text: STEER_NOTE + modelText }], displayText: text, ifBusy: 'steer' });
+        this.status(conv, 'Added your message to the current work…');
+        return 'Added to the current work.';
+      } catch (e) {
+        this.log(`Muse steer failed, queued instead: ${e.message}`);
+        this.enqueue(conv, text, attachments, from);
+        return 'Queued: it runs when the current work finishes.';
+      }
+    }
+    if (!rt) { this.enqueue(conv, text, attachments, from); return 'Queued.'; }
+    (rt.inbox = rt.inbox || []).push({ text: STEER_NOTE + modelText, images: imageAtt });
+    this.status(conv, 'Got your new message — it joins the current work at the next step…');
+    return 'Added to the current work.';
+  }
+  // Moves messages that arrived during the turn into the model's history. True if there were any.
+  drainInbox(conv, llm, rt) {
+    if (!rt.inbox || !rt.inbox.length) return false;
+    const model = conv.model || this.settings().model;
+    for (const m of rt.inbox.splice(0)) {
+      if (m.images && m.images.length && (models.has(model, 'vision') || !models.KNOWN[model])) {
+        const parts = [{ type: 'text', text: m.text }];
+        for (const im of m.images.slice(0, 6)) { try { parts.push({ type: 'image_url', image_url: { url: models.dataUrl(fs.readFileSync(im.path), im.mime) } }); } catch {} }
+        llm.push({ role: 'user', content: parts, _image: true });
+      } else llm.push({ role: 'user', content: m.text });
+    }
+    return true;
+  }
+  async runNextQueued(convId) {
+    const conv = this.store.get(convId);
+    if (!conv || this.isRunning(convId) || !(conv.queue || []).length) return;
+    const q = conv.queue.shift();
+    this.store.touch(conv);
+    this.emit('queue:update', { convId, queue: this.publicQueue(conv) });
+    try { await this.send(convId, q.text, { from: q.from || 'app', attachments: q.attachments || [] }); } catch (e) { this.log(`queued message failed: ${e.message}`); }
+  }
+
+  async send(convId, text, { from = 'app', attachments = [], when = 'now' } = {}) {
     const conv = this.store.get(convId);
     if (!conv) throw new Error('Conversation not found');
-    if (this.isRunning(convId)) throw new Error('Still working on the previous message. Wait, or press Stop.');
     text = String(text || '').trim();
     if (!text) throw new Error('Empty message');
+    if (this.isRunning(convId)) {
+      if (when === 'queue') { this.enqueue(conv, text, attachments, from); return 'Queued: it runs when the current work finishes.'; }
+      return this.steer(conv, text, attachments, from);
+    }
     if (conv.messages.filter((m) => m.role === 'user').length === 0 && (!conv.title || conv.title === 'New chat')) {
       conv.title = text.replace(/\s+/g, ' ').slice(0, 60);
       this.emit('conv:update', { id: conv.id, title: conv.title, updatedAt: Date.now() });
@@ -338,16 +447,9 @@ class Agent {
       this.emit('conv:update', { id: conv.id, title: conv.title, updatedAt: conv.updatedAt });
       return `Saved to memory: ${mem.text}`;
     }
-    const exp = this.expandSkill(text);
-    let modelText = exp.text;
-    if (exp.skill) this.addMsg(conv, { role: 'info', text: `Using skill /${exp.skill}` });
-    const imageAtt = attachments.filter((a) => a.path && /^image\//.test(a.mime || ''));
-    for (const a of attachments.slice(0, 10)) {
-      if (imageAtt.includes(a)) { modelText += `\n\n[attached image "${a.name}", saved at ${a.path}]`; continue; }
-      if (a.path && /^(audio|video)\//.test(a.mime || '')) { modelText += `\n\n[attached ${a.mime.split('/')[0]} "${a.name}", saved at ${a.path}]`; continue; }
-      modelText += `\n\n<attached_file name="${String(a.name).replace(/"/g, '')}"${a.path ? ` saved_at="${a.path}"` : ''}>\n${clip(a.text || '', 60000)}\n</attached_file>`;
-    }
-    const rt = { running: true, abort: new AbortController(), toolCalls: 0, finished: false };
+    const { modelText, imageAtt, skill } = this.modelInput(text, attachments);
+    if (skill) this.addMsg(conv, { role: 'info', text: `Using skill /${skill}` });
+    const rt = { running: true, abort: new AbortController(), toolCalls: 0, finished: false, inbox: [] };
     this.runtime.set(convId, rt);
     conv.lastQuery = text;
     conv.turnImages = [];
@@ -359,7 +461,17 @@ class Agent {
     try {
       this.store.pinned.add(convId);
       const kind = models.capsFor(conv.model || this.settings().model).kind;
-      if (engine === 'muse') await this.runMuse(conv, modelText, rt, text);
+      if (engine === 'muse') {
+        await this.runMuse(conv, modelText, rt, text);
+        // Muse Code: keep going while tasks it listed are unfinished (it reports them with task_update)
+        for (let k = 0; k < 4 && !rt.abort.signal.aborted && openTasks(conv).length && this.settings().finishAllTasks !== false; k++) {
+          const before = JSON.stringify(conv.tasks);
+          const open = openTasks(conv);
+          this.addMsg(conv, { role: 'info', text: `↻ ${open.length} task(s) not finished yet — continuing.` });
+          await this.runMuse(conv, `[Automatic check] These tasks are not marked done yet:\n${open.map((t) => `- ${t.title}`).join('\n')}\nContinue working on them now. When a task is really finished and checked, mark it done with task_update; if it is truly blocked, mark it blocked with what you need.`, rt, '↻ Continue unfinished tasks');
+          if (JSON.stringify(conv.tasks) === before) break; // no progress: stop and report
+        }
+      }
       else if (kind !== 'chat') await this.runMedia(conv, text, attachments, rt, kind);
       else {
         const reply = await this.runApi(conv, modelText, rt, imageAtt);
@@ -394,11 +506,17 @@ class Agent {
       // keep saved history small: photos stay on disk, not inside the chat history
       for (const m of conv.llm || []) if (m._image) { m.content = '[photo shown to the model earlier]'; delete m._image; }
       this.cancelApprovals(convId);
+      try { hideBanner(); } catch {}
       if (this.runtime.get(convId) === rt) this.runtime.delete(convId);
       this.store.touch(conv);
       this.emit('turn:status', { convId, text: '', ts: Date.now() });
       this.emit('turn:state', { convId, running: false, ms: Date.now() - startedAt });
       this.emit('conv:update', { id: conv.id, title: conv.title, updatedAt: conv.updatedAt });
+      // messages that arrived too late for this turn, then the queue: they run next (not after Stop)
+      if (!rt.abort.signal.aborted) {
+        for (const m of (rt.inbox || []).splice(0)) this.enqueue(conv, m.text.replace(STEER_NOTE, ''), [], 'app');
+        if ((conv.queue || []).length) setTimeout(() => this.runNextQueued(convId), 400);
+      }
     }
   }
 
@@ -426,7 +544,8 @@ class Agent {
 
   // ---------------------------------------------------------------- API-key engine
   toolSpecs(conv, { sub = false } = {}) {
-    const specs = [...BUILTIN, ...XTOOLS, ...GH_TOOLS, ...KNOWLEDGE_TOOLS, ...this.mcp.toolSpecs()];
+    const specs = [...BUILTIN, ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...KNOWLEDGE_TOOLS, ...this.mcp.toolSpecs()];
+    if (!sub) specs.push(TASK_TOOL);
     if (conv.projectId) specs.push(KNOWLEDGE_SEARCH);
     if (!sub) specs.push(DELEGATE);
     return specs;
@@ -447,13 +566,27 @@ class Agent {
   async agentLoop(conv, llm, rt, { sub, label }) {
     const s = this.settings();
     const model = conv.model || s.model;
-    const maxSteps = Math.max(1, Math.min(500, Number(s.maxSteps) || 100));
+    const baseSteps = Math.max(1, Math.min(500, Number(s.maxSteps) || 100));
+    let maxSteps = baseSteps;
+    // Auto / Full: the step limit is only a checkpoint — keep going until the job is done
+    // (stops only when a whole checkpoint made no progress, or at the hard safety limit).
+    const hardLimit = Math.max(baseSteps, Math.min(5000, Number(s.maxTotalSteps) || 1000));
     const specs = this.toolSpecs(conv, { sub });
     const ctx = this.promptContext(conv, { sub });
     const byName = new Map(specs.map((t) => [t.name, t]));
     let finalText = '';
-    for (let step = 0; step < maxSteps; step++) {
+    const mode = conv.mode || s.mode;
+    let okAtCheckpoint = rt.okCalls || 0;
+    for (let step = 0; ; step++) {
+      if (step >= maxSteps) {
+        const keepGoing = (mode === 'auto' || mode === 'full') && s.finishAllTasks !== false && maxSteps < hardLimit && (rt.okCalls || 0) > okAtCheckpoint;
+        if (!keepGoing) break;
+        okAtCheckpoint = rt.okCalls || 0;
+        maxSteps = Math.min(hardLimit, maxSteps + baseSteps);
+        if (!sub) this.addMsg(conv, { role: 'info', text: `↻ ${step} steps done — still working (${mode === 'full' ? 'Full' : 'Auto'} mode keeps going until the job is finished).` });
+      }
       if (rt.abort.signal.aborted) return finalText;
+      if (!sub) this.drainInbox(conv, llm, rt);
       compactHistory(llm);
       const prefix = sub ? `[${label}] ` : '';
       let textMsg = null, thinkMsg = null;
@@ -493,6 +626,32 @@ class Agent {
       llm.push(assistant);
       if (res.content) finalText = res.content;
       if (!res.toolCalls.length) {
+        if (!sub) {
+          // 1) a message arrived while it was answering: continue with it
+          if (this.drainInbox(conv, llm, rt)) continue;
+          // 2) unfinished tasks: keep working (stops when there is no progress)
+          const open = openTasks(conv);
+          if (open.length && s.finishAllTasks !== false && mode !== 'plan') {
+            const sig = JSON.stringify(conv.tasks);
+            rt.noProgress = sig === rt.lastTaskSig ? (rt.noProgress || 0) + 1 : 0;
+            rt.lastTaskSig = sig;
+            if (rt.noProgress < 2 && (rt.autoContinue = (rt.autoContinue || 0) + 1) <= 8) {
+              if (textMsg) this.patchMsg(conv, textMsg, { interim: true });
+              this.addMsg(conv, { role: 'info', text: `↻ ${open.length} task(s) not finished yet — continuing.` });
+              llm.push({ role: 'user', content: `[Automatic check] These tasks are not marked done:\n${open.map((t) => `- [${t.status}] ${t.title}`).join('\n')}\nContinue working on them now. If one is actually finished, check it and mark it done with task_update. If one is truly blocked, mark it blocked with a note saying exactly what you need from the user.` });
+              continue;
+            }
+          }
+          // 3) self-check before delivering work that changed something
+          if (rt.changedSomething && !rt.verified && s.verifyBeforeFinish !== false && mode !== 'plan') {
+            rt.verified = true;
+            if (textMsg) this.patchMsg(conv, textMsg, { draft: true });
+            this.addMsg(conv, { role: 'info', text: '🔎 Checking the work before finishing…' });
+            this.status(conv, 'Checking the work…');
+            llm.push({ role: 'user', content: '[Automatic self-check before you finish] Go through your answer above claim by claim (files created or changed, commands that worked, tests that passed, things deployed, facts and numbers). Every claim must be backed by a tool result from this conversation. If something is not proven yet, check it now with tools (run the tests, open/screenshot the page, read the file, query the server). If you cannot check it, say so. Remove anything you invented. Then give the final answer — short, saying what was verified and anything still open.' });
+            continue;
+          }
+        }
         if (!res.content && !sub) this.addMsg(conv, { role: 'error', text: `The model (${model}) returned an empty answer. Try again, or pick another model at the top.` });
         return finalText;
       }
@@ -509,7 +668,9 @@ class Agent {
       }
       rt.newImages = [];
     }
-    const msg = `Reached the step limit (${maxSteps}). Say "continue" to keep going.`;
+    const msg = (mode === 'auto' || mode === 'full')
+      ? (maxSteps >= hardLimit ? `Stopped at the safety limit of ${hardLimit} steps. Say "continue" to keep going.` : `Stopped after ${maxSteps} steps because the last ${baseSteps} steps made no progress (only errors). Check the last error above, then say "continue".`)
+      : `Reached the step limit (${maxSteps}) — Ask and Plan modes pause here. Say "continue" to keep going, or use Auto / Full to let it run until the job is done.`;
     if (!sub) this.addMsg(conv, { role: 'info', text: msg });
     return finalText || msg;
   }
@@ -531,6 +692,7 @@ class Agent {
       summary: prefix + describeCall(call.name, args),
       detail: call.name === 'write_file' ? String(args.content || '') : call.name === 'edit_file' ? `- ${args.old_string}\n+ ${args.new_string}` : JSON.stringify(args, null, 2),
       risk: spec.risk, tool: call.name,
+      always: call.name === 'sd_card_image' && args.action === 'write',
     });
     if (rt.abort.signal.aborted) { this.patchMsg(conv, card, { status: 'denied', output: 'Stopped' }); return 'Stopped by user.'; }
     if (!decision.approved) {
@@ -554,6 +716,8 @@ class Agent {
         if (spec._mcp) return this.mcp.call(spec._mcp.server, spec._mcp.tool, args);
         const ctx = this.toolCtx(conv, rt, { onPhoto, status: (t) => { if (!sub) this.status(conv, t); } });
         if (XNAMES.has(call.name)) return execX(call.name, args, ctx);
+        if (COMPUTER_NAMES.has(call.name)) return execComputer(call.name, args, ctx);
+        if (DEV_NAMES.has(call.name)) return execDev(call.name, args, ctx);
         if (GHNAMES.has(call.name)) return execGitHub(call.name, args, ctx);
         return execBuiltin(call.name, args, ctx);
       })();
@@ -566,13 +730,32 @@ class Agent {
       if (out === '__stopped__') { work.catch(() => {}); this.patchMsg(conv, card, { status: 'denied', output: 'Stopped by user' }); return 'Stopped by user.'; }
       out = clip(out);
       this.patchMsg(conv, card, { status: 'done', output: out });
-      return out;
+      if (spec.risk !== 'read') rt.changedSomething = true;
+      const failed = /^Error\b|\bexit code:? ?[1-9]\d*\b|\[exit (code )?[1-9]\d*\]/i.test(out.slice(0, 400)) || /\[exit code [1-9]\d*\]\s*$/.test(out);
+      if (!failed) rt.okCalls = (rt.okCalls || 0) + 1;
+      return this.stuckNote(rt, call.name, args, failed, out);
     } catch (e) {
       const err = `Error: ${e.message || e}`;
       this.patchMsg(conv, card, { status: 'error', output: err });
-      return err;
+      return this.stuckNote(rt, call.name, args, true, err);
     }
   }
+
+  // Notices when the agent keeps failing the same way and tells it to change approach.
+  stuckNote(rt, name, args, failed, out) {
+    if (!failed) { rt.errStreak = 0; return out; }
+    rt.errStreak = (rt.errStreak || 0) + 1;
+    const key = name + ':' + crypto.createHash('sha1').update(JSON.stringify(args || {})).digest('hex').slice(0, 12);
+    rt.errKeys = rt.errKeys || {};
+    const same = rt.errKeys[key] = (rt.errKeys[key] || 0) + 1;
+    if (same >= 2 || rt.errStreak >= 3) {
+      return `${out}\n\n[Muse Carpathron: this has failed ${same >= 2 ? `${same} times with the same call` : `${rt.errStreak} times in a row`}. Do not repeat the same call. Read the error closely, check logs, config and docs, web_search the exact error message, then try a different approach or tool. If it is truly blocked, mark the task blocked with what you need from the user.]`;
+    }
+    return out;
+  }
+
+  // Last screenshot geometry per chat (computer use maps the model's picture coordinates to the screen).
+  screenState(convId) { this.screens = this.screens || new Map(); if (!this.screens.has(convId)) this.screens.set(convId, {}); return this.screens.get(convId); }
 
   // Everything a tool may need: where to work (this PC or a remote server), engines, devices.
   toolCtx(conv, rt, extra = {}) {
@@ -582,6 +765,7 @@ class Agent {
       workspace: conv.workspace, robot: this.robot, camera: this.camera, mapper: this.mapper, signal: rt.abort.signal,
       remote: this.remote, remoteServer: rs ? rs.id : null, remotePath: rs ? (conv.remote.path || rs.defaultPath || '') : null,
       media: this.media, api: this.api, jobs: this.jobs, settings: s, dataDir: this.dataDir, model: conv.model || s.model, github: this.github,
+      computerState: this.screenState(conv.id), requestStop: () => this.stop(conv.id),
       ...extra,
     };
   }
@@ -633,7 +817,7 @@ class Agent {
     };
   }
   bridgeTools() {
-    return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...GH_TOOLS, ...KNOWLEDGE_TOOLS]
+    return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...KNOWLEDGE_TOOLS, TASK_TOOL]
       .map(({ name, description, parameters }) => ({ name, description, parameters }));
   }
   async bridgeCall(convId, name, args) {
@@ -651,7 +835,7 @@ class Agent {
       let output = k;
       if (output === null) {
         const ctx = this.toolCtx(conv, rt, { onPhoto, status: (t) => this.status(conv, t) });
-        output = XNAMES.has(name) ? await execX(name, args, ctx) : GHNAMES.has(name) ? await execGitHub(name, args, ctx) : await execBuiltin(name, args, ctx);
+        output = XNAMES.has(name) ? await execX(name, args, ctx) : GHNAMES.has(name) ? await execGitHub(name, args, ctx) : COMPUTER_NAMES.has(name) ? await execComputer(name, args, ctx) : DEV_NAMES.has(name) ? await execDev(name, args, ctx) : await execBuiltin(name, args, ctx);
       }
       return { output: clip(output), images: images.slice(-3) };
     } catch (e) { return { output: `Error: ${e.message || e}`, isError: true, images }; }
@@ -690,6 +874,8 @@ class Agent {
     const past = this.searchChats(query, conv.id, 2).filter((h) => h.score > 3);
     if (past.length) parts.push(`<related earlier chats>\n${past.map((h) => `"${h.conv}" (${h.date}):\n${clip(h.text, 900)}`).join('\n---\n')}\n</related earlier chats>`);
     if (this.settings().systemPrompt && firstTurn) parts.push(`<user instructions>\n${this.settings().systemPrompt}\n</user instructions>`);
+    if (firstTurn) parts.push(`<working rules from Muse Carpathron>\n${MUSE_RULES}\n</working rules>`);
+    if ((conv.tasks || []).length) parts.push(`<task list>\n${conv.tasks.map((t, i) => `${i + 1}. [${t.status}] ${t.title}${t.note ? ` — ${t.note}` : ''}`).join('\n')}\n</task list>`);
     return parts.length ? `${parts.join('\n\n')}\n\n(Context above comes from the Muse Carpathron app. Use it if relevant.)\n\n` : '';
   }
 
@@ -721,6 +907,7 @@ class Agent {
     const opened = await Promise.race([sessionP, abortWait(0)]);
     if (opened && opened.kind === 'aborted') { sessionP.catch(() => {}); return; }
     const session = opened;
+    rt.museSession = session;
     this.store.touch(conv);
     if (conv._museMode !== mode) { conv._museMode = mode; await this.muse.setMode(session.sessionId, mode); }
 

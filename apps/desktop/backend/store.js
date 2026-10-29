@@ -14,7 +14,10 @@ const DEFAULT_SETTINGS = {
   museModel: '',
   mode: 'ask', // ask | auto | full | plan
   workspace: '',
-  maxSteps: 100,
+  maxSteps: 100, // Ask / Plan: pause after this many steps; Auto / Full: checkpoint, keeps going
+  maxTotalSteps: 1000, // Auto / Full safety limit for one message
+  finishAllTasks: true, // keep working while the task list has unfinished tasks
+  verifyBeforeFinish: true, // one self-check pass before delivering work that changed something
   effort: '', // reasoning effort for Muse Spark / Wonder: '', minimal, low, medium, high, xhigh, max
   servers: [], // SSH servers (passwords/keys encrypted, see secrets.js)
   museBridge: true, // give Muse Code sessions the app's tools through the MCP bridge

@@ -76,6 +76,8 @@
       case 'msg:patch': if (S.conv && d.convId === S.conv.id) { const m = S.conv.messages.find((x) => x.id === d.id); if (m) { Object.assign(m, d.patch); updateMsg(m); } } break;
       case 'msg:delta': if (S.conv && d.convId === S.conv.id) { const m = S.conv.messages.find((x) => x.id === d.id); if (m) { m[d.field] = (m[d.field] || '') + d.delta; updateMsg(m, true); } } break;
       case 'turn:status': if (S.conv && d.convId === S.conv.id) setStatus(d.text); break;
+      case 'tasks:update': if (S.conv && d.convId === S.conv.id) { S.conv.tasks = d.tasks; renderTasks(); } break;
+      case 'queue:update': if (S.conv && d.convId === S.conv.id) { S.conv.queue = d.queue; renderQueue(); } break;
       case 'turn:state':
         if (d.running) S.running.add(d.convId); else S.running.delete(d.convId);
         if (S.conv && d.convId === S.conv.id) setRunning(d.running);
@@ -295,6 +297,7 @@
 
   function renderConv() {
     renderHead();
+    delete $('#tasks').dataset.open; renderTasks(); renderQueue();
     const box = $('#messages');
     box.innerHTML = '';
     const inner = h('div', { class: 'msgs-inner', id: 'msgsInner' });
@@ -477,13 +480,15 @@
     let el;
     switch (m.role) {
       case 'user':
-        el = h('div', { class: 'msg user' },
+        el = h('div', { class: 'msg user' + (m.steered ? ' steered' : '') },
           m.from && m.from !== 'app' ? h('span', { class: 'from' }, m.from === 'whatsapp' ? '💬 from WhatsApp' : `from ${m.from}`) : null,
+          m.steered ? h('span', { class: 'from' }, '⚡ added while working') : null,
           m.text,
           (m.attachments || []).length ? h('span', { class: 'att' }, '📎 ' + m.attachments.map((a) => a.name).join(', ')) : null);
         break;
       case 'assistant':
-        el = h('div', { class: 'msg assistant' + (m.streaming ? ' streaming' : ''), html: md(m.text) });
+        el = h('div', { class: 'msg assistant' + (m.streaming ? ' streaming' : '') + (m.draft ? ' draft' : '') + (m.interim ? ' interim' : ''), html: md(m.text) });
+        if (m.draft) el.prepend(h('div', { class: 'draft-label' }, 'Draft — checked again below'));
         decorateCode(el);
         if (m.image) el.append(genImg(m.image));
         break;
@@ -575,8 +580,11 @@
   const scrollDown = (instant) => { const b = $('#messages'); b.scrollTo({ top: b.scrollHeight, behavior: instant ? 'auto' : 'smooth' }); };
 
   function setRunning(on) {
-    $('#btnSend').hidden = on;
     $('#btnStop').hidden = !on;
+    $('#btnWhen').hidden = !on;
+    $('#hint').textContent = on
+      ? `Muse is working — you can keep writing. ${S.sendWhen === 'queue' ? '⏳ Your message waits until the current work finishes.' : '⚡ Your message joins the current work (it will finish everything unless you say stop).'} · Esc / ■ stops`
+      : 'Enter to send · Shift+Enter new line · Muse can make mistakes — check important work.';
     if (on) { if (!S.workStart) S.workStart = Date.now(); setStatus(S.statusText || 'Working…'); }
     else { S.workStart = 0; S.statusText = ''; $('#working')?.remove(); }
   }
@@ -612,6 +620,40 @@
   // Fallback: if the live connection is down, poll the open chat so output still appears.
   setInterval(() => { if ((!S.ws || S.ws.readyState !== 1) && S.view === 'chat') resyncConv(); }, 1500);
 
+  // --- tasks + queue (shown above the message box)
+  S.sendWhen = localStorage.getItem('sendWhen') || 'now';
+  const syncWhen = () => { $('#btnWhen').textContent = S.sendWhen === 'queue' ? '⏳ Queue' : '⚡ Now'; $('#btnWhen').classList.toggle('queue', S.sendWhen === 'queue'); };
+  syncWhen();
+  $('#btnWhen').onclick = () => { S.sendWhen = S.sendWhen === 'queue' ? 'now' : 'queue'; try { localStorage.setItem('sendWhen', S.sendWhen); } catch {} syncWhen(); setRunning(S.conv && S.running.has(S.conv.id)); input.focus(); };
+  function renderTasks() {
+    const box = $('#tasks');
+    const list = (S.conv && S.conv.tasks) || [];
+    box.hidden = !list.length;
+    if (!list.length) { box.innerHTML = ''; return; }
+    const done = list.filter((t) => t.status === 'done').length;
+    // open while work is left; a finished list folds away (click to open it)
+    const open = box.dataset.open ? box.dataset.open === '1' : done < list.length;
+    const icon = { done: '✓', in_progress: '▶', pending: '○', blocked: '⛔' };
+    box.innerHTML = '';
+    box.append(h('button', { class: 'tasks-head', onclick: () => { box.dataset.open = open ? '0' : '1'; renderTasks(); } },
+      h('b', {}, 'Tasks'), h('span', { class: 'muted' }, ` ${done}/${list.length} done`), h('span', { class: 'bar' }, h('i', { style: `width:${Math.round((done / list.length) * 100)}%` })), open ? ' ▾' : ' ▸'));
+    if (open) box.append(h('ol', {}, list.map((t) => h('li', { class: `t-${t.status}` }, h('span', { class: 'ic' }, icon[t.status] || '○'), h('span', {}, t.title, t.note ? h('small', {}, ` — ${t.note}`) : null)))));
+  }
+  function renderQueue() {
+    const box = $('#queue');
+    const q = (S.conv && S.conv.queue) || [];
+    box.hidden = !q.length;
+    box.innerHTML = '';
+    if (!q.length) return;
+    box.append(h('div', { class: 'small muted' }, `⏳ Waiting to run after the current work (${q.length})`));
+    for (const it of q) {
+      box.append(h('div', { class: 'qitem' }, h('span', { class: 'qtext' }, it.text, it.files && it.files.length ? h('small', {}, ` 📎 ${it.files.join(', ')}`) : null),
+        h('button', { class: 'btn tiny', title: 'Send it now: it joins the current work', onclick: async () => { try { await api(`/api/convs/${S.conv.id}/queue/${it.id}`, { body: {} }); } catch (e) { toast(e.message, true); } } }, '⚡ Send now'),
+        h('button', { class: 'btn tiny', title: 'Edit: put it back in the message box', onclick: async () => { await api(`/api/convs/${S.conv.id}/queue/${it.id}`, { method: 'DELETE' }); input.value = it.text; autoGrow(); input.focus(); } }, '✎'),
+        h('button', { class: 'btn tiny', title: 'Remove', onclick: () => api(`/api/convs/${S.conv.id}/queue/${it.id}`, { method: 'DELETE' }) }, '✕')));
+    }
+  }
+
   // --- composer
   const input = $('#input');
   function autoGrow() { input.style.height = 'auto'; input.style.height = Math.min(240, input.scrollHeight) + 'px'; }
@@ -634,6 +676,12 @@
       const body = { text: text || '(see attached files)', attachments: await Promise.all(attachments.map(async (f) => ({ name: f.name, dataBase64: await readFileB64(f) }))) };
       input.value = ''; autoGrow(); S.attachments = []; renderAttachments(); $('#slash').hidden = true;
       if (!S.convs.some((c) => c.id === conv.id)) { S.convs.unshift({ id: conv.id, title: conv.title, updatedAt: Date.now() }); renderChatList(); }
+      if (S.running.has(conv.id)) {
+        body.when = S.sendWhen;
+        const r = await api(`/api/convs/${conv.id}/send`, { body });
+        toast(r.when === 'queue' ? '⏳ Queued — runs when the current work is done' : '⚡ Added to the current work');
+        return;
+      }
       S.running.add(conv.id); S.workStart = Date.now(); S.statusText = 'Sending…'; setRunning(true);
       await api(`/api/convs/${conv.id}/send`, { body });
     } catch (err) { toast(err.message, true); }
@@ -879,6 +927,8 @@
     mode.value = s.mode;
     const ws = h('input', { value: s.workspace });
     const steps = h('input', { type: 'number', min: 5, max: 500, value: s.maxSteps });
+    const finishAll = h('input', { type: 'checkbox' }); finishAll.checked = S.settings.finishAllTasks !== false;
+    const verifyOn = h('input', { type: 'checkbox' }); verifyOn.checked = S.settings.verifyBeforeFinish !== false;
     const sys = h('textarea', { rows: 4, placeholder: 'e.g. Answer in Romanian. I am building a robot startup called Carpathron.' });
     sys.value = s.systemPrompt || '';
     body.append(h('div', { class: 'card' },
@@ -886,10 +936,12 @@
       field('Default approval mode', mode),
       h('div', { class: 'row' }, field('Default folder (workspace)', ws), isDesktop ? h('button', { class: 'btn', style: 'align-self:flex-end', onclick: async () => { const f = await window.desktop.pickFolder(ws.value); if (f) ws.value = f; } }, 'Browse…') : null),
       field('Default API model', model, 'Used by the API-key engine. Pick per chat from the model menu.'),
-      field('Max agent steps per message', steps),
+      field('Steps before a pause (Ask / Plan)', steps, 'Auto and Full keep going until the job is finished (checkpoints every this many steps; they stop only if a whole checkpoint makes no progress, or at 1000 steps).'),
+      h('label', { class: 'inline toggle' }, finishAll, ' Finish every task: keep working while the task list has unfinished tasks (also for messages sent while it works)'),
+      h('label', { class: 'inline toggle' }, verifyOn, ' Check the work before finishing: one extra pass that verifies every claim with tools (fewer mistakes, slightly slower)'),
       field('Custom instructions (for every chat)', sys),
       h('button', { class: 'btn primary', onclick: async () => {
-        try { S.settings = await api('/api/settings', { body: { mode: mode.value, workspace: ws.value, model: model.value.trim(), maxSteps: Number(steps.value) || 100, systemPrompt: sys.value } }); toast('Saved'); }
+        try { S.settings = await api('/api/settings', { body: { mode: mode.value, workspace: ws.value, model: model.value.trim(), maxSteps: Number(steps.value) || 100, systemPrompt: sys.value, finishAllTasks: finishAll.checked, verifyBeforeFinish: verifyOn.checked } }); toast('Saved'); }
         catch (e) { toast(e.message, true); }
       } }, 'Save')));
 

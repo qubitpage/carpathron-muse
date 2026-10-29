@@ -21,19 +21,30 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.5.5_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.6.0_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.5.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.5.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.5.5) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.6.0) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.5) | [**CarpathronAvatar-1.1.5.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.5.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. The Meta Horizon Store version is in review. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 
-All files of this version: **[Release v1.5.5](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.5.5)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.6.0](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.6.0)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
 
-## What's new in 1.5.5 (Windows) and 1.1.5 (Quest)
+## What's new in 1.6.0
+
+- **Write while it works:** the message box stays open while Muse works. **⚡ Now** adds your message to the running job (it keeps every earlier task and finishes them all unless you say stop); **⏳ Queue** runs it afterwards. Queued messages can be sent now, edited or removed. Works with both engines (Muse Code uses its native *steer*).
+- **Task list:** multi-step jobs show a live task list above the message box; Muse keeps working until every task is done (stops only when blocked or making no progress).
+- **Runs until the job is done:** in Auto and Full mode the step limit is only a checkpoint — no more "Reached the step limit (40)" in the middle of a build. A safety limit (1000 steps) and a no-progress check prevent runaway loops; Ask and Plan still pause.
+- **Fewer mistakes:** honesty rules (no invented facts, files, outputs or test results; sources for current facts), a **self-check pass** before finishing (every claim verified with tools), automatic "change approach" when the same call keeps failing, test-before-delivery and clean-work rules, a per-chat scratch folder.
+- **Computer use:** Muse sees the screen and controls mouse and keyboard on Windows (any app), plus a visible **Muse Browser** it drives element by element — to use desktop apps without an API, test the apps it builds and fix defects. An on-screen bar shows when it is in control, with a Stop button.
+- **Raspberry Pi and NVIDIA:** dev environment inventory (IDEs, SDKs, GPU/CUDA, boards on USB and on the network), installs (mpremote, Thonny, Raspberry Pi Imager, CUDA…), open IDEs, MicroPython on Pico/ESP32, Pico UF2 flashing, Raspberry Pi SD-card imaging (always confirmed), Pi and Jetson over SSH. New skills `/raspberry-pi`, `/nvidia-jetson`, `/test-app`, `/security-audit`.
+- **Security checks:** `security_check` for servers (ports, firewall, SSH, updates, fail2ban, Docker, exposed files) and websites (certificate, redirects, headers, version leaks, exposed `.git` / `.env` / backups), run automatically after public deployments.
+- **Other models from chat:** `ask_model` gets a second opinion from another Muse model (e.g. Muse Wonder for hard reasoning or reviews).
+
+### 1.5.5 (Windows) and 1.1.5 (Quest)
 
 - **GitHub "Sign in with browser" fixed:** newer GitHub CLI versions show the one-time code as *"One-time code (XXXX-XXXX) copied to clipboard"*; the app now reads both formats, shows the code, copies it and opens GitHub.
 - **Carpathron Avatar 1.1.5 (Quest):** fixes a crash at start on headsets without a text-to-speech engine (Godot's voice list call); the microphone permission is asked only the first time you hold the talk button; the demo robot shows at once while the app looks for your real robot.

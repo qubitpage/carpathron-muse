@@ -165,7 +165,9 @@ Images, PDF, Word, Excel, PowerPoint, text and code files, audio, video. The age
 
 - Big jobs are split into **sub-agents** that work in parallel (`delegate`).
 - Long commands (builds, servers, training) run as **background jobs** — the agent checks their output later.
-- *Settings → Defaults → Max agent steps per message* limits how long one answer may run (default 100).
+- **Auto** and **Full** keep going until the whole job is finished. *Settings → Defaults → Steps before a pause* is only a
+  checkpoint there (*↻ 100 steps done — still working*); they stop only if a whole checkpoint made no progress (only
+  errors) or at the safety limit of 1000 steps for one message. **Ask** and **Plan** pause at that number — say *continue*.
 
 ### 5.5 Chat commands
 
@@ -173,6 +175,45 @@ Images, PDF, Word, Excel, PowerPoint, text and code files, audio, video. The age
 |---|---|
 | `/remember <fact>` | Saves the fact to memory |
 | `/<skill-name> <task>` | Runs a skill, e.g. `/research best ESP32 boards` |
+
+### 5.6 Writing while it works (send now or queue)
+
+You don't have to wait. While Muse works, the message box stays open:
+
+- **⚡ Now** (default) — your message **joins the current work** at the next step. Muse adds it to its task list and
+  finishes **everything** — the old tasks and the new one — unless your message says to stop or cancel.
+  It shows in the chat with *"⚡ added while working"*.
+- **⏳ Queue** — your message **waits** and runs by itself when the current work is done. Queued messages appear above
+  the message box with **⚡ Send now** (move it into the running work), **✎** (edit) and **✕** (remove).
+- Click the **⚡ Now / ⏳ Queue** button next to Send to switch; the choice is remembered.
+- **■ Stop** (or **Esc**) still stops everything; queued messages then wait until you send them or remove them.
+- From WhatsApp, a message sent while Muse works also joins the current work.
+
+### 5.7 Task list — finishing everything
+
+For any job with several steps Muse keeps a **task list**, shown above the message box (*Tasks 3/5 done*, with a bar):
+○ pending · ▶ in progress · ✓ done · ⛔ blocked (with what it needs from you).
+
+- Muse **keeps working until every task is done**. If it tries to stop early, the app sends it back to the unfinished
+  tasks automatically (and stops if it makes no progress, so it never loops forever).
+- A task is marked **blocked** only when Muse really needs you — the note says exactly what.
+- Turn this off in *Settings → Defaults → Finish every task* if you prefer short answers.
+
+### 5.8 Reliability — no made-up answers
+
+Muse Carpathron adds rules and checks so the agent doesn't invent things:
+
+- **Honesty rules:** no invented facts, file contents, command output, prices or test results; current facts come from
+  web search with sources; it says when it is not sure.
+- **Self-check before finishing** — after work that changed something, the app asks the agent to check every claim of its
+  answer against real tool results (run the tests, open the page, read the file) and fix or remove anything unproven.
+  You see *🔎 Checking the work before finishing…*; the first answer is dimmed as a *draft* and the checked answer follows.
+  (*Settings → Defaults → Check the work before finishing*.)
+- **Getting unstuck** — if the same call fails twice (or three errors in a row), the agent is told to stop repeating it:
+  read the error, check logs and docs, search the exact error message, and try another approach.
+- **Testing before delivery** — apps and websites are built, run and checked (also visually) before Muse says they work.
+- **Clean work** — files go into a sensible project structure, temporary files into a per-chat **scratch folder**
+  (deleted with the chat), no secrets in code, no stray files on servers.
 
 ---
 
@@ -208,6 +249,16 @@ You never call tools yourself — ask in plain words and the agent picks them. T
 
 **Robot**
 `robot_status` · `robot_drive` · `robot_stop` · `robot_turn` · `robot_look` · `robot_photo` · `robot_scan_room`
+
+**Computer use (see and control the PC)** — section 11.1
+`computer_view` (screenshot, list windows) · `computer_act` (click, type, keys, scroll, drag, focus window, open app) ·
+`browser_view` / `browser_act` (the visible Muse Browser: open, elements, click, type, keys, page text)
+
+**Raspberry Pi, NVIDIA and IDEs** — section 11.2
+`dev_environment` · `dev_install` · `open_ide` · `micropython` · `pico_flash` · `sd_card_image`
+
+**Security, tasks and other models**
+`security_check` (servers and websites, section 7.5) · `task_update` (the task list) · `ask_model` (second opinion from another Muse model)
 
 **With Muse Code:** these same tools reach Muse Code through the built-in **Carpathron bridge** (an MCP server the
 app starts for each chat). In Muse Code they appear as `mcp__carpathron__…`. Keep *Settings → Tools & models → Give Muse Code the app tools* ticked.
@@ -267,6 +318,21 @@ Good requests: *"/server-setup install nginx and a free certificate for example.
 app log"*, *"deploy this folder to /var/www/site"*, *"set up a daily database backup"*.
 
 ---
+
+### 7.5 Security checks
+
+Ask *"/security-audit my-vps and example.com"* or *"check the security of the server"*. `security_check` looks at:
+
+- **Server (over SSH):** which ports are open and what listens on them (databases open to the internet are flagged),
+  firewall, SSH root/password login, pending security updates and automatic updates, fail2ban, Docker ports that bypass
+  the firewall, sensitive files in web roots, disk space, pending reboot.
+- **Website / domain:** HTTPS certificate (trusted? days left?), HTTP→HTTPS redirect, security headers (HSTS, CSP,
+  nosniff, frame protection, referrer policy), version leaks in headers, insecure cookies, and publicly readable files
+  such as `/.git`, `/.env`, backups and `phpinfo`.
+
+Results are marked **✗ critical**, **⚠ warning**, **✓ fine**, with the fix for each. Muse runs it by itself after
+deploying or changing anything public, fixes what it can (keeping your SSH access working), and checks again.
+Only use it on servers and domains you own or manage.
 
 ## 8. Plugins — GitHub
 
@@ -349,12 +415,16 @@ AI apps use. They work with **both engines** (Meta API key and Muse Code).
 | `/carpathron-build` | The full Carpathron build process (robot, apps, firmware) |
 | `/github-publish` | Publishes a folder to GitHub safely |
 | `/server-setup` | Sets up and checks a Linux server |
+| `/raspberry-pi` | Pico / MicroPython over USB, SD cards, Pi boards over SSH |
+| `/nvidia-jetson` | GPU / CUDA on this PC, Jetson boards over SSH |
+| `/test-app` | Runs an app or website, clicks through it like a user, fixes defects, tests again |
+| `/security-audit` | Checks and hardens a server or website |
 
 Create your own on the **Skills** page. After repeated multi-step work, the app offers to learn a new skill in your style.
 
 ---
 
-## 11. Arduino and firmware
+## 11. Arduino, Raspberry Pi, NVIDIA and computer use
 
 Ask for example *"/firmware blink the LED on my ESP32 and print the Wi-Fi IP"*. The agent:
 1. finds **arduino-cli** (Arduino IDE 2 already includes it) or downloads it (`arduino_setup`);
@@ -366,6 +436,45 @@ Ask for example *"/firmware blink the LED on my ESP32 and print the Wi-Fi IP"*. 
 Tips: ESP32 that doesn't connect → hold **BOOT** while it says *Connecting…*. For the ESP32-CAM car use the
 `esp32` core **2.0.12** and board *AI Thinker ESP32-CAM*. Path to arduino-cli can be set in *Settings → Tools & models*.
 `open_arduino_ide` opens the sketch in Arduino IDE if you want to edit it yourself.
+
+### 11.1 Computer use — Muse sees and controls the PC
+
+Like a person at the keyboard, Muse can look at the screen and use the mouse and keyboard — for desktop apps without an
+API (IDEs, installers, settings dialogs), to **test the apps it builds**, and to check defects.
+
+- **Whole desktop:** `computer_view` takes a screenshot (you see it in the chat) or lists the open windows;
+  `computer_act` clicks, double-clicks, types, presses keys (*ctrl+s*, *alt+tab*, *win+r*), scrolls, drags, switches
+  to a window, opens an app by name (Start menu) and waits. After each action it gets a new screenshot to check the result.
+- **Muse Browser:** a separate browser window inside the app (with its **own** sign-ins). `browser_view` opens pages,
+  reads the text and lists the buttons, links and fields with numbers; `browser_act` clicks them, types, presses keys,
+  picks options. Use it to test websites at desktop and phone width and to do web tasks step by step.
+- While Muse controls the PC an orange bar **"🤖 Muse is controlling this PC — ■ Stop"** shows at the top of the screen
+  (it is hidden from Muse's screenshots). Click **Stop**, or **■ / Esc** in the app, to stop at once.
+- In **Ask** mode every mouse/keyboard action asks you first (*Allow once* / *Always allow in this chat*).
+- **Safety rules the agent follows:** it never types passwords, card or bank details (sign in yourself in the window), never
+  solves CAPTCHAs, and asks before sending, deleting, buying or confirming anything that can't be undone.
+- Prefer direct tools when they exist (files, commands, APIs) — they are faster and exact; computer use is for everything else.
+
+Try: *"open Notepad, write a test line and save it on the Desktop as test.txt"*, *"/test-app the website in my folder"*.
+
+### 11.2 Raspberry Pi, NVIDIA and other IDEs
+
+- `dev_environment` — what is installed (Arduino IDE, VS Code, Thonny, Raspberry Pi Imager, PlatformIO, Python, mpremote,
+  esptool, picotool, CUDA, Nsight, Docker, WSL), your **NVIDIA GPU** (`nvidia-smi`), boards on USB (Pico, Pico in BOOTSEL,
+  ESP32, Arduino, **Jetson in recovery mode**) and **Raspberry Pi / Jetson boards on the network**.
+- `dev_install` — installs mpremote, esptool, PlatformIO, Thonny, Raspberry Pi Imager, VS Code, Python, Git, CUDA Toolkit,
+  Nsight Systems (winget / pip; Windows may ask for permission).
+- `open_ide` — opens Arduino IDE, VS Code, Thonny, Raspberry Pi Imager, Nsight Systems / Compute (or SDK Manager on Linux),
+  optionally with your file; Muse can then work inside it with computer use.
+- **Raspberry Pi Pico / MicroPython:** `pico_flash` copies a `.uf2` to a Pico in BOOTSEL mode (hold BOOTSEL while plugging in);
+  `micropython` lists, copies, runs and tests code on the board over USB (`mpremote`).
+- **SD cards for Raspberry Pi:** `sd_card_image` lists removable drives and writes an image with Raspberry Pi Imager.
+  Writing **erases the drive**: only removable USB/SD drives are allowed, the exact disk serial must match, and the app
+  **always asks you** — even in Full mode.
+- **Raspberry Pi and Jetson boards** are worked on over SSH like servers (add them on the Remote page). Flashing a Jetson
+  needs NVIDIA SDK Manager on Ubuntu (a Linux PC or WSL2) — Muse explains the steps.
+
+Try: *"/raspberry-pi blink the LED on my Pico W with MicroPython"*, *"/nvidia-jetson check CUDA on my Jetson"*.
 
 ---
 
@@ -437,7 +546,7 @@ The full app opens: chat, robot, video. A phone can also act as the robot's came
 | Section | What's in it |
 |---|---|
 | **Sign in to Meta** | API key, Muse Code install / sign-in / sandbox (section 3) |
-| **Defaults** | Default engine, approval mode, folder (workspace), API model, max steps, custom instructions for every chat |
+| **Defaults** | Default engine, approval mode, folder (workspace), API model, max steps, *Finish every task*, *Check the work before finishing*, custom instructions for every chat |
 | **Remote servers, SSH keys and GitHub** | Shortcuts to the Remote and Plugins pages |
 | **Tools & models** | Default reasoning effort; web search source; Muse Code sandbox (*Automatic / Always / Off*); trust workspace; Muse Code permission profile (*Load profiles*); *Give Muse Code the app tools* (bridge); arduino-cli path |
 | **MCP servers (tools)** | Extra tools (section 9) |
@@ -477,6 +586,12 @@ The full app opens: chat, robot, video. A phone can also act as the robot's came
 | Board not found / upload fails | Other programs using the COM port (close Serial Monitor), USB cable with data, hold BOOT |
 | WhatsApp doesn't answer | Status must be *connected*; write in **Message yourself** or add your number |
 | Phone can't open the app | Same Wi-Fi; accept the certificate; new PIN after 10 minutes |
+| *Reached the step limit* | Only in Ask / Plan mode — say "continue", or switch to Auto / Full, which run until the job is done |
+| Muse keeps working after I asked something small | Your message joined the running work (⚡ Now). Switch to ⏳ Queue, or say "stop" |
+| It stopped with tasks still open | A task is ⛔ blocked (read its note), or it made no progress — answer the question in the note and say "continue" |
+| Computer use: clicks land in the wrong place | Use 100 % / 125 % display scaling on the main monitor; Muse takes a new screenshot first — ask it to "take a screenshot and try again" |
+| Computer use: nothing happens in an admin window | Windows blocks input into programs running as administrator unless Muse Carpathron also runs as administrator |
+| Muse Browser asks to sign in | It has its own sign-ins: sign in yourself in that window once — Muse never types passwords |
 | Something else | Activity page, and the log at `%APPDATA%\Muse Carpathron\muse-carpathron.log` |
 
 ---
@@ -487,4 +602,5 @@ The full app opens: chat, robot, video. A phone can also act as the robot's came
 |---|---|
 | **Enter** / **Shift+Enter** | Send / new line |
 | **Esc** | Stop the current answer, or close a dialog |
+| **⚡ Now / ⏳ Queue** button | While working: messages join the current work, or wait for it to finish |
 | **W A S D**, **Space** | Drive / stop the robot (Robot page) |

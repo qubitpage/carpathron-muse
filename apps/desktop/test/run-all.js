@@ -448,8 +448,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     for (let i = 0; i < 100 && !sent.some(([, t]) => /Approval needed/.test(t)); i++) await sleep(50);
     assert.ok(sent.some(([, t]) => /Approval needed/.test(t)), JSON.stringify(sent));
     await post('40712345678', 'yes');
-    for (let i = 0; i < 100 && !sent.some(([, t]) => /^Done/.test(t)); i++) await sleep(50);
-    assert.ok(sent.some(([, t]) => /^Done/.test(t)), JSON.stringify(sent));
+    for (let i = 0; i < 100 && !sent.some(([, t]) => /^(Done|Verified)/.test(t)); i++) await sleep(50);
+    assert.ok(sent.some(([, t]) => /^(Done|Verified)/.test(t)), JSON.stringify(sent));
     assert.ok((await api('/api/convs')).some((c) => c.source === 'whatsapp'));
   });
 

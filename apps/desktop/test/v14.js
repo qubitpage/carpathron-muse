@@ -516,6 +516,161 @@ if (a.startsWith('auth login')) {
     await api('/api/settings', { mcpServers: st.config });
   });
 
+  await step('tasks: the agent keeps a task list and keeps working until every task is done, then checks its work', async () => {
+    const c = await conv(); await api(`/api/convs/${c.id}`, { mode: 'auto' }, 'PATCH');
+    const full = await sendMsg(c, 'make tasks for the job');
+    assert.deepStrictEqual(full.tasks.map((t) => t.status), ['done', 'done'], JSON.stringify(full.tasks));
+    assert.ok(full.messages.some((m) => m.role === 'info' && /not finished yet/.test(m.text)), 'auto-continued');
+    assert.ok(events.some((e) => e.event === 'tasks:update' && e.data.convId === c.id));
+    // task_update is "read" risk: no self-check needed; a turn that changed something gets one
+    const w = await sendMsg(c, 'write hello again');
+    assert.ok(w.messages.some((m) => m.role === 'info' && /Checking the work/.test(m.text)), 'self-check ran');
+    assert.ok(w.messages.some((m) => m.role === 'assistant' && m.draft), 'first answer marked as draft');
+    assert.strictEqual(w.messages.filter((m) => m.role === 'assistant').pop().text, 'Verified: everything checked.');
+  });
+
+  await step('messages while working: "now" joins the running work, "queue" runs after it', async () => {
+    const c = await conv(); await api(`/api/convs/${c.id}`, { mode: 'auto' }, 'PATCH');
+    await api(`/api/convs/${c.id}/send`, { text: 'short wait please' });
+    await waitFor((e) => e.event === 'turn:state' && e.data.convId === c.id && e.data.running);
+    const now = await api(`/api/convs/${c.id}/send`, { text: 'also say banana', when: 'now' });
+    assert.ok(now.busy && now.when === 'now', JSON.stringify(now));
+    const q = await api(`/api/convs/${c.id}/send`, { text: 'write hello from the queue', when: 'queue' });
+    assert.ok(q.busy && q.when === 'queue');
+    let mid = await api(`/api/convs/${c.id}`);
+    assert.strictEqual(mid.queue.length, 1);
+    // a second queued message can be removed again
+    await api(`/api/convs/${c.id}/send`, { text: 'never mind this one', when: 'queue' });
+    mid = await api(`/api/convs/${c.id}`);
+    await api(`/api/convs/${c.id}/queue/${mid.queue[1].id}`, null, 'DELETE');
+    await waitIdle(c.id, 30000);   // first turn (with the steered message)
+    let full = await api(`/api/convs/${c.id}`);
+    assert.ok(full.messages.some((m) => m.role === 'user' && m.steered && /banana/.test(m.text)), 'steered message shown');
+    assert.ok(full.messages.some((m) => m.role === 'assistant' && /also handled: also say banana/.test(m.text)), JSON.stringify(full.messages.map((m) => m.text)));
+    await waitIdle(c.id, 30000);   // then the queued one runs by itself
+    full = await api(`/api/convs/${c.id}`);
+    assert.strictEqual(full.queue.length, 0);
+    assert.ok(full.messages.some((m) => m.role === 'user' && /from the queue/.test(m.text)));
+    assert.ok(!full.messages.some((m) => /never mind/.test(m.text || '')), 'removed message did not run');
+    assert.ok(fs.existsSync(path.join(full.workspace, 'hello.txt')));
+  });
+
+  await step('stuck: repeating the same failing call gets a "change approach" note', async () => {
+    const { Agent } = require('../backend/agent');
+    const rt = {};
+    const a = Object.create(Agent.prototype);
+    assert.strictEqual(a.stuckNote(rt, 'read_file', { path: 'x' }, true, 'Error: nope'), 'Error: nope');
+    assert.ok(/Do not repeat the same call/.test(a.stuckNote(rt, 'read_file', { path: 'x' }, true, 'Error: nope')));
+    assert.strictEqual(a.stuckNote(rt, 'read_file', { path: 'y' }, false, 'ok'), 'ok');
+    const s = require('../backend/agent').systemPrompt({}, { workspace: '/tmp', tasks: [] }, { tasks: [{ title: 'T1', status: 'pending' }], scratch: '/tmp/s' });
+    assert.ok(/Never invent facts/.test(s) && /Test before delivery/.test(s) && /\[pending\] T1/.test(s) && /Scratch folder/.test(s));
+  });
+
+  await step('computer use: screenshot, clicks mapped from picture to screen pixels, keys, windows (stand-in desktop helper)', async () => {
+    const logf = path.join(dataDir, 'desktop.log');
+    process.env.MC_DESKTOP_HELPER = path.join(__dirname, 'fake-desktop.js');
+    process.env.FAKE_DESKTOP_LOG = logf;
+    const { execComputer, desktop } = require('../backend/computer');
+    const photos = [];
+    const ctx = { dataDir, onPhoto: (p) => photos.push(p), computerState: {} };
+    try {
+      await assert.rejects(execComputer('computer_act', { action: 'click', x: 1, y: 1 }, ctx), /screenshot first/);
+      let r = await execComputer('computer_view', { action: 'screenshot' }, ctx);
+      assert.ok(/1366x768/.test(r) && /scaled 50%/.test(r) && photos.length === 1, r);
+      r = await execComputer('computer_act', { action: 'double_click', x: 683, y: 384 }, ctx);
+      assert.ok(/Done: double click at 683,384/.test(r) && photos.length === 2, r);
+      r = await execComputer('computer_act', { action: 'key', keys: 'ctrl+s', screenshot: false }, ctx);
+      r = await execComputer('computer_act', { action: 'type', text: 'héllo\nworld', screenshot: false }, ctx);
+      r = await execComputer('computer_act', { action: 'focus_window', window: 'notepad', screenshot: false }, ctx);
+      assert.ok(/focused "Untitled - Notepad"/.test(r), r);
+      await assert.rejects(execComputer('computer_act', { action: 'focus_window', window: 'nope' }, ctx), /No window matches "nope"/);
+      r = await execComputer('computer_view', { action: 'list_windows' }, ctx);
+      assert.ok(/"Untitled - Notepad" — notepad at 50,50 size 400x300/.test(r), r);
+      await assert.rejects(execComputer('computer_act', { action: 'key', keys: 'ctrl+banana' }, ctx), /unknown key "banana"/);
+      const ops = fs.readFileSync(logf, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+      const click = ops.find((o) => o.op === 'click');
+      assert.deepStrictEqual([click.x, click.y, click.count, click.button], [1366, 768, 2, 'left'], 'picture px → screen px');
+      assert.deepStrictEqual(ops.find((o) => o.op === 'combo'), { id: ops.find((o) => o.op === 'combo').id, op: 'combo', vks: '17,83', ext: '0,0' });
+      assert.strictEqual(ops.find((o) => o.op === 'type').text, 'héllo\nworld');
+      assert.strictEqual(ops.find((o) => o.op === 'focus').hwnd, 42);
+    } finally { desktop.stop(); delete process.env.MC_DESKTOP_HELPER; }
+    // the agent offers these tools, with actions needing approval in Ask mode
+    const specs = srv.agent.toolSpecs({ id: 'x', workspace: dataDir });
+    const by = Object.fromEntries(specs.map((t) => [t.name, t.risk]));
+    assert.deepStrictEqual([by.computer_view, by.computer_act, by.browser_view, by.browser_act], ['read', 'external', 'read', 'external']);
+  });
+
+  await step('security_check: server findings, website certificate/headers/exposed files; ask_model; dev tools', async () => {
+    const { analyseServer, securityCheck } = require('../backend/devtools');
+    const sample = ['== OS', 'Ubuntu 22.04.4 LTS', '== LISTENING', 'tcp 0.0.0.0:22 users:(("sshd"))', 'tcp 0.0.0.0:6379 users:(("redis"))', 'tcp 127.0.0.1:5432 users:(("postgres"))', '== FIREWALL', 'Status: inactive',
+      '== SSHD', 'permitrootlogin yes', 'passwordauthentication yes', '== UPDATES', '4', '20', '== AUTOUPDATES', '0', '== FAIL2BAN', 'inactive', '== SUDO_NOPASSWD', '== USERS_SHELL', 'root ubuntu', '== DOCKER', '== WEBROOT', '/var/www/site/.env', '== DISK', '/dev/sda1 50G 47G 3G 95% /', '== REBOOT', 'required'].join('\n');
+    const f = analyseServer(sample).findings.join('\n');
+    for (const re of [/✗ Redis listens on all interfaces/, /✗ No active firewall/, /✗ SSH allows root login/, /⚠ SSH password login is enabled/, /✗ 4 security updates pending/, /⚠ fail2ban is not running/, /✗ Sensitive files inside a web root/, /⚠ Disk almost full \(95%\)/, /⚠ A reboot is required/]) assert.ok(re.test(f), `${re} in\n${f}`);
+    assert.ok(!/PostgreSQL listens/.test(f), 'localhost-only database is fine');
+    // a small website with a leaked .env and .git, no security headers
+    const http = require('http');
+    const site = http.createServer((req, res) => {
+      if (req.url === '/.env') { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end('DB_PASSWORD=secret'); }
+      if (req.url === '/.git/HEAD') { res.writeHead(200); return res.end('ref: refs/heads/main'); }
+      if (req.url === '/') { res.writeHead(200, { 'Content-Type': 'text/html', Server: 'nginx/1.18.0', 'X-Powered-By': 'PHP/7.4' }); return res.end('<html>hi</html>'); }
+      res.writeHead(404); res.end('<html>not found</html>');
+    });
+    await new Promise((r) => site.listen(18655, '127.0.0.1', r));
+    try {
+      const r = await securityCheck({ url: 'http://127.0.0.1:18655/' }, { status: () => {} });
+      assert.ok(/✗ Publicly readable: .*\/\.git\/HEAD/.test(r) && /\/\.env/.test(r), r);
+      assert.ok(/Missing security headers: HSTS/.test(r) && /Server reveals versions/.test(r), r);
+      assert.ok(/Summary: \d+ critical/.test(r));
+    } finally { site.close(); }
+    // the same check on a real SSH server (the test server runs the commands in a local shell)
+    const sr = await securityCheck({ server: 'testbox' }, { remote: srv.remote, status: () => {} });
+    assert.ok(/## Server testbox/.test(sr) && /Summary:/.test(sr), sr);
+    // ask another model (through the Meta API)
+    const { execDev } = require('../backend/devtools');
+    const am = await execDev('ask_model', { model: 'muse-wonder-1.0', prompt: 'review this' }, { api: srv.agent.api, status: () => {} });
+    assert.ok(/muse-wonder-1.0 answered:[\s\S]*Hello from fake Muse/.test(am), am);
+    await assert.rejects(execDev('ask_model', { model: 'muse-image-1.0', prompt: 'x' }, { api: srv.agent.api }), /not a text model/);
+    const env = await execDev('dev_environment', { network: false }, { dataDir, settings: {} });
+    assert.ok(/## IDEs and tools/.test(env) && /## NVIDIA/.test(env) && /## Connected boards/.test(env), env);
+    const mp = await execDev('micropython', { action: 'devices' }, { workspace: dataDir });
+    assert.ok(/mpremote is not installed|devices|\/dev|No MicroPython/i.test(mp), mp);
+    // erasing a drive always asks the user, even in Full mode
+    const c = await conv(); await api(`/api/convs/${c.id}`, { mode: 'full' }, 'PATCH');
+    const cv = srv.store.get(c.id);
+    const p = srv.agent.requestApproval(cv, { summary: 'ERASE disk 3', risk: 'external', tool: 'sd_card_image', always: true });
+    const ap = cv.messages.find((m) => m.role === 'approval');
+    assert.ok(ap && ap.choices.length === 2, 'approval card shown in Full mode');
+    srv.agent.decide(ap.approvalId, 'deny');
+    assert.strictEqual((await p).approved, false);
+    const auto = await srv.agent.requestApproval(cv, { summary: 'write', risk: 'external', tool: 'write_file' });
+    assert.ok(auto.approved && auto.auto, 'normal actions stay automatic in Full mode');
+  });
+
+  await step('step limit: Auto/Full keep going past the checkpoint until done; no progress or the safety limit stops; Ask pauses', async () => {
+    await api('/api/settings', { maxSteps: 3, maxTotalSteps: 9 });
+    try {
+      const c = await conv(); await api(`/api/convs/${c.id}`, { mode: 'full' }, 'PATCH');
+      let full = await sendMsg(c, 'loop forever please');
+      const tools = full.messages.filter((m) => m.role === 'tool').length;
+      assert.ok(tools >= 9, `kept going past 3 steps (${tools} tool calls)`);
+      assert.ok(full.messages.some((m) => m.role === 'info' && /still working/.test(m.text)), 'checkpoint note');
+      assert.ok(full.messages.some((m) => m.role === 'info' && /safety limit of 9 steps/.test(m.text)), JSON.stringify(full.messages.filter((m) => m.role === 'info').map((m) => m.text)));
+      const c2 = await conv(); await api(`/api/convs/${c2.id}`, { mode: 'auto' }, 'PATCH');
+      full = await sendMsg(c2, 'always fail please');
+      assert.ok(full.messages.some((m) => m.role === 'info' && /made no progress/.test(m.text)), 'stops when only errors');
+      assert.ok(full.messages.filter((m) => m.role === 'tool').length <= 4);
+      const c3 = await conv(); await api(`/api/convs/${c3.id}`, { mode: 'ask' }, 'PATCH');
+      await api(`/api/convs/${c3.id}/send`, { text: 'loop forever please' });
+      for (let i = 0; i < 3; i++) {   // approve the 3 commands
+        const e = await waitFor((x) => x.event === 'approval:new' && x.data.convId === c3.id && !x._done && (x._done = true));
+        await api(`/api/approvals/${e.data.approvalId}`, { choiceId: 'allow' });
+      }
+      await waitIdle(c3.id);
+      full = await api(`/api/convs/${c3.id}`);
+      assert.ok(full.messages.some((m) => m.role === 'info' && /Ask and Plan modes pause here/.test(m.text)));
+    } finally { await api('/api/settings', { maxSteps: 100, maxTotalSteps: 1000 }); }
+  });
+
   await step('projects: create a project and put a chat in it (no browser prompt needed)', async () => {
     const p = await api('/api/projects', { name: 'EU funding' });
     const c = await conv();

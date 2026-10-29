@@ -388,6 +388,19 @@ function describeCall(name, args) {
     case 'github_issues': return `GitHub issues ${a.action} ${a.repo}${a.number ? ' #' + a.number : ''}`;
     case 'github_pulls': return `GitHub PRs ${a.action} ${a.repo}${a.number ? ' #' + a.number : ''}`;
     case 'github_api': return `GitHub API ${a.method || 'GET'} ${a.path}`;
+    case 'task_update': { const t = Array.isArray(a.tasks) ? a.tasks : []; return `Update task list (${t.filter((x) => x.status === 'done').length}/${t.length} done)`; }
+    case 'dev_environment': return 'Check installed dev tools and connected boards';
+    case 'dev_install': return `Install ${a.tool}`;
+    case 'open_ide': return `Open ${a.ide}${a.path ? ` with ${a.path}` : ''}`;
+    case 'micropython': return `MicroPython: ${a.action}${a.remote ? ' ' + a.remote : a.path ? ' ' + a.path : ''}${a.port ? ` on ${a.port}` : ''}`;
+    case 'pico_flash': return `Flash Pico with ${a.uf2}`;
+    case 'sd_card_image': return a.action === 'write' ? `ERASE disk ${a.disk} and write ${a.image}` : 'List removable drives';
+    case 'security_check': return `Security check ${[a.server, a.url].filter(Boolean).join(' + ')}`;
+    case 'ask_model': return `Ask ${a.model}`;
+    case 'computer_view': return a.action === 'screenshot' ? 'Look at the screen' : `Screen: ${a.action}`;
+    case 'computer_act': return { click: `Click at ${a.x},${a.y}`, double_click: `Double-click at ${a.x},${a.y}`, right_click: `Right-click at ${a.x},${a.y}`, middle_click: `Middle-click at ${a.x},${a.y}`, move: `Move mouse to ${a.x},${a.y}`, drag: `Drag ${a.x},${a.y} → ${a.x2},${a.y2}`, scroll: `Scroll ${a.direction || 'down'}`, type: `Type "${String(a.text || '').slice(0, 60)}"`, key: `Press ${a.keys || a.text}`, focus_window: `Switch to window "${a.window}"`, open_app: `Open ${a.app}`, wait: `Wait ${a.seconds || 1}s` }[a.action] || `Computer: ${a.action}`;
+    case 'browser_view': return a.action === 'open' ? `Browser: open ${a.url}` : `Browser: ${a.action}`;
+    case 'browser_act': return a.action === 'click' ? `Browser: click ${Number.isInteger(a.index) ? `[${a.index}]` : `${a.x},${a.y}`}` : a.action === 'type' ? `Browser: type "${String(a.text || '').slice(0, 60)}"` : a.action === 'eval' ? 'Browser: run JavaScript in the page' : `Browser: ${a.action} ${a.keys || a.value || ''}`;
     case 'read_document': return `Read document ${a.path}${a.pages ? ' pages ' + a.pages : ''}`;
     case 'view_image': return `Look at ${a.path}`;
     case 'create_pdf': return `Create PDF ${a.output_path}`;

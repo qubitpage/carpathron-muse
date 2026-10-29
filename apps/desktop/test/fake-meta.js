@@ -16,9 +16,18 @@ function plan(body) {
     const img = last.content.find((c) => c.type === 'image_url');
     return { text: `I can see the photo (${img ? img.image_url.url.slice(0, 23) : 'none'}).` };
   }
+  if (/loop forever/.test(String(firstUser))) return { tool: ['run_command', { command: 'echo step' }] };
+  if (/always fail/.test(String(firstUser))) return { tool: ['read_file', { path: `missing-${msgs.length}.txt` }] };
   if (last.role === 'tool') return { text: `Done. Result: ${String(last.content).slice(0, 80)}` };
   if (/sub-agent of Muse Carpathron/.test(sys)) return { text: `Report for: ${firstUser.slice(0, 30)}` };
   const u = String(last.content);
+  if (/^\[Automatic check\]/.test(u)) return { tool: ['task_update', { tasks: [{ title: 'Step A', status: 'done' }, { title: 'Step B', status: 'done' }] }] };
+  if (/^\[Automatic self-check/.test(u)) return { text: 'Verified: everything checked.' };
+  if (/New message from the user while you were working/.test(u)) return { text: `Got it, also handled: ${u.split('\n').pop().slice(0, 40)}` };
+  if (/make tasks/i.test(u)) return { tool: ['task_update', { tasks: [{ title: 'Step A', status: 'in_progress' }, { title: 'Step B', status: 'pending' }] }] };
+  if (/medium wait/i.test(u)) return { tool: ['run_command', { command: process.platform === 'win32' ? 'Start-Sleep 6; echo waited' : 'sleep 6; echo waited' }] };
+  if (/short wait/i.test(u)) return { tool: ['run_command', { command: process.platform === 'win32' ? 'Start-Sleep 2; echo waited' : 'sleep 2; echo waited' }] };
+  if (/fail twice/i.test(u)) return { tool: ['read_file', { path: 'does-not-exist.txt' }] };
   if (/remote list/i.test(u)) return { tool: ['list_dir', { path: '.' }] };
   if (/remote write/i.test(u)) return { tool: ['write_file', { path: 'from-agent.txt', content: 'written over sftp' }] };
   if (/remote run/i.test(u)) return { tool: ['run_command', { command: 'echo remote-$((40+2)) && pwd' }] };

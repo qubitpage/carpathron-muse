@@ -1,7 +1,7 @@
 {
   "name": "muse-carpathron",
   "productName": "Muse Carpathron",
-  "version": "1.5.5",
+  "version": "1.6.0",
   "description": "Agentic desktop assistant for Meta Muse models: full PC and SSH server access, documents and PDFs, web research, firmware, robot control and WhatsApp remote.",
   "main": "main.js",
   "author": "Carpathron",
@@ -12,7 +12,8 @@
     "server": "node backend/standalone.js",
     "test": "node test/run-all.js && node test/v14.js",
     "dist": "node build/patch-sdk.js && electron-builder --win nsis --x64",
-    "postinstall": "node build/patch-sdk.js"
+    "postinstall": "node build/patch-sdk.js",
+    "test:electron": "xvfb-run -a electron --no-sandbox test/electron-browser.js /tmp"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",

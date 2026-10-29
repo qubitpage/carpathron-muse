@@ -58,6 +58,10 @@ const BUILTIN_SKILLS = [
   { name: 'firmware', description: 'Write, build and flash ESP32/Arduino firmware, then verify on the serial monitor', body: 'Firmware workflow:\n1. arduino_setup (with the core needed, e.g. esp32:esp32) if arduino_compile is not available yet.\n2. arduino_boards to find the port and board.\n3. Write or edit the sketch in its own folder (folder name = sketch name, file <name>.ino). Keep pins, Wi-Fi credentials and constants at the top.\n4. arduino_compile; read errors (file:line) and fix until BUILD OK.\n5. arduino_upload to the port (ESP32: if it cannot connect, tell the user to hold BOOT).\n6. serial_monitor for 10 s to verify it boots and prints what is expected (IP address, sensor values). Fix and repeat if needed.' },
   { name: 'carpathron-build', description: 'The Carpathron process: robot firmware + control app + Avatar (VR) + docs, end to end', body: 'Work like the Carpathron project:\n1. Hardware: list parts and pins; write the robot firmware (ESP32, HTTP/WebSocket protocol like protocol/ROBOT-PROTOCOL.md) and flash it with the /firmware steps.\n2. Control: connect the robot in Muse Carpathron (Robot page → Find my car), test robot_status, robot_drive, robot_photo.\n3. Apps: extend the desktop control center or the Quest Avatar app; build, run, and test after every change.\n4. Server: if the user wants it online, deploy to the chosen SSH server (ssh_upload, ssh_exec, job_start for long processes).\n5. Documentation: README with setup steps and a designed PDF (/design-pdf) for partners.\nAfter each step report what works and what is next.' },
   { name: 'github-publish', description: 'Publish a folder to GitHub (create the repo if needed) and optionally make a release with files', body: 'Publish to GitHub:\n1. github_account to know the owner (or use the owner/name the user gave).\n2. Make sure a good .gitignore exists (node_modules, dist, build outputs, .env, keys, *.keystore) and that no secrets (API keys, passwords, tokens, keystores) are inside the folder — search for them first and stop if you find any.\n3. Add or update README.md if missing.\n4. github_publish with a clear commit message (private repo unless the user says public).\n5. If the user wants downloadable apps: github_release with a version tag (e.g. v1.0.0), release notes, and the installer/APK files.\n6. Report the repository and download links.' },
+  { name: 'raspberry-pi', description: 'Raspberry Pi work: Pico / MicroPython over USB, or a Pi board over SSH (setup, GPIO, camera, services)', body: 'Raspberry Pi workflow:\n1. dev_environment to see what is connected (Pico on a COM port or in BOOTSEL mode, Pi boards on the network) and which tools are installed; install missing ones with dev_install (mpremote, thonny, rpi-imager).\n2. Pico / Pico W / Pico 2: flash MicroPython with pico_flash (download the right .uf2 from micropython.org first) or a compiled C/C++/Arduino .uf2; then micropython (put, run, exec, ls) to deploy and test main.py; read the output and fix until it works. Arduino-style builds: arduino_setup with core rp2040:rp2040.\n3. New Pi board: download Raspberry Pi OS (Lite for headless), sd_card_image list → confirm the drive with the user → write. Enable SSH and Wi-Fi through Imager customisation or tell the user the first-boot steps.\n4. Pi on the network: add it as a server (ssh_save_server, user from the setup), then work over SSH: apt update/upgrade, python3-venv, gpiozero / picamera2 / libcamera, I2C/SPI with raspi-config nonint, systemd service for the app, logs with journalctl.\n5. Test on the real hardware (run it, read the output, camera photo) before saying it works. Finish with security_check if the Pi is reachable from the internet.' },
+  { name: 'nvidia-jetson', description: 'NVIDIA work: GPU/CUDA on this PC, or a Jetson board over SSH (JetPack, CUDA, TensorRT, cameras, AI models)', body: 'NVIDIA workflow:\n1. dev_environment: GPU and driver (nvidia-smi), CUDA Toolkit (nvcc), Nsight, Jetson on USB (recovery mode) or on the network.\n2. On this PC: install the CUDA Toolkit with dev_install cuda if needed, build and run a small CUDA/PyTorch check (torch.cuda.is_available()), profile with Nsight (open_ide nsight-systems).\n3. Jetson over SSH (add it with ssh_save_server): cat /etc/nv_tegra_release and dpkg -l nvidia-jetpack for the JetPack version; sudo nvpmodel -q / jetson_clocks for power modes; jtop (pip install jetson-stats) for load; CUDA samples / deviceQuery; TensorRT (trtexec) and DeepStream for AI pipelines; cameras with gst-launch-1.0 nvarguscamerasrc; Docker with the NVIDIA runtime (l4t containers).\n4. Flashing a Jetson needs NVIDIA SDK Manager on Ubuntu (a Linux PC or WSL2): explain the steps (recovery mode jumper/button, USB-C to the host, SDK Manager) — or flash an SD-card image for Orin Nano dev kits with sd_card_image.\n5. Always measure and test on the device before saying it works.' },
+  { name: 'test-app', description: 'Test an app or website like a user: run it, click through it, find defects, fix them and test again', body: 'App testing loop:\n1. Build and start the app (run_command / job_start for servers; open the page with browser_view open, or the desktop app with computer_act open_app).\n2. Make a task list (task_update) of the main user flows and checks (start, navigation, forms, errors, mobile width 390 for websites).\n3. Go through each flow visually: screenshot, act (browser_act / computer_act), screenshot again. Note every defect: crashes, console errors, wrong text, broken layout, slow steps.\n4. Fix the defects in the code, rebuild, and test the same flow again until it passes.\n5. Run the automated tests if the project has them. Report what was tested, what was fixed, and anything still open — with evidence (screenshots, outputs).' },
+  { name: 'security-audit', description: 'Check and harden a public server or website (ports, firewall, SSH, updates, TLS, headers, exposed files)', body: 'Security audit:\n1. security_check with the server and/or the domain.\n2. Explain the findings in plain words, most critical first.\n3. With the user\'s OK, fix them over SSH step by step (keep your own SSH access working: allow OpenSSH in the firewall BEFORE enabling it; test a second SSH login before disabling passwords).\n4. Run security_check again and show the before/after.' },
   { name: 'server-setup', description: 'Set up or fix a VPS / dedicated server over SSH', body: 'On the chosen server (ssh_servers to list):\n1. Inspect first: OS, disk, memory, running services (ssh_exec: uname -a; df -h; free -m; systemctl --failed; ss -tlnp).\n2. Say what you will change, then do it step by step: updates, firewall (keep SSH open!), users, nginx/caddy, certificates, docker, databases, app deployment with systemd or docker compose.\n3. Use ssh_shell for interactive programs. Verify each step (curl the site, check logs).\n4. Summarise what was changed and how to undo it.' },
 ];
 function seedSkills(skills) {
@@ -264,7 +268,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       if (!c) return send(res, 404, { error: 'not found' });
       if (m === 'GET') {
         const { llm, ...rest } = c;
-        return send(res, 200, { ...rest, running: agent.isRunning(c.id), status: agent.runtime.get(c.id)?.status || '', pending: agent.pendingApprovals(c.id) });
+        return send(res, 200, { ...rest, queue: agent.publicQueue(c), running: agent.isRunning(c.id), status: agent.runtime.get(c.id)?.status || '', pending: agent.pendingApprovals(c.id) });
       }
       if (m === 'PATCH') {
         const b = await readJson(req);
@@ -287,15 +291,35 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         const { llm, ...rest } = c;
         return send(res, 200, rest);
       }
-      if (m === 'DELETE') { await agent.stop(c.id); store.delete(c.id); emit('conv:delete', { id: c.id }); return send(res, 200, { ok: true }); }
+      if (m === 'DELETE') {
+        await agent.stop(c.id); store.delete(c.id); emit('conv:delete', { id: c.id });
+        fs.promises.rm(path.join(dataDir, 'scratch', c.id), { recursive: true, force: true }).catch(() => {});
+        return send(res, 200, { ok: true });
+      }
     }
     if ((mm = p.match(/^\/api\/convs\/([\w-]+)\/send$/)) && m === 'POST') {
       const b = await readJson(req);
       if (!store.get(mm[1])) return send(res, 404, { error: 'not found' });
-      if (agent.isRunning(mm[1])) return send(res, 409, { error: 'Still working on the previous message.' });
       const attachments = await attachmentsToText(b.attachments);
-      agent.send(mm[1], b.text, { from: b.from || 'app', attachments }).catch((e) => logFn(`send failed: ${e.message}`));
+      const busy = agent.isRunning(mm[1]);
+      const when = b.when === 'queue' ? 'queue' : 'now';
+      const p2 = agent.send(mm[1], b.text, { from: b.from || 'app', attachments, when });
+      if (busy) { const r = await p2.catch((e) => `Error: ${e.message}`); return send(res, 200, { ok: true, busy: true, when, result: r }); }
+      p2.catch((e) => logFn(`send failed: ${e.message}`));
       return send(res, 202, { ok: true });
+    }
+    // queued messages: remove, or send one right now (joins the running work, or starts if idle)
+    if ((mm = p.match(/^\/api\/convs\/([\w-]+)\/queue\/([\w-]+)$/))) {
+      const c = store.get(mm[1]);
+      if (!c) return send(res, 404, { error: 'not found' });
+      if (m === 'DELETE') return send(res, 200, { ok: !!agent.removeQueued(c, mm[2]) });
+      if (m === 'POST') {
+        const q = agent.removeQueued(c, mm[2]);
+        if (!q) return send(res, 404, { error: 'not in the queue any more' });
+        const r = agent.send(c.id, q.text, { from: q.from || 'app', attachments: q.attachments || [], when: 'now' });
+        if (agent.isRunning(c.id)) await r.catch(() => {}); else r.catch((e) => logFn(`send failed: ${e.message}`));
+        return send(res, 200, { ok: true });
+      }
     }
     if ((mm = p.match(/^\/api\/convs\/([\w-]+)\/stop$/)) && m === 'POST') return send(res, 200, { ok: await agent.stop(mm[1]) });
     if (p === '/api/search') {
@@ -327,7 +351,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/settings' && m === 'POST') {
       const b = await readJson(req);
       const patch = {};
-      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'museSandbox', 'museTrustWorkspace', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel']) if (k in b) patch[k] = b[k];
+      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'museSandbox', 'museTrustWorkspace', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel', 'finishAllTasks', 'verifyBeforeFinish', 'maxTotalSteps']) if (k in b) patch[k] = b[k];
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey.trim();
       if (b.clearApiKey) patch.apiKey = '';
       if (b.workspace) {

@@ -201,7 +201,7 @@ class DesktopHelper {
   constructor(log) { this.log = log || (() => {}); this.proc = null; this.ready = null; this.waiters = new Map(); this.seq = 0; this.buf = ''; }
   start() {
     if (this.ready) return this.ready;
-    if (!IS_WIN && !process.env.MC_DESKTOP_HELPER) return Promise.reject(new Error('Desktop control works on Windows (the Muse Carpathron desktop app).'));
+    if (!IS_WIN && !process.env.MC_DESKTOP_HELPER) return Promise.reject(new Error('Desktop control works on Windows (the Carpathron Robotics & Coding desktop app).'));
     const cmd = process.env.MC_DESKTOP_HELPER || 'powershell.exe';
     // -EncodedCommand (UTF-16LE base64): no quoting problems with the script on the Windows command line
     const args = process.env.MC_DESKTOP_HELPER ? [] : ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(PS_HOST, 'utf16le').toString('base64')];
@@ -290,10 +290,15 @@ class MuseBrowser {
   constructor() { this.win = null; this.scale = 1; }
   async ensure(width) {
     const e = electron();
-    if (!e) throw new Error('The Muse Browser needs the Muse Carpathron desktop app.');
+    if (!e) throw new Error('The Muse Browser needs the Carpathron Robotics & Coding desktop app.');
     if (!this.win || this.win.isDestroyed()) {
       this.win = new e.BrowserWindow({ width: width || 1280, height: 860, title: 'Muse Browser', show: false, autoHideMenuBar: true, webPreferences: { partition: 'persist:muse-browser', sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
-      this.win.webContents.setWindowOpenHandler(({ url }) => { this.win.loadURL(url).catch(() => {}); return { action: 'deny' }; });   // popups open in the same window
+      // Popups open in the same window (web addresses only). A page may not navigate itself to file:// or other
+      // local schemes (that would let a web page read files from this PC); only the agent's own "open" can.
+      this.win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) this.win.loadURL(url).catch(() => {}); return { action: 'deny' }; });
+      const guard = (ev, url) => { if (!/^(https?:|about:blank)/i.test(url)) ev.preventDefault(); };
+      this.win.webContents.on('will-navigate', guard);
+      this.win.webContents.on('will-redirect', guard);
       this.win.on('page-title-updated', (ev, t) => { ev.preventDefault(); this.win.setTitle(`Muse Browser — ${t}`); });
       this.win.showInactive();
     } else if (width) {
@@ -440,7 +445,9 @@ async function execComputer(name, args, ctx) {
         if (!app) throw new Error('app is needed');
         let target = app;
         if (!/[\\/]/.test(app) && !/\.(exe|bat|cmd|lnk|msc)$/i.test(app) && !/^[a-z]+:/i.test(app)) target = (await findStartMenuApp(app)) || app;
-        const ps = `Start-Process -FilePath ${JSON.stringify(target).replace(/`/g, '``')}${args.args ? ` -ArgumentList ${JSON.stringify(String(args.args))}` : ''}`;
+        // Single-quoted PowerShell strings: nothing inside is expanded ($(), `, variables).
+        const psq = (v) => `'${String(v).replace(/'/g, "''")}'`;
+        const ps = `Start-Process -FilePath ${psq(target)}${args.args ? ` -ArgumentList ${psq(args.args)}` : ''}`;
         const before = new Set((await desktop.call('windows').catch(() => [])).map((w) => w.hwnd));
         await new Promise((resolve, reject) => {
           const p = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true });

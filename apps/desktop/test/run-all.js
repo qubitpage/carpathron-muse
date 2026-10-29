@@ -42,11 +42,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await new Promise((r) => sock.on('open', r));
   const waitFor = async (pred, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { const e = events.find(pred); if (e) return e; await sleep(30); } throw new Error('timeout waiting for event'); };
   const waitIdle = async (convId) => waitFor((e) => e.event === 'turn:state' && e.data.convId === convId && e.data.running === false && !e.data._seen && (e.data._seen = true), 15000);
-  const lastAgentCall = () => fake.calls().filter((x) => /You are Muse Carpathron/.test(x.messages[0].content)).slice(-1)[0];
+  const lastAgentCall = () => fake.calls().filter((x) => /You are Carpathron/.test(x.messages[0].content)).slice(-1)[0];
   const conv = async (extra = {}) => { const c = await api('/api/convs', { ...extra }); return c; };
   const sendMsg = async (c, text, extra = {}) => { await api(`/api/convs/${c.id}/send`, { text, ...extra }); await waitIdle(c.id); return api(`/api/convs/${c.id}`); };
 
-  console.log('Muse Carpathron backend tests');
+  console.log('Carpathron Robotics & Coding backend tests');
 
   await step('security: API and WebSocket refuse requests without the access token', async () => {
     const r = await fetch(base + '/api/bootstrap');
@@ -70,7 +70,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.strictEqual(r.status, 200, 'paired device can use the app');
     assert.strictEqual((await post(acc.pin)).status, 403, 'PIN is single use');
     const page = await fetch(`${base}/pair`);
-    assert.ok(/Pair with Muse Carpathron/.test(await page.text()));
+    assert.ok(/Pair with Carpathron Robotics/.test(await page.text()));
   });
 
   await step('bootstrap + models list from Meta API', async () => {
@@ -233,7 +233,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await step('skills: /review expands to the skill instructions; custom skill saved', async () => {
     const c = await conv();
     await sendMsg(c, '/review src folder');
-    const last = fake.calls().filter((x) => x.messages[0].content.includes('Muse Carpathron')).slice(-1)[0].messages.slice(-1)[0].content;
+    const last = fake.calls().filter((x) => x.messages[0].content.includes('You are Carpathron')).slice(-1)[0].messages.slice(-1)[0].content;
     assert.ok(/Review the code/.test(last) && /src folder/.test(last), last);
     await api('/api/skills', { name: 'Daily Report', description: 'd', body: 'Write my daily report' });
     assert.ok((await api('/api/skills')).some((s) => s.name === 'daily-report'));

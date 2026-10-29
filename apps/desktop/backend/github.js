@@ -122,6 +122,15 @@ class GitHub {
     const res = await fetch(asset.browser_download_url, { headers: { 'User-Agent': 'Muse-Carpathron' }, signal: AbortSignal.timeout(300000) });
     if (!res.ok) throw new Error(`GitHub CLI download failed (HTTP ${res.status}).`);
     const buf = Buffer.from(await res.arrayBuffer());
+    // Verify the download against the checksums file published with the same release.
+    onStatus('Verifying the download…');
+    const ver = String(j.tag_name || '').replace(/^v/, '');
+    const sumsUrl = asset.browser_download_url.replace(/[^/]+$/, `gh_${ver}_checksums.txt`);
+    const sums = await fetch(sumsUrl, { headers: { 'User-Agent': 'Carpathron' }, signal: AbortSignal.timeout(30000) }).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+    const want = (sums.split('\n').find((l) => l.trim().endsWith(` ${asset.name}`)) || '').trim().split(/\s+/)[0];
+    const got = require('crypto').createHash('sha256').update(buf).digest('hex');
+    if (!want) throw new Error('Could not get the GitHub CLI checksums file to verify the download. Try again later.');
+    if (want.toLowerCase() !== got) throw new Error('The GitHub CLI download did not match its published checksum; it was not installed.');
     const dir = this.ghDir();
     await fsp.rm(dir, { recursive: true, force: true });
     await fsp.mkdir(path.join(dir, 'bin'), { recursive: true });
@@ -220,9 +229,10 @@ class GitHub {
 
   git(args, cwd, { signal, auth = false } = {}) {
     return new Promise((resolve) => {
-      const pre = auth ? ['-c', `http.https://github.com/.extraheader=AUTHORIZATION: basic ${Buffer.from(`x-access-token:${this.token()}`).toString('base64')}`] : [];
+      // The token goes through the environment (GIT_CONFIG_*), not the command line, so it is not visible in process lists.
+      const authEnv = auth ? { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader', GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${this.token()}`).toString('base64')}` } : {};
       let child;
-      try { child = spawn('git', [...pre, ...args], { cwd, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }); }
+      try { child = spawn('git', args, { cwd, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', ...authEnv } }); }
       catch (e) { resolve({ code: -1, out: e.message }); return; }
       let out = '';
       child.stdout.on('data', (d) => (out += d)); child.stderr.on('data', (d) => (out += d));

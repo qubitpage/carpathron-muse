@@ -1,0 +1,52 @@
+# Builds Carpathron Robotics & Coding on Windows: the installer (.exe) and the Microsoft Store package (.appx / MSIX).
+# The Store package identity comes from Partner Center (App → Product management → Product identity). Set them once as
+# repository variables (Settings → Secrets and variables → Actions → Variables):
+#   STORE_IDENTITY_NAME   e.g. 12345QubitpageLIMITED.CarpathronRoboticsCoding   (Package/Identity/Name)
+#   STORE_PUBLISHER       e.g. CN=1A2B3C4D-....                                 (Package/Identity/Publisher)
+# Without them the package is built with placeholders (fine for testing the build, not for uploading).
+# The Store signs the package itself; no certificate is needed here.
+name: Desktop app (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Tests
+        run: npm test
+        continue-on-error: true # written for Linux CI too; report, don't block the package build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+      - name: Build installer and Store package
+        shell: pwsh
+        run: |
+          $args = @('--win', 'nsis', 'appx', '--x64', '--publish', 'never')
+          if ($env:STORE_IDENTITY_NAME) { $args += "-c.appx.identityName=$env:STORE_IDENTITY_NAME" }
+          if ($env:STORE_PUBLISHER) { $args += "-c.appx.publisher=$env:STORE_PUBLISHER" }
+          node build/patch-sdk.js
+          npx electron-builder @args
+        env:
+          STORE_IDENTITY_NAME: ${{ vars.STORE_IDENTITY_NAME }}
+          STORE_PUBLISHER: ${{ vars.STORE_PUBLISHER }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: carpathron-windows
+          path: |
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.appx
+          if-no-files-found: error

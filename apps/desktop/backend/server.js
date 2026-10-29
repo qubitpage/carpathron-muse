@@ -1,4 +1,4 @@
-// Muse Carpathron backend: HTTPS + WebSocket server used by the desktop window, the Quest/phone browser and WhatsApp.
+// Carpathron Robotics & Coding backend: HTTPS + WebSocket server used by the desktop window, the Quest/phone browser and WhatsApp.
 'use strict';
 const fs = require('fs');
 const fsp = fs.promises;
@@ -8,6 +8,7 @@ const https = require('https');
 const http = require('http');
 const net = require('net');
 const crypto = require('crypto');
+const { pipeline } = require('stream');
 const { WebSocketServer } = require('ws');
 const selfsigned = require('selfsigned');
 const { Store } = require('./store');
@@ -56,7 +57,7 @@ const BUILTIN_SKILLS = [
   { name: 'design-pdf', description: 'Create a professionally designed PDF (report, offer, CV, flyer, invoice)', body: 'Create a professionally designed PDF.\n1. Collect the content (read the given files with read_document, research with web_search if facts are needed).\n2. Write one HTML document with embedded CSS: @page size and margins, a cover or header, clear typographic hierarchy, tables with borders, page-break rules (break-inside: avoid for tables/figures), SVG charts drawn inline when numbers matter, a footer.\n3. Save the HTML next to the PDF, call create_pdf with source = that HTML, then check it: screenshot_page on the HTML (width 1240) and read_document on the PDF (page count, text). Fix layout problems and regenerate.\n4. Report the PDF path and page count.' },
   { name: 'research', description: 'Research a topic on the web and write a cited report', body: 'Use deep_research with depth "standard" (or "deep" if the user wants thoroughness) on the request. Then read the report, check the most important claims against the sources with web_fetch, correct anything unsupported, and give the user a short answer plus the report path.' },
   { name: 'firmware', description: 'Write, build and flash ESP32/Arduino firmware, then verify on the serial monitor', body: 'Firmware workflow:\n1. arduino_setup (with the core needed, e.g. esp32:esp32) if arduino_compile is not available yet.\n2. arduino_boards to find the port and board.\n3. Write or edit the sketch in its own folder (folder name = sketch name, file <name>.ino). Keep pins, Wi-Fi credentials and constants at the top.\n4. arduino_compile; read errors (file:line) and fix until BUILD OK.\n5. arduino_upload to the port (ESP32: if it cannot connect, tell the user to hold BOOT).\n6. serial_monitor for 10 s to verify it boots and prints what is expected (IP address, sensor values). Fix and repeat if needed.' },
-  { name: 'carpathron-build', description: 'The Carpathron process: robot firmware + control app + Avatar (VR) + docs, end to end', body: 'Work like the Carpathron project:\n1. Hardware: list parts and pins; write the robot firmware (ESP32, HTTP/WebSocket protocol like protocol/ROBOT-PROTOCOL.md) and flash it with the /firmware steps.\n2. Control: connect the robot in Muse Carpathron (Robot page → Find my car), test robot_status, robot_drive, robot_photo.\n3. Apps: extend the desktop control center or the Quest Avatar app; build, run, and test after every change.\n4. Server: if the user wants it online, deploy to the chosen SSH server (ssh_upload, ssh_exec, job_start for long processes).\n5. Documentation: README with setup steps and a designed PDF (/design-pdf) for partners.\nAfter each step report what works and what is next.' },
+  { name: 'carpathron-build', description: 'The Carpathron process: robot firmware + control app + Avatar (VR) + docs, end to end', body: 'Work like the Carpathron project:\n1. Hardware: list parts and pins; write the robot firmware (ESP32, HTTP/WebSocket protocol like protocol/ROBOT-PROTOCOL.md) and flash it with the /firmware steps.\n2. Control: connect the robot in Carpathron Robotics & Coding (Robot page → Find my car), test robot_status, robot_drive, robot_photo.\n3. Apps: extend the desktop control center or the Quest Avatar app; build, run, and test after every change.\n4. Server: if the user wants it online, deploy to the chosen SSH server (ssh_upload, ssh_exec, job_start for long processes).\n5. Documentation: README with setup steps and a designed PDF (/design-pdf) for partners.\nAfter each step report what works and what is next.' },
   { name: 'github-publish', description: 'Publish a folder to GitHub (create the repo if needed) and optionally make a release with files', body: 'Publish to GitHub:\n1. github_account to know the owner (or use the owner/name the user gave).\n2. Make sure a good .gitignore exists (node_modules, dist, build outputs, .env, keys, *.keystore) and that no secrets (API keys, passwords, tokens, keystores) are inside the folder — search for them first and stop if you find any.\n3. Add or update README.md if missing.\n4. github_publish with a clear commit message (private repo unless the user says public).\n5. If the user wants downloadable apps: github_release with a version tag (e.g. v1.0.0), release notes, and the installer/APK files.\n6. Report the repository and download links.' },
   { name: 'raspberry-pi', description: 'Raspberry Pi work: Pico / MicroPython over USB, or a Pi board over SSH (setup, GPIO, camera, services)', body: 'Raspberry Pi workflow:\n1. dev_environment to see what is connected (Pico on a COM port or in BOOTSEL mode, Pi boards on the network) and which tools are installed; install missing ones with dev_install (mpremote, thonny, rpi-imager).\n2. Pico / Pico W / Pico 2: flash MicroPython with pico_flash (download the right .uf2 from micropython.org first) or a compiled C/C++/Arduino .uf2; then micropython (put, run, exec, ls) to deploy and test main.py; read the output and fix until it works. Arduino-style builds: arduino_setup with core rp2040:rp2040.\n3. New Pi board: download Raspberry Pi OS (Lite for headless), sd_card_image list → confirm the drive with the user → write. Enable SSH and Wi-Fi through Imager customisation or tell the user the first-boot steps.\n4. Pi on the network: add it as a server (ssh_save_server, user from the setup), then work over SSH: apt update/upgrade, python3-venv, gpiozero / picamera2 / libcamera, I2C/SPI with raspi-config nonint, systemd service for the app, logs with journalctl.\n5. Test on the real hardware (run it, read the output, camera photo) before saying it works. Finish with security_check if the Pi is reachable from the internet.' },
   { name: 'nvidia-jetson', description: 'NVIDIA work: GPU/CUDA on this PC, or a Jetson board over SSH (JetPack, CUDA, TensorRT, cameras, AI models)', body: 'NVIDIA workflow:\n1. dev_environment: GPU and driver (nvidia-smi), CUDA Toolkit (nvcc), Nsight, Jetson on USB (recovery mode) or on the network.\n2. On this PC: install the CUDA Toolkit with dev_install cuda if needed, build and run a small CUDA/PyTorch check (torch.cuda.is_available()), profile with Nsight (open_ide nsight-systems).\n3. Jetson over SSH (add it with ssh_save_server): cat /etc/nv_tegra_release and dpkg -l nvidia-jetpack for the JetPack version; sudo nvpmodel -q / jetson_clocks for power modes; jtop (pip install jetson-stats) for load; CUDA samples / deviceQuery; TensorRT (trtexec) and DeepStream for AI pipelines; cameras with gst-launch-1.0 nvarguscamerasrc; Docker with the NVIDIA runtime (l4t containers).\n4. Flashing a Jetson needs NVIDIA SDK Manager on Ubuntu (a Linux PC or WSL2): explain the steps (recovery mode jumper/button, USB-C to the host, SDK Manager) — or flash an SD-card image for Orin Nano dev kits with sd_card_image.\n5. Always measure and test on the device before saying it works.' },
@@ -166,29 +167,58 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   wa.applySettings().catch(() => {});
 
   const tls = await getCert(dataDir);
-  // Pairing PIN for the Quest / phones: short code instead of typing the long secret link.
-  let pair = { pin: '', at: 0 };
+  // Pairing PIN for phones / browsers: shown only while Settings → Phone & Quest is open, valid 2 minutes,
+  // one use, and destroyed after 10 wrong tries from anywhere. Each paired device gets its own revocable token.
+  let pair = { pin: '', at: 0, fails: 0 };
+  const PIN_TTL = 2 * 60 * 1000;
   const pinNow = () => {
-    if (!pair.pin || Date.now() - pair.at > 10 * 60 * 1000) pair = { pin: String(crypto.randomInt(0, 1000000)).padStart(6, '0'), at: Date.now() };
+    if (!pair.pin || Date.now() - pair.at > PIN_TTL) pair = { pin: String(crypto.randomInt(0, 1000000)).padStart(6, '0'), at: Date.now(), fails: 0 };
     return pair;
   };
+  const pinValid = () => pair.pin && Date.now() - pair.at <= PIN_TTL;
   const pairTries = new Map(); // ip -> [timestamps]
   // Carpathron Avatar (native Quest app) link: the headset asks, you click Allow on the PC, it gets its own token.
   const avatarLinks = new Map(); // id -> { status, device, ip, at, token }
   const avatarTries = new Map();
-  const avatarAuthed = (req) => {
-    const t = String(req.headers['x-avatar-token'] || '');
-    if (!t) return null;
-    return (store.settings.avatarTokens || []).find((x) => x.token.length === t.length && crypto.timingSafeEqual(Buffer.from(x.token), Buffer.from(t))) || null;
+  const prune = () => {
+    const now = Date.now();
+    for (const [k, l] of avatarLinks) if (now - l.at > 5 * 60 * 1000) avatarLinks.delete(k);
+    for (const m of [pairTries, avatarTries]) for (const [k, v] of m) if (!v.some((t) => now - t < 10 * 60 * 1000)) m.delete(k);
   };
+  const hashToken = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
+  const deviceFor = (t, kind) => {
+    if (!t) return null;
+    const h = Buffer.from(hashToken(t));
+    return (store.settings.devices || []).find((d) => (!kind || d.kind === kind) && d.hash && d.hash.length === h.length && crypto.timingSafeEqual(Buffer.from(d.hash), h)) || null;
+  };
+  const addDevice = (kind, name, ip) => {
+    const t = crypto.randomBytes(24).toString('base64url');
+    const devs = (store.settings.devices || []).filter((d) => d.kind !== kind || d.name !== name || d.ip !== ip);
+    devs.push({ id: crypto.randomUUID(), kind, name: String(name).slice(0, 60), ip: String(ip || '').replace(/^::ffff:/, ''), at: Date.now(), hash: hashToken(t) });
+    store.updateSettings({ devices: devs.slice(-20) });
+    emit('settings:update', store.publicSettings());
+    return t;
+  };
+  const avatarAuthed = (req) => deviceFor(String(req.headers['x-avatar-token'] || ''), 'quest');
   const token = () => store.settings.accessToken;
 
   function authed(req, url) {
     const b = Buffer.from(token());
     const candidates = [req.headers['x-mc-token'], url.searchParams.get('t'), (String(req.headers.cookie || '').match(/(?:^|;\s*)mc_token=([^;]+)/) || [])[1]];
-    return candidates.some((t) => { if (!t) return false; const a = Buffer.from(String(t)); return a.length === b.length && crypto.timingSafeEqual(a, b); });
+    return candidates.some((t) => {
+      if (!t) return false;
+      const a = Buffer.from(String(t));
+      if (a.length === b.length && crypto.timingSafeEqual(a, b)) return true;
+      return !!deviceFor(String(t), 'browser');
+    });
   }
-  const isLocal = (req) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+  // Requests relayed by the Cloudflare tunnel (WhatsApp webhook) arrive from 127.0.0.1 but come from the internet.
+  const viaTunnel = (req) => !!(req.headers['cf-connecting-ip'] || req.headers['cf-ray'] || req.headers['cdn-loop']);
+  const isLocal = (req) => !viaTunnel(req) && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+  const sendFile = (res, file, type) => {
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+    pipeline(fs.createReadStream(file), res, (e) => { if (e && !res.writableEnded) { try { res.destroy(); } catch {} } });
+  };
 
   const readBody = (req, limit = 40 * 1024 * 1024) => new Promise((resolve, reject) => {
     const chunks = []; let n = 0;
@@ -350,7 +380,13 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/settings' && m === 'GET') return send(res, 200, store.publicSettings());
     if (p === '/api/settings' && m === 'POST') {
       const b = await readJson(req);
+      // Settings that start programs, open the PC to the network or hold credentials: only from this PC.
+      if (!isLocal(req)) for (const k of ['mcpServers', 'museBin', 'apiBase', 'apiKey', 'clearApiKey', 'workspace', 'arduinoCli', 'whatsapp', 'lanAccess', 'systemPrompt', 'githubClientId', 'museSandbox', 'musePermissionProfile']) delete b[k];
       const patch = {};
+      if ('lanAccess' in b) patch.lanAccess = !!b.lanAccess;
+      if (b.whatsapp && b.whatsapp.cloud && b.whatsapp.cloud.enabled && !(b.whatsapp.cloud.appSecret || store.settings.whatsapp.cloud.appSecret)) {
+        return send(res, 400, { error: 'WhatsApp Cloud needs the App Secret (Meta app → Settings → Basic) so the app can check that messages really come from Meta.' });
+      }
       for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'museSandbox', 'museTrustWorkspace', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel', 'finishAllTasks', 'verifyBeforeFinish', 'maxTotalSteps']) if (k in b) patch[k] = b[k];
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey.trim();
       if (b.clearApiKey) patch.apiKey = '';
@@ -382,16 +418,24 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       }
       store.updateSettings(patch);
       if (b.robot) robot.connect();
-      if (b.mcpServers) mcp.sync(store.settings.mcpServers).then(() => emit('mcp:status', mcp.status()));
+      if (b.mcpServers) mcp.sync(store.settings.mcpServers).then(() => emit('mcp:status', mcp.status())).catch((e) => logFn(`MCP: ${e.message}`));
       if (b.whatsapp) await wa.applySettings();
+      if ('lanAccess' in patch) await listenFront().catch((e) => logFn(`Network access: ${e.message}`));
       if (b.museBin !== undefined || b.museSandbox !== undefined || b.museTrustWorkspace !== undefined) { agent.muse.noSandboxNext = false; await agent.muse.close(); }
       const pub = store.publicSettings();
       emit('settings:update', pub);
       return send(res, 200, pub);
     }
+    if (p === '/api/devices' && m === 'GET') return send(res, 200, store.publicSettings().devices || []);
+    const dv = p.match(/^\/api\/devices\/([\w-]+)$/);
+    if (dv && m === 'DELETE') {
+      store.updateSettings({ devices: (store.settings.devices || []).filter((d) => d.id !== dv[1]) });
+      emit('settings:update', store.publicSettings());
+      return send(res, 200, { ok: true });
+    }
     if (p === '/api/access' && isLocal(req)) {
       const pp = pinNow();
-      return send(res, 200, { token: token(), urls: lanIps().map((ip) => `https://${ip}:${store.settings.port}/?t=${encodeURIComponent(token())}`), pairUrls: lanIps().map((ip) => `https://${ip}:${store.settings.port}/pair`), pin: pp.pin, pinExpiresIn: Math.round((pp.at + 600000 - Date.now()) / 1000) });
+      return send(res, 200, { lanAccess: !!store.settings.lanAccess, token: token(), urls: lanIps().map((ip) => `https://${ip}:${store.settings.port}/?t=${encodeURIComponent(token())}`), pairUrls: lanIps().map((ip) => `https://${ip}:${store.settings.port}/pair`), pin: pp.pin, pinExpiresIn: Math.round((pp.at + PIN_TTL - Date.now()) / 1000) });
     }
 
     // engines
@@ -495,7 +539,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         if (!st.installed) lines.push("Write-Host 'Installing GitHub CLI (official, from GitHub via winget)...' -ForegroundColor Green", 'winget install --id GitHub.cli -e --accept-source-agreements --accept-package-agreements', "$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')");
         lines.push("Write-Host 'Your browser opens GitHub: copy the one-time code shown here, paste it there and click Authorize.' -ForegroundColor Green",
           'gh auth login --web --hostname github.com --git-protocol https --scopes "repo,workflow,read:org"',
-          "Write-Host ''", "Write-Host 'Done. Go back to Muse Carpathron - it connects automatically. You can close this window.' -ForegroundColor Green");
+          "Write-Host ''", "Write-Host 'Done. Go back to Carpathron Robotics & Coding - it connects automatically. You can close this window.' -ForegroundColor Green");
         MuseEngine.openConsole('github-login', lines, os.homedir());
         return send(res, 200, { ok: true, installing: !st.installed });
       } catch (e) { return send(res, 400, { error: e.message }); }
@@ -552,7 +596,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/wa/tunnel/stop' && m === 'POST') { wa.stopTunnel(); return send(res, 200, wa.status()); }
     if (p === '/api/wa/cloud/test' && m === 'POST') {
       const b = await readJson(req);
-      try { await wa.cloudSend(b.to, b.text || 'Hello from Muse Carpathron'); return send(res, 200, { ok: true }); } catch (e) { return send(res, 200, { ok: false, error: e.message }); }
+      try { await wa.cloudSend(b.to, b.text || 'Hello from Carpathron Robotics & Coding'); return send(res, 200, { ok: true }); } catch (e) { return send(res, 200, { ok: false, error: e.message }); }
     }
 
     // robot + camera
@@ -578,8 +622,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       const inMaps = path.basename(path.dirname(path.dirname(f))) === 'maps' && /\.(jpe?g|png)$/i.test(f);
       const shown = agent.shown.has(f) && /\.(jpe?g|png|webp|gif|bmp)$/i.test(f);
       if ((!inPhotos && !inMaps && !shown) || !fs.existsSync(f)) return send(res, 404, { error: 'not found' });
-      res.writeHead(200, { 'Content-Type': models.mimeOf(f).startsWith('image/') ? models.mimeOf(f) : 'image/jpeg', 'Cache-Control': 'no-store' });
-      return fs.createReadStream(f).pipe(res);
+      return sendFile(res, f, models.mimeOf(f).startsWith('image/') ? models.mimeOf(f) : 'image/jpeg');
     }
     // Robot head + room maps
     if (p === '/api/robot/look' && m === 'POST') {
@@ -603,8 +646,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       const l = avatarLinks.get(String(b.id || ''));
       if (!l) return send(res, 404, { error: 'Link request expired' });
       if (b.allow) {
-        l.token = crypto.randomBytes(24).toString('hex'); l.status = 'allowed';
-        store.updateSettings({ avatarTokens: [...(store.settings.avatarTokens || []), { token: l.token, device: l.device, at: Date.now() }].slice(-5) });
+        l.token = addDevice('quest', l.device, l.ip); l.status = 'allowed';
         logFn(`Carpathron Avatar linked: ${l.device}`);
       } else { l.status = 'denied'; }
       return send(res, 200, { ok: true });
@@ -613,8 +655,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (mf && m === 'GET') {
       const f = mapper.file(mf[1], mf[2]);
       if (!f) return send(res, 404, { error: 'not found' });
-      res.writeHead(200, { 'Content-Type': f.endsWith('.svg') ? 'image/svg+xml' : f.endsWith('.png') ? 'image/png' : 'image/jpeg', 'Cache-Control': 'no-store' });
-      return fs.createReadStream(f).pipe(res);
+      return sendFile(res, f, f.endsWith('.svg') ? 'image/svg+xml' : f.endsWith('.png') ? 'image/png' : 'image/jpeg');
     }
     if (p === '/api/wa/personal/test' && m === 'POST') { try { await wa.sendSelfTest(); return send(res, 200, { ok: true }); } catch (e) { return send(res, 200, { ok: false, error: e.message }); } }
 
@@ -624,6 +665,9 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   const server = https.createServer(tls, async (req, res) => {
     const url = new URL(req.url, 'https://localhost');
     try {
+      prune();
+      // Through the tunnel only the WhatsApp webhook is reachable; everything else is for this PC / the LAN.
+      if (viaTunnel(req) && url.pathname !== '/whatsapp/webhook') { res.writeHead(403); return res.end('forbidden'); }
       // WhatsApp Cloud API webhook (called by Meta, authenticated by verify token / signature)
       if (url.pathname === '/whatsapp/webhook') {
         if (req.method === 'GET') {
@@ -640,7 +684,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         }
       }
       // ---- Carpathron Avatar (Quest app) endpoints
-      if (url.pathname === '/avatar/hello') return send(res, 200, { app: 'Muse Carpathron', version: require('../package.json').version, linked: !!avatarAuthed(req) });
+      if (url.pathname === '/avatar/hello') return send(res, 200, { app: 'Muse Carpathron', name: 'Carpathron Robotics & Coding', /* 'app' is checked by the Quest app 1.1.x: keep */ version: require('../package.json').version, linked: !!avatarAuthed(req) });
       if (url.pathname === '/avatar/link' && req.method === 'POST') {
         const ip = req.socket.remoteAddress || '';
         const now = Date.now();
@@ -671,7 +715,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
             const b = await readJson(req);
             const ph = await camera.capture();
             const s = store.settings;
-            if (!s.apiKey) return send(res, 200, { answer: 'Add the Meta API key in Muse Carpathron (Settings) so Muse can see through the robot.' });
+            if (!s.apiKey) return send(res, 200, { answer: 'Add the Meta API key in Carpathron Robotics & Coding (Settings) so Muse can see through the robot.' });
             const r = await agent.api.complete({ model: s.model, messages: [
               { role: 'system', content: 'You are the eyes of a small robot car (camera 10 cm above the floor). The user wears a VR headset and sees the same picture. Answer in 1-3 short sentences, practical (obstacles, distances, where to drive).' },
               { role: 'user', content: [{ type: 'text', text: String(b.question || 'What do you see?').slice(0, 500) }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${ph.buffer.toString('base64')}` } }] },
@@ -702,8 +746,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         return send(res, 404, { error: 'unknown' });
       }
       if (url.pathname === '/pair' && req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-        return fs.createReadStream(path.join(PUBLIC_DIR, 'pair.html')).pipe(res);
+        return sendFile(res, path.join(PUBLIC_DIR, 'pair.html'), 'text/html; charset=utf-8');
       }
       if (url.pathname === '/pair' && req.method === 'POST') {
         const ip = req.socket.remoteAddress || '';
@@ -713,18 +756,24 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         tries.push(now); pairTries.set(ip, tries);
         let b = {};
         try { b = JSON.parse((await readBody(req, 4096)).toString('utf8') || '{}'); } catch {}
-        const pp = pinNow();
+        if (!pinValid()) return send(res, 403, { error: 'No PIN is active. On the PC open Settings → Phone & Quest to show a new PIN (valid 2 minutes).' });
         const given = String(b.pin || '').replace(/\D/g, '');
-        const ok = given.length === 6 && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(pp.pin));
-        if (!ok) return send(res, 403, { error: 'Wrong PIN. Check the PIN shown in Muse Carpathron on the PC.' });
-        pair = { pin: '', at: 0 }; // one use
+        const ok = given.length === 6 && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(pair.pin));
+        if (!ok) {
+          if (++pair.fails >= 10) { pair = { pin: '', at: 0, fails: 0 }; logFn('Pairing PIN cancelled after 10 wrong tries'); }
+          return send(res, 403, { error: 'Wrong PIN. Check the PIN shown in Carpathron Robotics & Coding on the PC.' });
+        }
+        pair = { pin: '', at: 0, fails: 0 }; // one use
         pairTries.delete(ip);
-        logFn(`Device paired from ${ip}`);
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `mc_token=${token()}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000` });
+        const ua = String(req.headers['user-agent'] || '');
+        const name = /Quest|OculusBrowser/i.test(ua) ? 'Quest browser' : /iPhone|iPad/i.test(ua) ? 'iPhone / iPad' : /Android/i.test(ua) ? 'Android phone' : 'Browser';
+        const devTok = addDevice('browser', name, ip);
+        logFn(`Device paired from ${ip} (${name})`);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `mc_token=${devTok}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000` });
         return res.end(JSON.stringify({ ok: true }));
       }
       if (url.pathname.startsWith('/api/')) {
-        if (!authed(req, url)) return send(res, 401, { error: 'Not authorized. Open the link shown in Muse Carpathron → Settings → Phone & Quest.' });
+        if (!authed(req, url)) return send(res, 401, { error: 'Not authorized. Open the link shown in Carpathron Robotics & Coding → Settings → Phone & Quest.' });
         return await api(req, res, url);
       }
       // pages: accept ?t=token once and keep it in a cookie
@@ -732,13 +781,16 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         res.writeHead(302, { 'Set-Cookie': `mc_token=${token()}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000`, Location: url.pathname });
         return res.end();
       }
-      if (VENDOR[url.pathname]) { res.writeHead(200, { 'Content-Type': MIME['.js'] }); return fs.createReadStream(VENDOR[url.pathname]).pipe(res); }
+      if (VENDOR[url.pathname]) return sendFile(res, VENDOR[url.pathname], MIME['.js']);
       let file = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname);
       file = path.normalize(path.join(PUBLIC_DIR, file));
       if (!file.startsWith(PUBLIC_DIR)) { res.writeHead(403); return res.end(); }
       fs.readFile(file, (err, data) => {
         if (err) { res.writeHead(404); return res.end('not found'); }
-        res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
+        const headers = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
+        // The app page shows model output: no remote images/scripts/connections (stops data leaking through injected links).
+        if (path.basename(file) === 'index.html') headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+        res.writeHead(200, headers);
         res.end(data);
       });
     } catch (e) {
@@ -775,8 +827,12 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     res.writeHead(301, { Location: `https://${host}${req.url && req.url.startsWith('/') ? req.url : '/'}`, 'Content-Type': 'text/html' });
     res.end(`<a href="https://${host}${req.url}">Continue to the secure page</a>`);
   });
+  const openSockets = new Set();
+  const loopback = (a) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(a);
   const front = net.createServer((socket) => {
     socket.on('error', () => {});
+    if (!store.settings.lanAccess && !loopback(socket.remoteAddress)) return socket.destroy();
+    openSockets.add(socket); socket.on('close', () => openSockets.delete(socket));
     socket.setTimeout(30000, () => socket.destroy());
     socket.once('data', (buf) => {
       socket.setTimeout(0);
@@ -786,8 +842,19 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       process.nextTick(() => socket.resume());
     });
   });
-  await new Promise((resolve, reject) => { front.once('error', reject); front.listen(port, '0.0.0.0', resolve); });
-  logFn(`Muse Carpathron server on https://localhost:${port}`);
+  // Only this PC can connect unless "Allow phones and Quest on this network" is on.
+  let frontHost = '';
+  async function listenFront() {
+    const want = store.settings.lanAccess ? '0.0.0.0' : '127.0.0.1';
+    if (want === frontHost) return;
+    if (frontHost) front.close(); // stops listening now; the app window's own connection stays
+    if (want === '127.0.0.1') for (const sk of openSockets) if (!loopback(sk.remoteAddress)) sk.destroy(); // network access off: drop LAN devices now
+    await new Promise((resolve, reject) => { front.once('error', reject); front.listen(port, want, () => { front.off('error', reject); resolve(); }); });
+    frontHost = want;
+    logFn(`Listening on ${want}:${port} (${store.settings.lanAccess ? 'network access on' : 'this PC only'})`);
+  }
+  await listenFront();
+  logFn(`Carpathron Robotics & Coding server on https://localhost:${port}`);
 
   return {
     port,

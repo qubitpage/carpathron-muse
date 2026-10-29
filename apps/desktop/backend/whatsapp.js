@@ -1,4 +1,4 @@
-// Control Muse Carpathron from a phone over WhatsApp.
+// Control Carpathron Robotics & Coding from a phone over WhatsApp.
 //  - Personal WhatsApp: pair like WhatsApp Web with a QR code (unofficial, Baileys). Use "Message yourself" or an allowed number.
 //  - WhatsApp Business Cloud API (official, Meta): webhook + Graph API sending. Needs a public URL (Cloudflare tunnel helper included).
 // Only the owner's own chat and numbers in the allow-list can control the app.
@@ -10,7 +10,7 @@ const { spawn } = require('child_process');
 const voice = require('./voice');
 
 const HELP = [
-  '*Muse Carpathron* — commands:',
+  '*Carpathron Robotics & Coding* — commands:',
   '/new — start a new chat',
   '/stop — stop the current task',
   '/mode ask|auto|full|plan — approval mode',
@@ -60,12 +60,9 @@ class WhatsApp {
   _changed() { this.emit('wa:status', this.status()); }
 
   isAllowed(number) {
-    const n = digits(number);
-    // exact match, or same number written with/without country code (at least 8 matching digits)
-    return n.length >= 8 && this.cfg().allowed.some((a) => {
-      const d = digits(a);
-      return d.length >= 8 && (d === n || n.endsWith(d) || d.endsWith(n));
-    });
+    // Exact match on the full international number (digits only, country code included, no leading 00 or +).
+    const n = digits(number).replace(/^00/, '');
+    return n.length >= 8 && this.cfg().allowed.some((a) => digits(a).replace(/^00/, '') === n);
   }
 
   // ------------------------------------------------------------ shared command handling
@@ -73,7 +70,9 @@ class WhatsApp {
     const map = this.store.settings.whatsapp.conversations || {};
     let conv = map[key] && this.store.get(map[key]);
     if (!conv) {
-      conv = this.store.createConversation({ title: `WhatsApp ${key.split(':')[1] || ''}`.trim(), source: 'whatsapp' });
+      const quest = key.startsWith('quest:');
+      conv = this.store.createConversation({ title: quest ? 'Quest headset' : `WhatsApp ${key.split(':')[1] || ''}`.trim(), source: 'whatsapp' });
+      if (quest) { conv.mode = 'ask'; this.store.touch(conv); } // voice from the headset never runs actions without approval
       this.store.settings.whatsapp.conversations = { ...map, [key]: conv.id };
       this.store.saveSettings();
       this.emit('conv:update', { id: conv.id, title: conv.title, updatedAt: conv.updatedAt, source: 'whatsapp' });
@@ -120,7 +119,7 @@ class WhatsApp {
       return reply('🆕 New chat started.');
     }
     if (lower === '/stop') { const ok = await this.agent.stop(conv.id); return reply(ok ? '⏹ Stopped.' : 'Nothing is running.'); }
-    if (lower === '/status') return reply(this.agent.isRunning(conv.id) ? '⏳ Working on your last message.' : '💤 Idle. Mode: ' + (this.store.settings.mode));
+    if (lower === '/status') return reply(this.agent.isRunning(conv.id) ? '⏳ Working on your last message.' : '💤 Idle. Mode: ' + (conv.mode || this.store.settings.mode));
     if (lower === '/robot stop' || lower === '/stop robot') { this.agent.robot.stop('whatsapp'); return reply('🛑 Robot stopped.'); }
     const plan = WhatsApp.drivePlan(lower);
     if (plan) {
@@ -162,7 +161,12 @@ class WhatsApp {
       return;
     }
     const mm = lower.match(/^\/mode\s+(ask|auto|full|plan)$/);
-    if (mm) { this.store.updateSettings({ mode: mm[1] }); this.emit('settings:update', this.store.publicSettings()); return reply(`Mode set to *${mm[1]}*.`); }
+    if (mm) {
+      // Only this phone chat changes; the PC's own chats keep their mode. The Quest app always asks on the PC.
+      if (channel === 'quest') return reply('The headset always asks for approval on the PC.');
+      conv.mode = mm[1]; this.store.touch(conv);
+      return reply(`Mode for this chat set to *${mm[1]}*.`);
+    }
     if (this.agent.isRunning(conv.id)) return reply('⏳ Still working on the previous message. Send /stop to cancel it.');
 
     await reply('⏳ Working on it…');
@@ -215,6 +219,13 @@ class WhatsApp {
 
   // ------------------------------------------------------------ personal WhatsApp (QR pairing)
   async startPersonal() {
+    // The Microsoft Store version ships only the official WhatsApp Business Cloud API (Store policy: no unofficial
+    // clients). process.windowsStore is true when Electron runs from an MSIX/AppX package.
+    if (process.windowsStore || process.env.MC_STORE_BUILD === '1') {
+      this.personal.status = 'not available in the Microsoft Store version — use WhatsApp Business (Cloud API) below';
+      this._changed();
+      return;
+    }
     if (this.personal.sock) return;
     const baileys = require('@whiskeysockets/baileys');
     const makeWASocket = baileys.default;
@@ -230,7 +241,7 @@ class WhatsApp {
     const sock = makeWASocket({
       auth: state,
       ...(version ? { version } : {}),
-      browser: Browsers.windows('Muse Carpathron'),
+      browser: Browsers.windows('Carpathron Robotics & Coding'),
       logger: pino({ level: 'warn' }, { write: (line) => {
         this._libLogs = (this._libLogs || 0) + 1;
         if (this._libLogs > 60) return;
@@ -341,7 +352,7 @@ class WhatsApp {
     if (!sock || this.personal.status !== 'connected') throw new Error('Personal WhatsApp is not connected.');
     const me = String(sock.user?.id || '').split(':')[0].split('@')[0];
     const jid = `${me}@s.whatsapp.net`;
-    const sent = await sock.sendMessage(jid, { text: `${BOT_MARK}Muse Carpathron is connected ✅\nReply in this chat with /help` });
+    const sent = await sock.sendMessage(jid, { text: `${BOT_MARK}Carpathron Robotics & Coding is connected ✅\nReply in this chat with /help` });
     if (sent?.key?.id) this.sentIds.add(sent.key.id);
     this.log(`WhatsApp: test message sent to your own chat (${me.slice(0, 4)}…)`);
     return true;
@@ -369,7 +380,7 @@ class WhatsApp {
 
   cloudSignatureOk(rawBody, header) {
     const secret = this.cfg().cloud.appSecret;
-    if (!secret) return true; // optional
+    if (!secret) return false; // required: without it anyone who can reach the webhook could pose as Meta
     const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
     const a = Buffer.from(String(header || '')), b = Buffer.from(expected);
     return a.length === b.length && crypto.timingSafeEqual(a, b);

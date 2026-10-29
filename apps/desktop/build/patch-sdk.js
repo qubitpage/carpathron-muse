@@ -9,7 +9,7 @@ if (src.includes('params.config = options.config')) { console.log('sdk already p
 const start = src.indexOf('async startSession(options = {})');
 const anchor = 'if (options.recoveryMode != null)\n            params.recoveryMode = options.recoveryMode;';
 const at = src.indexOf(anchor, start);
-if (start < 0 || at < 0) { console.error('patch-sdk: anchor not found, SDK changed'); process.exit(0); }
+if (start < 0 || at < 0) { console.error('patch-sdk: anchor not found — @muse-code/sdk changed; update build/patch-sdk.js'); process.exit(1); }
 src = src.slice(0, at + anchor.length) + '\n        if (options.config != null)\n            params.config = options.config;' + src.slice(at + anchor.length);
 fs.writeFileSync(file, src);
 console.log('patched @muse-code/sdk startSession to forward config');

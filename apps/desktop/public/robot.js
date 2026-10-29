@@ -66,6 +66,12 @@
       el.innerHTML = '';
       const url = a.pairUrls[0];
       if (!url) { el.textContent = 'Connect this PC to Wi-Fi to pair the Quest.'; return; }
+      if (!a.lanAccess) {
+        const btn = Object.assign(document.createElement('button'), { className: 'btn', textContent: 'Allow phones and Quest on this network' });
+        btn.onclick = async () => { await window.MCapi('/api/settings', { body: { lanAccess: true } }); showPair(); };
+        el.append(Object.assign(document.createElement('div'), { className: 'small muted', textContent: 'The Quest and phones connect over Wi-Fi. Network access is off (only this PC can connect).' }), btn);
+        return;
+      }
       el.append(
         Object.assign(document.createElement('div'), { className: 'small muted', textContent: 'On the Quest 3S: open the Browser, go to' }),
         Object.assign(document.createElement('div'), { className: 'pairurl', textContent: url }),

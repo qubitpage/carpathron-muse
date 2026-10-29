@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { Secrets } = require('./secrets');
 
 const DEFAULT_SETTINGS = {
   // engine: 'muse' = Muse Code with your Meta account, 'api' = Meta Model API key
@@ -30,6 +31,8 @@ const DEFAULT_SETTINGS = {
   autoMemory: true,
   autoSkills: true,
   port: 8443,
+  lanAccess: false, // accept phones / Quest on the local network (off = this PC only)
+  devices: [], // paired phones/browsers and Quest headsets: { id, kind, name, ip, at, hash } (token hashes only)
   accessToken: '',
   systemPrompt: '',
   mcpServers: {}, // { name: { command, args: [], env: {}, enabled: true } }
@@ -72,9 +75,21 @@ class Store {
     this.convDir = path.join(dataDir, 'conversations');
     fs.mkdirSync(this.convDir, { recursive: true });
     this.settingsFile = path.join(dataDir, 'settings.json');
+    this.secrets = new Secrets(dataDir);
     let saved = {};
-    try { saved = JSON.parse(fs.readFileSync(this.settingsFile, 'utf8')); } catch {}
-    this.settings = deepMerge(DEFAULT_SETTINGS, saved);
+    if (fs.existsSync(this.settingsFile)) {
+      try { saved = JSON.parse(fs.readFileSync(this.settingsFile, 'utf8')); fs.copyFileSync(this.settingsFile, `${this.settingsFile}.bak`); }
+      catch (e) {
+        // Don't silently start over: keep the broken file, then try the last good copy.
+        const bad = `${this.settingsFile}.corrupt-${Date.now()}`;
+        try { fs.renameSync(this.settingsFile, bad); } catch {}
+        try { saved = JSON.parse(fs.readFileSync(`${this.settingsFile}.bak`, 'utf8')); this.recovered = `Settings were damaged; restored the last good copy (damaged file kept as ${path.basename(bad)}).`; }
+        catch { this.recovered = `Settings were damaged and no backup was found; started with defaults (damaged file kept as ${path.basename(bad)}).`; }
+      }
+    }
+    this.settings = deepMerge(DEFAULT_SETTINGS, this._openSecrets(saved));
+    if (saved.lanAccess === undefined && Array.isArray(saved.avatarTokens) && saved.avatarTokens.length) this.settings.lanAccess = true; // already used with a Quest
+    this._migrateTokens();
     if (!this.settings.accessToken) this.settings.accessToken = crypto.randomBytes(18).toString('base64url');
     const lw = String(this.settings.workspace || '').toLowerCase();
     if (process.platform === 'win32' && (lw.includes('\\program files') || lw.includes('\\windows\\'))) this.settings.workspace = '';
@@ -126,7 +141,34 @@ class Store {
   _meta(c) { return { id: c.id, title: c.title, updatedAt: c.updatedAt, createdAt: c.createdAt, source: c.source, engine: c.engine, projectId: c.projectId || null, remote: c.remote && c.remote.serverId ? { serverId: c.remote.serverId, path: c.remote.path || '' } : null }; }
   _saveIndex() { writeAtomic(this.indexFile, JSON.stringify(this.index)); }
 
-  saveSettings() { writeAtomic(this.settingsFile, JSON.stringify(this.settings, null, 2)); }
+  // Secrets in settings.json are stored encrypted (Windows DPAPI in the desktop app), plain in memory.
+  _secretPaths() { return [['apiKey'], ['accessToken'], ['whatsapp', 'cloud', 'accessToken'], ['whatsapp', 'cloud', 'appSecret'], ['whatsapp', 'cloud', 'verifyToken']]; }
+  _mapSecrets(obj, fn) {
+    const out = JSON.parse(JSON.stringify(obj || {}));
+    for (const keys of this._secretPaths()) {
+      let o = out;
+      for (const k of keys.slice(0, -1)) { o = o && o[k]; }
+      const last = keys[keys.length - 1];
+      if (o && typeof o[last] === 'string' && o[last]) o[last] = fn(o[last]);
+    }
+    return out;
+  }
+  _openSecrets(saved) {
+    return this._mapSecrets(saved, (v) => { try { return this.secrets.decrypt(v); } catch (e) { this.recovered = `A saved secret could not be decrypted (${e.message}); enter it again in Settings.`; return ''; } });
+  }
+  // Old versions kept Quest tokens in plain text: keep only a hash (shown once to the headset, never stored).
+  _migrateTokens() {
+    const old = this.settings.avatarTokens;
+    if (Array.isArray(old) && old.length) {
+      const devs = this.settings.devices || [];
+      for (const t of old) if (t && t.token) devs.push({ id: crypto.randomUUID(), kind: 'quest', name: t.device || 'Quest', ip: '', at: t.at || Date.now(), hash: Store.hashToken(t.token) });
+      this.settings.devices = devs;
+    }
+    delete this.settings.avatarTokens;
+  }
+  static hashToken(t) { return crypto.createHash('sha256').update(String(t)).digest('hex'); }
+
+  saveSettings() { writeAtomic(this.settingsFile, JSON.stringify(this._mapSecrets(this.settings, (v) => (/^(dpapi|aes):/.test(v) ? v : this.secrets.encrypt(v))), null, 2)); }
   updateSettings(patch) { this.settings = deepMerge(this.settings, patch); this.saveSettings(); return this.settings; }
 
   // Settings safe to send to the UI (secrets masked)
@@ -136,10 +178,11 @@ class Store {
     s.whatsapp.cloud.hasAccessToken = !!s.whatsapp.cloud.accessToken; delete s.whatsapp.cloud.accessToken;
     s.whatsapp.cloud.hasAppSecret = !!s.whatsapp.cloud.appSecret; delete s.whatsapp.cloud.appSecret;
     delete s.accessToken;
+    s.devices = (s.devices || []).map(({ hash, ...d }) => d);
     delete s.servers;
     delete s.sshKeys;
     if (s.github) s.github = { connected: !!s.github.token, login: s.github.login || '', name: s.github.name || '', email: s.github.email || '' };
-    s.avatarLinked = (s.avatarTokens || []).map((x) => ({ device: x.device, at: x.at })); delete s.avatarTokens;
+    s.avatarLinked = (s.devices || []).filter((d) => d.kind === 'quest').map((d) => ({ device: d.name, at: d.at }));
     return s;
   }
 

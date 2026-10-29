@@ -12,7 +12,7 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 
 | | What it is | Where |
 |---|---|---|
-| 🧠 **Muse Carpathron** | Windows desktop app: chat + agent on **Meta Muse** (Muse Spark / Wonder via the Meta Model API, or your Meta account via **Muse Code**) with full PC access, **SSH servers**, documents & designed PDFs, web research, **Arduino/ESP32 firmware**, Muse Image, SAM 3.1, MCP, sub-agents, RAG memory, projects, skills, WhatsApp remote, robot control, room mapping, browser VR | [`apps/desktop`](apps/desktop) |
+| 🧠 **Carpathron Robotics & Coding** (formerly Muse Carpathron) | Windows desktop app: chat + agent on **Meta Muse** (Muse Spark / Wonder via the Meta Model API, or your Meta account via **Muse Code**) with full PC access, **SSH servers**, documents & designed PDFs, web research, **Arduino/ESP32 firmware**, Muse Image, SAM 3.1, MCP, sub-agents, RAG memory, projects, skills, WhatsApp remote, robot control, room mapping, browser VR | [`apps/desktop`](apps/desktop) |
 | 🥽 **Carpathron Avatar** | Native **Meta Quest** app (OpenXR, Godot): see through the robot's eyes, drive with the controllers, turn your head and the robot turns with you, talk to Muse | [`apps/quest-avatar`](apps/quest-avatar) |
 | 🚗 **Baby Carpathron firmware** | ESP32-CAM car (KUONGSHUN AD174 4WD kit): live video, drive, photo, Wi-Fi setup, RC-style control | [`firmware/carpathron_car`](firmware/carpathron_car) |
 | 🔌 **Carpathron Robot Protocol** | Small open HTTP protocol: any robot that speaks it works with every app | [`protocol/ROBOT-PROTOCOL.md`](protocol/ROBOT-PROTOCOL.md) |
@@ -21,17 +21,31 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.6.1_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Carpathron-Robotics-Coding-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Carpathron--Robotics--Coding--Setup.exe_v1.7.0_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.5.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.5.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.6.1) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. The app opens when the install finishes. |
+| 🧠 **Carpathron Robotics & Coding** – Windows 10 / 11 / Server 2016+ (v1.7.0) | [**Carpathron-Robotics-Coding-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Carpathron-Robotics-Coding-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. Updating from Muse Carpathron keeps all chats, settings and servers. Microsoft Store version: coming soon. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.5) | [**CarpathronAvatar-1.1.5.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.5.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. The Meta Horizon Store version is in review. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 
-All files of this version: **[Release v1.6.1](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.6.1)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.7.0](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.7.0)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+
+## What's new in 1.7.0 — Carpathron Robotics & Coding
+
+- **New name:** Muse Carpathron is now **Carpathron Robotics & Coding** by Qubitpage LIMITED. Updating keeps all chats, settings, servers and keys.
+- **Production security review** (independent audit, all findings fixed and covered by 10 new tests):
+  - phones and Quest connect only when you switch on **network access** (off by default); pairing PIN is valid 2 minutes, works once and is cancelled after 10 wrong tries;
+  - every paired phone/headset gets **its own revocable key** (Settings → Phone & Quest → Paired devices); turning network access off disconnects them at once; settings that start programs or hold keys can only be changed on the PC;
+  - the WhatsApp Cloud webhook requires Meta's signature; the Cloudflare tunnel exposes only the webhook; allowed numbers must match exactly; `/mode` from WhatsApp changes only that chat; the Quest app always asks on the PC;
+  - API key, app key and WhatsApp tokens are **encrypted at rest** (DPAPI) like SSH and GitHub secrets; Quest tokens are stored as fingerprints;
+  - Ask mode asks before reading credential folders (`.ssh`, browser profiles, the app's data), fetching URLs that could carry data out or reach local/cloud-metadata addresses, and taking desktop screenshots;
+  - strict Content-Security-Policy on the app page; web pages in the agent's browser can't open local files; render windows use their own session;
+  - the GitHub CLI download is verified against GitHub's checksums; tokens are kept out of command lines; safer PowerShell quoting; DevTools off in release builds; damaged settings are restored from the last good copy.
+- **Dependencies:** `ws` 8.22.0 (security fixes); spreadsheets are read with `exceljs` (replaces `xlsx` 0.18.5, which has unfixed advisories on npm).
+- **Microsoft Store ready:** MSIX package config, Store tiles, firewall rule in the package manifest, and a Windows build workflow (`.github/workflows/desktop-windows.yml`). The Store version uses the official WhatsApp Business Cloud API only.
 
 ## What's new in 1.6.1
 
@@ -141,7 +155,7 @@ All files of this version: **[Release v1.6.1](https://github.com/qubitpage/carpa
 ## Quick start
 
 1. **Car:** assemble the kit, flash [`firmware/carpathron_car`](firmware/carpathron_car) with Arduino IDE (esp32 core **2.0.12**), put it on your Wi-Fi ([CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md)).
-2. **PC:** install Muse Carpathron ([Muse-Carpathron-Setup.exe](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe), or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
+2. **PC:** install Carpathron Robotics & Coding ([Carpathron-Robotics-Coding-Setup.exe](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Carpathron-Robotics-Coding-Setup.exe), or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
 3. **Phone:** Settings → WhatsApp → scan the QR. Send `/help` or a voice note.
 4. **Quest 3S:** sideload [`CarpathronAvatar-1.1.5.apk`](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.5.apk) (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
 
@@ -152,9 +166,10 @@ The full walk-through is in the **[A-to-Z guide](docs/GUIDE.md)**.
 ```bash
 # Desktop app (Node 20+)
 cd apps/desktop && npm ci
-npm test                      # 35 end-to-end backend tests (fake Meta API, fake car, fake MCP)
+npm test                      # 82 tests: end-to-end backend (fake Meta API, fake car, fake MCP) + security
 node test/ui-eyes.js          # simulated Quest 3S in browser VR (Playwright)
 npm run dist                  # Windows installer (on Linux needs wine)
+npm run dist:store            # Microsoft Store package (MSIX/appx; Windows only — or run the "Desktop app (Windows)" GitHub workflow)
 
 # Quest app (Godot 4.4.1 + Android templates, JDK 17, apktool 2.11, zipalign, apksigner, Khronos OpenXR loader AAR)
 cd apps/quest-avatar

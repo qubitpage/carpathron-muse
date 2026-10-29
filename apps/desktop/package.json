@@ -1,19 +1,24 @@
 {
   "name": "muse-carpathron",
-  "productName": "Muse Carpathron",
-  "version": "1.6.1",
-  "description": "Agentic desktop assistant for Meta Muse models: full PC and SSH server access, documents and PDFs, web research, firmware, robot control and WhatsApp remote.",
+  "productName": "Carpathron Robotics & Coding",
+  "version": "1.7.0",
+  "description": "Carpathron Robotics & Coding: an AI agent for Windows powered by Meta Muse models. Coding, servers, GitHub, MCP, computer use and robot control.",
   "main": "main.js",
-  "author": "Carpathron",
+  "author": {
+    "name": "Qubitpage LIMITED",
+    "email": "contact@qubitpage.com",
+    "url": "https://qubitpage.com"
+  },
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
     "start": "electron .",
     "server": "node backend/standalone.js",
-    "test": "node test/run-all.js && node test/v14.js",
+    "test": "node test/run-all.js && node test/v14.js && node test/security.js",
     "dist": "node build/patch-sdk.js && electron-builder --win nsis --x64",
     "postinstall": "node build/patch-sdk.js",
-    "test:electron": "xvfb-run -a electron --no-sandbox test/electron-browser.js /tmp"
+    "test:electron": "xvfb-run -a electron --no-sandbox test/electron-browser.js /tmp",
+    "dist:store": "node build/patch-sdk.js && electron-builder --win appx --x64"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
@@ -23,6 +28,7 @@
     "@muse-code/sdk": "1.4.14",
     "@whiskeysockets/baileys": "6.7.24",
     "dompurify": "3.4.17",
+    "exceljs": "4.4.0",
     "jszip": "3.10.1",
     "mammoth": "1.13.0",
     "marked": "18.1.2",
@@ -32,8 +38,7 @@
     "selfsigned": "2.4.1",
     "ssh2": "1.16.0",
     "unpdf": "1.9.1",
-    "ws": "8.18.0",
-    "xlsx": "0.18.5"
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "electron": "44.10.0",
@@ -42,8 +47,8 @@
   },
   "build": {
     "appId": "ai.carpathron.muse",
-    "productName": "Muse Carpathron",
-    "copyright": "Copyright 2026 Carpathron",
+    "productName": "Carpathron",
+    "copyright": "Copyright © 2026 Qubitpage LIMITED",
     "npmRebuild": false,
     "directories": {
       "buildResources": "build",
@@ -78,7 +83,8 @@
         }
       ],
       "icon": "build/icon.ico",
-      "signAndEditExecutable": false
+      "signAndEditExecutable": false,
+      "executableName": "Carpathron"
     },
     "nsis": {
       "oneClick": true,
@@ -86,20 +92,38 @@
       "allowElevation": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "Muse Carpathron",
+      "shortcutName": "Carpathron Robotics & Coding",
       "runAfterFinish": true,
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",
       "include": "build/installer.nsh",
-      "artifactName": "Muse-Carpathron-Setup-${version}.exe",
-      "deleteAppDataOnUninstall": false
+      "artifactName": "Carpathron-Robotics-Coding-Setup-${version}.exe",
+      "deleteAppDataOnUninstall": false,
+      "uninstallDisplayName": "Carpathron Robotics & Coding"
     },
     "publish": null,
-    "compression": "maximum"
+    "compression": "maximum",
+    "appx": {
+      "applicationId": "CarpathronRoboticsCoding",
+      "identityName": "QubitpageLIMITED.CarpathronRoboticsCoding",
+      "publisher": "CN=00000000-0000-0000-0000-000000000000",
+      "publisherDisplayName": "Qubitpage LIMITED",
+      "displayName": "Carpathron Robotics & Coding",
+      "backgroundColor": "#0d0f12",
+      "languages": [
+        "en-US"
+      ],
+      "minVersion": "10.0.17763.0",
+      "maxVersionTested": "10.0.26100.0",
+      "showNameOnTiles": true,
+      "customExtensionsPath": "build/appx/extensions.xml",
+      "artifactName": "Carpathron-Robotics-Coding-${version}.${ext}"
+    }
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/carpathron/muse-carpathron"
-  }
+  },
+  "homepage": "https://qubitpage.com/projects/carpathron-muse"
 }

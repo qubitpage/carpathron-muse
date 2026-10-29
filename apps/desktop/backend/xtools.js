@@ -80,19 +80,38 @@ async function readDocument(file, { pages, maxChars = 60000 } = {}) {
     const r = await mammoth.convertToMarkdown({ path: file }).catch(() => mammoth.extractRawText({ path: file }));
     return clip(`Word document\n\n${r.value || ''}`, maxChars);
   }
-  if (['.xlsx', '.xlsm', '.xls', '.ods', '.csv'].includes(ext)) {
-    const XLSX = require('xlsx');
-    const wb = XLSX.read(await fsp.readFile(file), { type: 'buffer', cellDates: true });
+  if (ext === '.csv') {
+    const rows = (await fsp.readFile(file, 'utf8')).split(/\r?\n/).filter((l) => l.trim());
+    return clip(`CSV, ${rows.length} rows\n\n${rows.slice(0, 400).join('\n')}${rows.length > 400 ? `\n… ${rows.length - 400} more rows` : ''}`, maxChars);
+  }
+  if (ext === '.xls' || ext === '.ods') return `This is an old ${ext} spreadsheet. Open it in Excel/LibreOffice and save it as .xlsx, then read that file.`;
+  if (ext === '.xlsx' || ext === '.xlsm') {
+    const ExcelJS = require('exceljs');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await fsp.readFile(file));
+    const csvCell = (v) => {
+      if (v === null || v === undefined) return '';
+      if (v instanceof Date) v = v.toISOString().slice(0, 19).replace('T', ' ').replace(/ 00:00:00$/, '');
+      else if (typeof v === 'object') v = v.result !== undefined ? v.result : v.text !== undefined ? v.text : v.richText ? v.richText.map((r) => r.text).join('') : v.hyperlink || JSON.stringify(v);
+      const t = String(v ?? '');
+      return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
     const out = [];
-    for (const name of wb.SheetNames) {
-      const sh = wb.Sheets[name];
-      const csv = XLSX.utils.sheet_to_csv(sh, { blankrows: false });
-      const rows = csv.split('\n');
-      out.push(`### Sheet "${name}" (${rows.length} rows${sh['!ref'] ? ', range ' + sh['!ref'] : ''})\n${rows.slice(0, 400).join('\n')}${rows.length > 400 ? `\n… ${rows.length - 400} more rows` : ''}`);
-      const formulas = Object.entries(sh).filter(([k, c]) => !k.startsWith('!') && c && c.f).slice(0, 40).map(([k, c]) => `${k}: =${c.f}`);
+    for (const sh of wb.worksheets) {
+      const rows = []; const formulas = [];
+      sh.eachRow({ includeEmpty: false }, (row) => {
+        const vals = [];
+        for (let c = 1; c <= row.cellCount; c++) {
+          const cell = row.getCell(c);
+          vals.push(csvCell(cell.value));
+          if (cell.formula && formulas.length < 40) formulas.push(`${cell.address}: =${cell.formula}`);
+        }
+        rows.push(vals.join(','));
+      });
+      out.push(`### Sheet "${sh.name}" (${rows.length} rows${sh.dimensions ? ', range ' + sh.dimensions : ''})\n${rows.slice(0, 400).join('\n')}${rows.length > 400 ? `\n… ${rows.length - 400} more rows` : ''}`);
       if (formulas.length) out.push(`Formulas (first ${formulas.length}): ${formulas.join('; ')}`);
     }
-    return clip(`Spreadsheet with ${wb.SheetNames.length} sheet(s)\n\n${out.join('\n\n')}`, maxChars);
+    return clip(`Spreadsheet with ${wb.worksheets.length} sheet(s)\n\n${out.join('\n\n')}`, maxChars);
   }
   if (ext === '.pptx') {
     const JSZip = require('jszip');
@@ -489,7 +508,7 @@ async function arduinoSetup(args, ctx) {
     const archive = path.join(dir, IS_WIN ? 'cli.zip' : 'cli.tar.gz');
     fs.writeFileSync(archive, Buffer.from(await res.arrayBuffer()));
     const r = IS_WIN
-      ? await runProc('powershell.exe', ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${archive}' -DestinationPath '${dir}'`], { timeoutMs: 120000 })
+      ? await runProc('powershell.exe', ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${archive.replace(/'/g, "''")}' -DestinationPath '${dir.replace(/'/g, "''")}'`], { timeoutMs: 120000 })
       : await runProc('tar', ['-xzf', archive, '-C', dir], { timeoutMs: 120000 });
     fs.unlinkSync(archive);
     cli = findArduinoCli(ctx.dataDir);

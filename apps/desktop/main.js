@@ -1,4 +1,4 @@
-// Muse Carpathron — Windows desktop app (Electron shell around the local backend).
+// Carpathron Robotics & Coding — Windows desktop app (Electron shell around the local backend).
 'use strict';
 const path = require('path');
 const fs = require('fs');
@@ -10,6 +10,10 @@ let tray = null;
 let srv = null;
 let quitting = false;
 
+// The app was called "Muse Carpathron" before 1.7.0. Keep its data folder (chats, settings, servers, encrypted keys)
+// so updates from older versions keep everything; Electron would otherwise use a folder named after the new productName.
+try { app.setPath('userData', path.join(app.getPath('appData'), 'Muse Carpathron')); } catch {}
+
 const logFile = () => path.join(app.getPath('userData'), 'muse-carpathron.log');
 function log(text) {
   const line = `${new Date().toISOString()} ${text}\n`;
@@ -19,13 +23,23 @@ function log(text) {
 // Never work from the install folder (C:\Program Files\...): child processes would inherit it.
 try { const home = path.join(app.getPath('home'), 'MuseCarpathron'); fs.mkdirSync(home, { recursive: true }); process.chdir(home); } catch {}
 
+// Log unexpected errors instead of crashing or failing silently.
+process.on('uncaughtException', (e) => log(`uncaught: ${e && e.stack || e}`));
+process.on('unhandledRejection', (e) => log(`unhandled rejection: ${e && e.stack || e}`));
+
 if (!app.requestSingleInstanceLock()) { app.quit(); }
 else {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 
   // Trust only our own local certificate.
-  app.on('certificate-error', (event, _wc, url, _err, _cert, cb) => {
-    if (srv && url.startsWith(`https://localhost:${srv.port}`)) { event.preventDefault(); cb(true); } else cb(false);
+  // Fallback for the verify proc below: still only our exact certificate, never "any certificate on localhost".
+  app.on('certificate-error', (event, _wc, url, _err, cert, cb) => {
+    let ok = false;
+    try {
+      const n = (x) => String(x || '').replace(/\r/g, '').trim();
+      ok = !!srv && url.startsWith(`https://localhost:${srv.port}`) && n(cert && cert.data) === n(fs.readFileSync(path.join(app.getPath('userData'), 'data', 'cert.pem'), 'utf8'));
+    } catch {}
+    if (ok) { event.preventDefault(); cb(true); } else cb(false);
   });
 
   ipcMain.handle('pick-folder', async (_e, start) => {
@@ -43,9 +57,9 @@ else {
     } catch (e) {
       log(`startup failed: ${e.stack || e.message}`);
       const busy = e.code === 'EADDRINUSE';
-      dialog.showErrorBox('Muse Carpathron', busy
-        ? 'Port 8443 is already used by another program (maybe the old Carpathron Control Center). Close it and start Muse Carpathron again.'
-        : `Muse Carpathron could not start:\n${e.message}\n\nLog: ${logFile()}`);
+      dialog.showErrorBox('Carpathron Robotics & Coding', busy
+        ? 'Port 8443 is already used by another program (maybe the old Carpathron Control Center). Close it and start Carpathron Robotics & Coding again.'
+        : `Carpathron Robotics & Coding could not start:\n${e.message}\n\nLog: ${logFile()}`);
       app.quit();
       return;
     }
@@ -65,7 +79,7 @@ else {
     Menu.setApplicationMenu(null);
     win = new BrowserWindow({
       width: 1360, height: 880, minWidth: 960, minHeight: 620,
-      title: 'Muse Carpathron',
+      title: 'Carpathron Robotics & Coding',
       backgroundColor: '#0d0f12',
       icon: path.join(__dirname, 'public', 'icon.png'),
       show: false,
@@ -76,7 +90,7 @@ else {
     win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
     win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(`https://localhost:${srv.port}`)) { e.preventDefault(); if (/^https?:\/\//.test(url)) shell.openExternal(url); } });
     win.webContents.on('before-input-event', (_e, input) => {
-      if (input.type === 'keyDown' && input.key === 'F12') win.webContents.toggleDevTools();
+      if (input.type === 'keyDown' && input.key === 'F12' && (!app.isPackaged || process.env.CARPATHRON_DEVTOOLS === '1')) win.webContents.toggleDevTools();
       if (input.type === 'keyDown' && input.key === 'F5') win.webContents.reload();
     });
     // Closing the window keeps WhatsApp + robot running in the tray when WhatsApp is enabled.
@@ -86,9 +100,9 @@ else {
     });
     try {
       tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'public', 'tray.png')).resize({ width: 16, height: 16 }));
-      tray.setToolTip('Muse Carpathron');
+      tray.setToolTip('Carpathron Robotics & Coding');
       tray.setContextMenu(Menu.buildFromTemplate([
-        { label: 'Open Muse Carpathron', click: () => { win.show(); win.focus(); } },
+        { label: 'Open Carpathron Robotics & Coding', click: () => { win.show(); win.focus(); } },
         { type: 'separator' },
         { label: 'Quit', click: () => { quitting = true; app.quit(); } },
       ]));

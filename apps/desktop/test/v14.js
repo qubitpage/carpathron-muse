@@ -90,7 +90,7 @@ function tinyPdf(pages) {
   const sendMsg = async (c, text, extra = {}) => { await api(`/api/convs/${c.id}/send`, { text, ...extra }); await waitIdle(c.id); return api(`/api/convs/${c.id}`); };
   const toolMsg = (full) => full.messages.find((m) => m.role === 'tool');
 
-  console.log('Muse Carpathron 1.4 tests');
+  console.log('Carpathron Robotics & Coding 1.4 tests');
 
   await step('built-in skills are added once (design-website, design-pdf, research, firmware, server-setup, carpathron-build)', async () => {
     const sk = (await api('/api/skills')).map((x) => x.name);
@@ -238,10 +238,10 @@ function tinyPdf(pages) {
   });
 
   await step('documents: Excel, Word, PowerPoint and PDF are read', async () => {
-    const XLSX = require('xlsx');
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Part', 'Price'], ['X15-450', 1139], ['RS-04', 211]]), 'Parts');
-    XLSX.writeFile(wb, path.join(ws, 'book.xlsx'));
+    const ExcelJS = require('exceljs');
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet('Parts').addRows([['Part', 'Price'], ['X15-450', 1139], ['RS-04', 211]]);
+    await wb.xlsx.writeFile(path.join(ws, 'book.xlsx'));
     const c = await conv();
     const full = await sendMsg(c, 'read the sheet');
     assert.ok(/Sheet "Parts"/.test(toolMsg(full).output) && /X15-450,1139/.test(toolMsg(full).output), toolMsg(full).output);
@@ -324,7 +324,7 @@ function tinyPdf(pages) {
   await step('image attachment goes to a vision model as an image (not as text)', async () => {
     const c = await conv();
     await sendMsg(c, 'what is in this picture', { attachments: [{ name: 'p.jpg', dataBase64: fs.readFileSync(path.join(__dirname, 'sample.jpg')).toString('base64') }] });
-    const call = fake.calls().filter((x) => /You are Muse Carpathron/.test(x.messages[0].content)).pop();
+    const call = fake.calls().filter((x) => /You are Carpathron/.test(x.messages[0].content)).pop();
     const user = call.messages.find((m) => m.role === 'user' && Array.isArray(m.content));
     assert.ok(user && user.content.some((p) => p.type === 'image_url' && p.image_url.url.startsWith('data:image/jpeg')), 'image part sent');
   });

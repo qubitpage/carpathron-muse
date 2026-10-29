@@ -1,0 +1,6 @@
+
+        <desktop2:Extension xmlns:desktop2="http://schemas.microsoft.com/appx/manifest/desktop/windows10/2" Category="windows.firewallRules">
+          <desktop2:FirewallRules Executable="app\Carpathron.exe">
+            <desktop2:Rule Direction="in" IPProtocol="TCP" LocalPortMin="8443" LocalPortMax="8443" Profile="all"/>
+          </desktop2:FirewallRules>
+        </desktop2:Extension>

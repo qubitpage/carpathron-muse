@@ -19,7 +19,7 @@ function plan(body) {
   if (/loop forever/.test(String(firstUser))) return { tool: ['run_command', { command: 'echo step' }] };
   if (/always fail/.test(String(firstUser))) return { tool: ['read_file', { path: `missing-${msgs.length}.txt` }] };
   if (last.role === 'tool') return { text: `Done. Result: ${String(last.content).slice(0, 80)}` };
-  if (/sub-agent of Muse Carpathron/.test(sys)) return { text: `Report for: ${firstUser.slice(0, 30)}` };
+  if (/sub-agent of Carpathron/.test(sys)) return { text: `Report for: ${firstUser.slice(0, 30)}` };
   const u = String(last.content);
   if (/^\[Automatic check\]/.test(u)) return { tool: ['task_update', { tasks: [{ title: 'Step A', status: 'done' }, { title: 'Step B', status: 'done' }] }] };
   if (/^\[Automatic self-check/.test(u)) return { text: 'Verified: everything checked.' };

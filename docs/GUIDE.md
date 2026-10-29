@@ -1,11 +1,14 @@
-# Muse Carpathron — the complete guide
+# Carpathron Robotics & Coding — the complete guide
 
-Muse Carpathron is a Windows app that turns **Meta Muse** models into a working assistant on your PC: it chats,
+Carpathron Robotics & Coding is a Windows app that turns **Meta Muse** models into a working assistant on your PC: it chats,
 writes and runs code, works on your **remote servers over SSH**, publishes to **GitHub**, writes and flashes
 **Arduino / ESP32 firmware**, reads and designs **PDFs and websites**, does **web research**, and drives the
 **Carpathron robot** from the PC, WhatsApp, a phone or a Meta Quest headset.
 
 This guide starts from zero (installing the app) and then explains every menu, button and tool.
+
+> **New name (1.7.0):** the app was called *Muse Carpathron* before. Updating keeps all your chats, settings,
+> servers and keys (they stay in the same folders). It is made by **Qubitpage LIMITED** (qubitpage.com).
 
 ---
 
@@ -51,7 +54,7 @@ skills are kept** — they are not in the installer.
 Passwords, API keys, SSH keys and the GitHub token are **encrypted with your Windows account** (DPAPI). They never
 appear in the installer, in the repository, in the browser or on the phone.
 
-**Uninstall:** Windows *Settings → Apps → Muse Carpathron → Uninstall*. Your data folders stay; delete them by hand
+**Uninstall:** Windows *Settings → Apps → Carpathron Robotics & Coding → Uninstall*. Your data folders stay; delete them by hand
 if you want a clean start.
 
 ---
@@ -201,7 +204,7 @@ For any job with several steps Muse keeps a **task list**, shown above the messa
 
 ### 5.8 Reliability — no made-up answers
 
-Muse Carpathron adds rules and checks so the agent doesn't invent things:
+Carpathron Robotics & Coding adds rules and checks so the agent doesn't invent things:
 
 - **Honesty rules:** no invented facts, file contents, command output, prices or test results; current facts come from
   web search with sources; it says when it is not sure.
@@ -524,7 +527,12 @@ Keep it away from stairs, pets and liquids; in VR stay seated or inside your bou
 - **A · Personal WhatsApp** — scan the QR code with WhatsApp (*Linked devices*), like WhatsApp Web. Write to yourself in
   **Message yourself**, or add **allowed phone numbers** (with country code).
 - **B · WhatsApp Business Cloud API** — fill in *Phone number ID*, *Access token*, a *verify word* of your choice and the
-  *App secret*. **Start public tunnel** opens a Cloudflare tunnel for the webhook. **Send test** checks it.
+  *App secret* (required: the app refuses webhook messages that are not signed by Meta). **Start public tunnel** opens
+  a Cloudflare tunnel for the webhook — only the webhook is reachable through it, never the app. **Send test** checks it.
+- The **Microsoft Store version** offers only option B (the official WhatsApp Business API).
+
+Allowed numbers must be written in full with the country code (e.g. `+40 712 345 678`) and must match exactly.
+`/mode` from WhatsApp changes only that WhatsApp chat, not the chats on the PC.
 
 Commands: `/help` · `/new` · `/stop` · `/status` · `/mode ask|auto|full|plan` · `/photo` · `/drive forward 2` ·
 `/f /b /l /r` · `/look left|right|back` · `/turn 90` · `/scan` · `/robot stop` · `/remember <fact>` · `yes` / `no`
@@ -535,9 +543,18 @@ and run like typed messages.
 
 ## 14. Phone, tablet and Quest browser
 
-*Settings → Phone & Quest access*: open the address shown (`https://<pc-ip>:8443/pair`) on a device on the same Wi-Fi,
-accept the certificate warning once (*Advanced → Proceed*), type the **6-digit PIN** shown on the PC (valid 10 minutes).
-The full app opens: chat, robot, video. A phone can also act as the robot's camera.
+*Settings → Phone & Quest access*:
+
+1. Switch on **Allow phones and Quest on this network**. It is **off by default** — then only this PC can open the app.
+2. Open the address shown (`https://<pc-ip>:8443/pair`) on a device on the same Wi-Fi, accept the certificate warning
+   once (*Advanced → Proceed*), and type the **6-digit PIN** shown on the PC. The PIN is valid **2 minutes**, works once,
+   and is cancelled after 10 wrong tries (press **New PIN** for another).
+3. The full app opens: chat, robot, video. A phone can also act as the robot's camera.
+
+Every phone, browser and Quest headset gets **its own key** and is listed under **Paired devices** — press **Remove**
+to cut one off. Switching network access off disconnects all of them at once. From a phone you can chat, drive and
+change ordinary settings; settings that start programs or hold keys (MCP servers, Muse Code path, API key, WhatsApp,
+network access) can only be changed on the PC. The Quest app always asks for approval on the PC before acting.
 
 ---
 
@@ -585,18 +602,33 @@ The full app opens: chat, robot, video. A phone can also act as the robot's came
 | arduino-cli missing | Ask *"set up Arduino"* (`arduino_setup`) or set its path in Settings |
 | Board not found / upload fails | Other programs using the COM port (close Serial Monitor), USB cable with data, hold BOOT |
 | WhatsApp doesn't answer | Status must be *connected*; write in **Message yourself** or add your number |
-| Phone can't open the app | Same Wi-Fi; accept the certificate; new PIN after 10 minutes |
+| Phone can't open the app | Network access switched on (Settings → Phone & Quest); same Wi-Fi; accept the certificate; press New PIN (valid 2 minutes) |
 | *Reached the step limit* | Only in Ask / Plan mode — say "continue", or switch to Auto / Full, which run until the job is done |
 | Muse keeps working after I asked something small | Your message joined the running work (⚡ Now). Switch to ⏳ Queue, or say "stop" |
 | It stopped with tasks still open | A task is ⛔ blocked (read its note), or it made no progress — answer the question in the note and say "continue" |
 | Computer use: clicks land in the wrong place | Use 100 % / 125 % display scaling on the main monitor; Muse takes a new screenshot first — ask it to "take a screenshot and try again" |
-| Computer use: nothing happens in an admin window | Windows blocks input into programs running as administrator unless Muse Carpathron also runs as administrator |
+| Computer use: nothing happens in an admin window | Windows blocks input into programs running as administrator unless Carpathron Robotics & Coding also runs as administrator |
 | Muse Browser asks to sign in | It has its own sign-ins: sign in yourself in that window once — Muse never types passwords |
 | Something else | Activity page, and the log at `%APPDATA%\Muse Carpathron\muse-carpathron.log` |
 
 ---
 
-## 18. Keyboard shortcuts
+## 18. Security and privacy
+
+- **Your keys are encrypted** on disk with your Windows account (API key, app key, WhatsApp tokens, SSH passwords and
+  keys, GitHub token). Paired devices are stored as fingerprints only.
+- **This PC only by default.** Phones and the Quest connect only after you switch on network access and pair them.
+- **Ask mode protects your secrets:** even "read-only" steps ask first when they would read key/credential folders
+  (`.ssh`, browser profiles, this app's data), fetch a web address that could carry data out (with `?…`), reach a
+  local-network or cloud-metadata address, or take a screenshot of the desktop.
+- **Downloads are verified:** the GitHub CLI is checked against GitHub's published checksums before it is installed.
+- **What leaves the PC:** your messages (and attached files, screenshots or photos you send) go to Meta's Muse models
+  to get answers; WhatsApp messages go through WhatsApp/Meta; nothing else is uploaded. See the Activity page for every
+  outgoing call. Privacy notice: https://qubitpage.com/privacy
+
+---
+
+## 19. Keyboard shortcuts
 
 | Keys | Action |
 |---|---|

@@ -12,6 +12,7 @@ const { COMPUTER_TOOLS, COMPUTER_NAMES, execComputer, hideBanner } = require('./
 const { DEV_TOOLS, DEV_NAMES, execDev } = require('./devtools');
 const GHNAMES = new Set(GH_TOOLS.map((t) => t.name));
 const models = require('./models');
+const { effectiveRisk } = require('./guard');
 const XNAMES = new Set(XTOOLS.map((t) => t.name));
 
 const fs = require('fs');
@@ -45,8 +46,8 @@ function systemPrompt(settings, conv, ctx = {}) {
   ctx.remote = ctx.remote || null;
   const lines = [
     sub
-      ? 'You are a sub-agent of Muse Carpathron. Complete only the task you were given, using tools as needed, then reply with a concise final report of what you did and found.'
-      : 'You are Muse Carpathron, an agentic assistant running on the user\'s computer, powered by Meta Muse models. You work like a local bridge: you see the user\'s files through tools, decide what to do, and your tool calls are executed on the user\'s PC.',
+      ? 'You are a sub-agent of Carpathron. Complete only the task you were given, using tools as needed, then reply with a concise final report of what you did and found.'
+      : 'You are Carpathron (the Carpathron Robotics & Coding app), an agentic assistant running on the user\'s computer, powered by Meta Muse models. You work like a local bridge: you see the user\'s files through tools, decide what to do, and your tool calls are executed on the user\'s PC.',
     `Operating system: ${os.type()} ${os.release()} (${process.platform}). Shell for run_command: ${process.platform === 'win32' ? 'Windows PowerShell' : 'bash'}.`,
     ctx.remote
       ? `WORKING ON REMOTE SERVER "${ctx.remote.name}" (${ctx.remote.username}@${ctx.remote.host}, ${ctx.remote.os || 'linux'}) over SSH. list_dir, read_file, write_file, edit_file, search and run_command run ON THAT SERVER, in ${ctx.remote.path} (relative paths are there). Use ssh_upload / ssh_download to move files between this PC (${conv.workspace}) and the server. Be careful with destructive commands on servers (rm -rf, firewall, reboots): say what you will do first.`
@@ -687,11 +688,12 @@ class Agent {
     }
     const rtc = this.runtime.get(conv.id);
     if (rtc) rtc.toolCalls++;
-    this.status(conv, spec.risk === 'read' || (conv.mode || this.settings().mode) === 'auto' ? `Running: ${prefix}${describeCall(call.name, args)}` : `Waiting for your approval: ${describeCall(call.name, args)}`);
+    const risk = effectiveRisk(call.name, args, spec.risk, { workspace: this.settings().workspace, dataDir: this.dataDir });
+    this.status(conv, risk === 'read' || (conv.mode || this.settings().mode) === 'auto' ? `Running: ${prefix}${describeCall(call.name, args)}` : `Waiting for your approval: ${describeCall(call.name, args)}`);
     const decision = await this.requestApproval(conv, {
       summary: prefix + describeCall(call.name, args),
       detail: call.name === 'write_file' ? String(args.content || '') : call.name === 'edit_file' ? `- ${args.old_string}\n+ ${args.new_string}` : JSON.stringify(args, null, 2),
-      risk: spec.risk, tool: call.name,
+      risk, tool: call.name,
       always: call.name === 'sd_card_image' && args.action === 'write',
     });
     if (rt.abort.signal.aborted) { this.patchMsg(conv, card, { status: 'denied', output: 'Stopped' }); return 'Stopped by user.'; }
@@ -749,7 +751,7 @@ class Agent {
     rt.errKeys = rt.errKeys || {};
     const same = rt.errKeys[key] = (rt.errKeys[key] || 0) + 1;
     if (same >= 2 || rt.errStreak >= 3) {
-      return `${out}\n\n[Muse Carpathron: this has failed ${same >= 2 ? `${same} times with the same call` : `${rt.errStreak} times in a row`}. Do not repeat the same call. Read the error closely, check logs, config and docs, web_search the exact error message, then try a different approach or tool. If it is truly blocked, mark the task blocked with what you need from the user.]`;
+      return `${out}\n\n[Carpathron Robotics & Coding: this has failed ${same >= 2 ? `${same} times with the same call` : `${rt.errStreak} times in a row`}. Do not repeat the same call. Read the error closely, check logs, config and docs, web_search the exact error message, then try a different approach or tool. If it is truly blocked, mark the task blocked with what you need from the user.]`;
     }
     return out;
   }
@@ -816,12 +818,18 @@ class Agent {
       env: { ELECTRON_RUN_AS_NODE: '1', MC_URL: `https://127.0.0.1:${b.port}`, MC_TOKEN: b.token, MC_CONV: conv.id, MC_CA: b.ca },
     };
   }
+  bridgeList() { return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...KNOWLEDGE_TOOLS, TASK_TOOL]; }
+  bridgeSpecs() { return new Map(this.bridgeList().map((t) => [t.name, t])); }
   bridgeTools() {
-    return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...KNOWLEDGE_TOOLS, TASK_TOOL]
-      .map(({ name, description, parameters }) => ({ name, description, parameters }));
+    return this.bridgeList().map(({ name, description, parameters }) => ({ name, description, parameters }));
   }
   async bridgeCall(convId, name, args) {
     const conv = this.store.get(convId) || { id: convId, workspace: this.settings().workspace, messages: [] };
+    // Only the tools this bridge publishes (never shell/file builtins through the fallback), and Plan mode stays read-only.
+    const spec = this.bridgeSpecs().get(name);
+    if (!spec) return { output: `Error: "${name}" is not available through the app bridge.`, isError: true, images: [] };
+    const risk = effectiveRisk(name, args, spec.risk, { workspace: this.settings().workspace, dataDir: this.dataDir });
+    if ((conv.mode || this.settings().mode) === 'plan' && risk !== 'read') return { output: 'Plan mode is read-only: this tool is not allowed now.', isError: true, images: [] };
     const rt = this.runtime.get(convId) || { abort: new AbortController() };
     const images = [];
     const onPhoto = (ph) => {
@@ -874,9 +882,9 @@ class Agent {
     const past = this.searchChats(query, conv.id, 2).filter((h) => h.score > 3);
     if (past.length) parts.push(`<related earlier chats>\n${past.map((h) => `"${h.conv}" (${h.date}):\n${clip(h.text, 900)}`).join('\n---\n')}\n</related earlier chats>`);
     if (this.settings().systemPrompt && firstTurn) parts.push(`<user instructions>\n${this.settings().systemPrompt}\n</user instructions>`);
-    if (firstTurn) parts.push(`<working rules from Muse Carpathron>\n${MUSE_RULES}\n</working rules>`);
+    if (firstTurn) parts.push(`<working rules from Carpathron Robotics & Coding>\n${MUSE_RULES}\n</working rules>`);
     if ((conv.tasks || []).length) parts.push(`<task list>\n${conv.tasks.map((t, i) => `${i + 1}. [${t.status}] ${t.title}${t.note ? ` — ${t.note}` : ''}`).join('\n')}\n</task list>`);
-    return parts.length ? `${parts.join('\n\n')}\n\n(Context above comes from the Muse Carpathron app. Use it if relevant.)\n\n` : '';
+    return parts.length ? `${parts.join('\n\n')}\n\n(Context above comes from the Carpathron Robotics & Coding app. Use it if relevant.)\n\n` : '';
   }
 
   async runMuse(conv, text, rt, displayText = text) { // eslint-disable-line no-param-reassign

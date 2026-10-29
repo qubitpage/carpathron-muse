@@ -1,4 +1,4 @@
-// Muse Carpathron — front end (desktop window, Quest browser, phone browser)
+// Carpathron Robotics & Coding — front end (desktop window, Quest browser, phone browser)
 'use strict';
 (() => {
   const $ = (s, el = document) => el.querySelector(s);
@@ -832,7 +832,7 @@
   }
   $('#memForm').onsubmit = async (e) => { e.preventDefault(); const t = $('#memInput').value.trim(); if (!t) return; await api('/api/memory', { body: { text: t } }); $('#memInput').value = ''; renderMemory(); };
   $('#autoMemory').onchange = async (e) => { S.settings = await api('/api/settings', { body: { autoMemory: e.target.checked } }); toast(e.target.checked ? 'Automatic memory on' : 'Automatic memory off'); };
-  $('#btnMemClear').onclick = async () => { if (confirm('Delete everything Muse Carpathron remembers about you?')) { await api('/api/memory', { method: 'DELETE' }); renderMemory(); } };
+  $('#btnMemClear').onclick = async () => { if (confirm('Delete everything Carpathron Robotics & Coding remembers about you?')) { await api('/api/memory', { method: 'DELETE' }); renderMemory(); } };
 
   // ------------------------------------------------------------ skills
   function renderSkills() {
@@ -1021,12 +1021,12 @@
     const pid = h('input', { value: c.phoneNumberId, placeholder: 'Phone number ID' });
     const tok = h('input', { type: 'password', placeholder: c.hasAccessToken ? '•••••• saved' : 'Access token' });
     const vtok = h('input', { value: c.verifyToken, placeholder: 'Any secret word you choose' });
-    const asec = h('input', { type: 'password', placeholder: c.hasAppSecret ? '•••••• saved' : 'App secret (optional, recommended)' });
+    const asec = h('input', { type: 'password', placeholder: c.hasAppSecret ? '•••••• saved' : 'App secret (required)' });
     const cfp = h('input', { value: c.cloudflaredPath, placeholder: 'cloudflared (auto)' });
     const testTo = h('input', { placeholder: 'Test: send to number' });
     body.append(h('div', { class: 'card', id: 'waCard' },
       h('h3', {}, 'WhatsApp remote control'),
-      h('p', { class: 'muted small' }, 'Control Muse Carpathron from your phone. Only your own "Message yourself" chat and the numbers below can give commands. Send /help on WhatsApp for commands; approvals are answered with yes / no. Keep the app running (it stays in the tray when you close the window).'),
+      h('p', { class: 'muted small' }, 'Control Carpathron Robotics & Coding from your phone. Only your own "Message yourself" chat and the numbers below can give commands. Send /help on WhatsApp for commands; approvals are answered with yes / no. Keep the app running (it stays in the tray when you close the window).'),
       field('Allowed phone numbers (with country code)', allowed),
       h('b', {}, 'A · Personal WhatsApp (QR code, like WhatsApp Web)'),
       h('p', { class: 'small', style: 'color:var(--warn)' }, 'Unofficial connection (Baileys). WhatsApp may restrict numbers that automate messages — use a spare number if possible.'),
@@ -1055,20 +1055,52 @@
     // --- phone & quest access
     const acc = h('div', {});
     body.append(h('div', { class: 'card' }, h('h3', {}, 'Phone & Quest access (same Wi-Fi)'), acc));
-    try {
-      const a = await api('/api/access');
-      acc.append(
-        h('p', { class: 'muted small' }, 'Easiest: on the Quest or phone open this address and type the PIN (accept the certificate warning first: Advanced → Proceed):'),
-        ...a.pairUrls.map((u) => h('div', { class: 'pairurl' }, u)),
-        h('div', { class: 'pin' }, a.pin.replace(/(\d{3})/, '$1 ')),
-        h('p', { class: 'muted small' }, 'Or open this private link directly (contains your access key — do not share it):'),
-        ...a.urls.map((u) => h('div', { class: 'access-url' }, u)),
-        ...(a.urls.length ? [] : [h('p', { class: 'muted' }, 'No network address found — connect the PC to Wi-Fi.')]));
-    } catch { acc.append(h('p', { class: 'muted small' }, 'Available on the PC only.')); }
+    async function renderAccess() {
+      acc.innerHTML = '';
+      const st = S.settings;
+      const lan = h('input', { type: 'checkbox', checked: !!st.lanAccess });
+      lan.onchange = async () => {
+        try { S.settings = await api('/api/settings', { body: { lanAccess: lan.checked } }); toast(lan.checked ? 'Phones and Quest on this network can now connect (after pairing)' : 'Only this PC can connect now'); }
+        catch (e) { toast(e.message, true); lan.checked = !lan.checked; }
+        renderAccess();
+      };
+      acc.append(h('label', { class: 'toggle inline', style: 'margin-bottom:8px' }, lan, ' Allow phones and Quest on this network (Quest app, phone camera, phone control). Off = only this PC can connect.'));
+      if (st.lanAccess) {
+        try {
+          const a = await api('/api/access');
+          const pin = h('div', { class: 'pin' }, a.pin.replace(/(\d{3})/, '$1 '));
+          const left = h('span', { class: 'muted small' }, '');
+          let secs = Math.max(0, Number(a.pinExpiresIn) || 120);
+          const tick = setInterval(() => { secs--; left.textContent = secs > 0 ? ` valid ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : ' expired'; if (secs <= 0 || !document.body.contains(left)) clearInterval(tick); }, 1000);
+          acc.append(
+            h('p', { class: 'muted small' }, 'On the Quest or phone open this address and type the PIN (accept the certificate warning first: Advanced → Proceed):'),
+            ...a.pairUrls.map((u) => h('div', { class: 'pairurl' }, u)),
+            h('div', { class: 'row' }, pin, left, h('button', { class: 'btn small', onclick: renderAccess }, 'New PIN')),
+            ...(a.urls.length ? [] : [h('p', { class: 'muted' }, 'No network address found — connect the PC to Wi-Fi.')]),
+            h('details', { class: 'small' }, h('summary', {}, 'Private link with the master key (advanced)'),
+              h('p', { class: 'muted small' }, 'Gives full access without pairing. Do not share it; prefer the PIN.'),
+              ...a.urls.map((u) => h('div', { class: 'access-url' }, u))));
+        } catch { acc.append(h('p', { class: 'muted small' }, 'Pairing is shown on the PC only.')); }
+      }
+      const devs = st.devices || [];
+      acc.append(h('h4', {}, `Paired devices (${devs.length})`));
+      if (!devs.length) acc.append(h('p', { class: 'muted small' }, 'None yet.'));
+      for (const d of devs) {
+        acc.append(h('div', { class: 'row small' },
+          h('span', {}, `${d.kind === 'quest' ? '🥽' : '📱'} ${d.name}${d.ip ? ' · ' + d.ip : ''} · ${new Date(d.at).toLocaleDateString()}`),
+          h('button', { class: 'btn small danger', onclick: async () => {
+            if (!confirm(`Remove ${d.name}? It will have to pair again.`)) return;
+            await api('/api/devices/' + encodeURIComponent(d.id), { method: 'DELETE' });
+            S.settings = await api('/api/settings');
+            renderAccess();
+          } }, 'Remove')));
+      }
+    }
+    await renderAccess();
 
     // --- about
     body.append(h('div', { class: 'card' }, h('h3', {}, 'About'),
-      h('p', { class: 'small muted' }, `Muse Carpathron ${S.boot.version} · ${S.boot.platform} · Data stays on this PC except what is sent to Meta's model for each message (see Activity).`)));
+      h('p', { class: 'small muted' }, `Carpathron Robotics & Coding ${S.boot.version} · ${S.boot.platform} · Data stays on this PC except what is sent to Meta's model for each message (see Activity).`)));
   }
   // ------------------------------------------------------------ Remote page
   async function renderRemote() {
@@ -1348,7 +1380,7 @@
     try { S.boot = await api('/api/bootstrap'); }
     catch (e) {
       document.body.innerHTML = '';
-      document.body.append(h('div', { style: 'padding:40px;max-width:560px;margin:auto' }, h('h2', {}, 'Muse Carpathron'), h('p', {}, e.message)));
+      document.body.append(h('div', { style: 'padding:40px;max-width:560px;margin:auto' }, h('h2', {}, 'Carpathron Robotics & Coding'), h('p', {}, e.message)));
       return;
     }
     S.settings = S.boot.settings; S.convs = S.boot.convs; S.projects = S.boot.projects; S.skills = S.boot.skills;

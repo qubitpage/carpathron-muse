@@ -128,6 +128,8 @@ function openIde(args, ctx) {
   const target = args.path ? (path.isAbsolute(args.path) ? args.path : path.join(ctx.workspace, args.path)) : null;
   if (args.ide === 'vscode') {
     const p = findIde('vscode') || 'code';
+    // "code" is a .cmd script that needs a shell: refuse paths with shell characters in that case.
+    if (p === 'code' && target && /[&|<>^"%!`$;\r\n]/.test(target)) throw new Error('That path has characters that cannot be passed safely to VS Code. Rename the folder or open it from VS Code.');
     spawn(p, target ? [target] : [], { detached: true, stdio: 'ignore', shell: p === 'code' }).unref();
     return `Opened VS Code${target ? ` with ${target}` : ''}.`;
   }
@@ -324,7 +326,7 @@ async function askModel(args, ctx) {
   const kind = models.capsFor(model).kind;
   if (kind && kind !== 'chat') throw new Error(`${model} is not a text model (${kind}). Use ${kind === 'image' ? 'generate_image' : kind === 'segment' ? 'segment_image' : 'transcribe_audio'} instead.`);
   ctx.status && ctx.status(`Asking ${model}…`);
-  const res = await ctx.api.complete({ model, effort: args.effort, messages: [{ role: 'system', content: 'You are consulted by another AI agent (Muse Carpathron). Answer precisely. Say clearly when you are not sure; never invent facts.' }, { role: 'user', content: String(args.prompt || '') }], tools: [], signal: ctx.signal, onText: () => {} });
+  const res = await ctx.api.complete({ model, effort: args.effort, messages: [{ role: 'system', content: 'You are consulted by another AI agent (Carpathron Robotics & Coding). Answer precisely. Say clearly when you are not sure; never invent facts.' }, { role: 'user', content: String(args.prompt || '') }], tools: [], signal: ctx.signal, onText: () => {} });
   return `${model} answered:\n\n${res.content || '(empty answer)'}`;
 }
 

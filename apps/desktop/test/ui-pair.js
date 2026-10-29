@@ -5,7 +5,7 @@ const { chromium } = require(process.env.PW || 'playwright');
 (async () => {
   const out = process.argv[2];
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-pair-'));
-  fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ port: 18992 }));
+  fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ port: 18992, lanAccess: true }));
   const srv = await startServer({ dataDir, log: () => {} });
   const b = await chromium.launch({ args: ['--ignore-certificate-errors'] });
   const pc = await b.newPage({ viewport: { width: 1250, height: 860 } });

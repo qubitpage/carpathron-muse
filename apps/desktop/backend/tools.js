@@ -313,7 +313,12 @@ async function execBuiltin(name, args, ctx) {
       if (!/^https?:\/\//i.test(url)) throw new Error('Only http(s) URLs are allowed.');
       const res = await fetch(url, { signal: AbortSignal.timeout(30000), headers: { 'User-Agent': 'Mozilla/5.0 MuseCarpathron/1.0' } });
       const type = res.headers.get('content-type') || '';
-      const body = await res.text();
+      // Read at most 5 MB (a huge or endless response must not fill the memory).
+      const chunks = []; let n = 0;
+      if (res.body) {
+        for await (const c of res.body) { chunks.push(Buffer.from(c)); n += c.length; if (n > 5 * 1024 * 1024) break; }
+      }
+      const body = Buffer.concat(chunks).toString('utf8');
       const text = /html/i.test(type) ? htmlToText(body) : body;
       return clip(`HTTP ${res.status} ${type}\n\n${text}`, 20000);
     }

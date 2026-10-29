@@ -47,6 +47,58 @@ class GitHub {
     this.store.saveSettings();
     return this.publicInfo();
   }
+  // ---- Sign in through the browser
+  // A) OAuth device flow (needs the client ID of an OAuth App with "Device flow" enabled).
+  async deviceStart(clientId, scopes = 'repo workflow read:org') {
+    const base = process.env.MC_GITHUB_WEB || 'https://github.com';
+    const r = await fetch(`${base}/login/device/code`, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: clientId, scope: scopes }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.device_code) throw new Error(`GitHub device login could not start: ${j.error_description || j.error || r.status}. Check the OAuth App client ID and that "Enable Device Flow" is ticked.`);
+    const flow = { clientId, ...j, status: 'pending', started: Date.now() };
+    this.flow = flow;
+    (async () => {
+      let wait = (j.interval || 5) * 1000;
+      while (flow.status === 'pending' && Date.now() - flow.started < (j.expires_in || 900) * 1000) {
+        await new Promise((res) => setTimeout(res, wait));
+        if (flow.status !== 'pending') return;
+        try {
+          const t = await fetch(`${base}/login/oauth/access_token`, { method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' }, body: JSON.stringify({ client_id: clientId, device_code: j.device_code, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }) });
+          const x = await t.json();
+          if (x.access_token) { await this.connect(x.access_token); flow.status = 'done'; this.log(`GitHub: signed in through the browser as ${this.cfg().login}`); return; }
+          if (x.error === 'slow_down') wait += 5000;
+          else if (x.error && x.error !== 'authorization_pending') { flow.status = 'error'; flow.error = x.error_description || x.error; return; }
+        } catch (e) { flow.error = e.message; }
+      }
+      if (flow.status === 'pending') { flow.status = 'expired'; }
+    })();
+    return { user_code: j.user_code, verification_uri: j.verification_uri, expires_in: j.expires_in };
+  }
+  deviceStatus() { const f = this.flow; return f ? { status: f.status, error: f.error || '', login: this.cfg().login || '' } : { status: 'none' }; }
+
+  // B) GitHub CLI: "gh auth login --web" opens the browser; then the token is imported from gh.
+  findGh() {
+    const cands = ['gh'];
+    if (IS_WIN) cands.unshift(path.join(process.env.ProgramFiles || 'C:\\Program Files', 'GitHub CLI', 'gh.exe'), path.join(process.env.LOCALAPPDATA || '', 'Programs', 'GitHub CLI', 'gh.exe'));
+    for (const c of cands) { if (c === 'gh') return 'gh'; try { if (fs.statSync(c).isFile()) return c; } catch {} }
+    return 'gh';
+  }
+  run(cmd, args, timeoutMs = 20000) {
+    return new Promise((resolve) => {
+      let child, out = '';
+      try { child = spawn(cmd, args, { windowsHide: true }); } catch (e) { resolve({ code: -1, out: e.message }); return; }
+      const t = setTimeout(() => { try { child.kill(); } catch {} }, timeoutMs);
+      child.stdout.on('data', (d) => (out += d)); child.stderr.on('data', (d) => (out += d));
+      child.on('error', (e) => { clearTimeout(t); resolve({ code: -1, out: e.message }); });
+      child.on('close', (code) => { clearTimeout(t); resolve({ code, out: out.trim() }); });
+    });
+  }
+  async ghStatus() { const v = await this.run(this.findGh(), ['--version']); return { installed: v.code === 0, version: v.code === 0 ? v.out.split('\n')[0] : '' }; }
+  async ghImport() {
+    const r = await this.run(this.findGh(), ['auth', 'token', '-h', 'github.com']);
+    if (r.code !== 0 || !/^(gh[opusr]_|github_pat_)\w+/.test(r.out)) throw new Error(r.code === -1 ? 'GitHub CLI is not installed yet.' : `Not signed in with the GitHub CLI yet (${r.out.slice(0, 200)}). Finish the browser login first.`);
+    return this.connect(r.out.split(/\s+/)[0]);
+  }
+
   updateAuthor({ name, email }) { const c = this.cfg(); if (name !== undefined) c.name = String(name).trim(); if (email !== undefined) c.email = String(email).trim(); this.store.settings.github = c; this.store.saveSettings(); return this.publicInfo(); }
   disconnect() { delete this.store.settings.github; this.store.saveSettings(); }
   headers(token) { return { Authorization: `Bearer ${token || this.token()}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'MuseCarpathron' }; }

@@ -179,6 +179,7 @@
         S.running.has(c.id) ? h('span', { class: 'run', title: 'working' }) : null,
         h('span', { class: 't', title: c.snippet || c.title }, c.title || 'Untitled'),
         c.source === 'whatsapp' ? h('span', { class: 'badge', title: 'WhatsApp' }, '💬') : null,
+        c.remote ? h('span', { class: 'badge', title: `Works on ${((S.boot.servers || []).find((x) => x.id === c.remote.serverId) || {}).name || 'a server'}` }, c.source === 'terminal' ? '⌨' : '🌐') : null,
         proj ? h('span', { class: 'badge', title: proj.name }, '▦') : null,
         !list ? h('button', { class: 'del', title: 'Delete chat', onclick: async (e) => { e.stopPropagation(); if (confirm(`Delete "${c.title}"?`)) await api(`/api/convs/${c.id}`, { method: 'DELETE' }); } }, '🗑') : null,
       ));
@@ -225,8 +226,9 @@
   async function ensureConv() {
     if (S.conv && S.conv.id) return S.conv;
     const draft = S.conv || {};
-    const c = await api('/api/convs', { body: { projectId: draft.projectId || null, workspace: draft.workspace, engine: draft.engine || undefined } });
+    const c = await api('/api/convs', { body: { projectId: draft.projectId || null, workspace: draft.workspace, engine: draft.engine || undefined, remote: draft.remote || null } });
     const patch = {};
+    if (draft.effort) patch.effort = draft.effort;
     if (draft.mode) patch.mode = draft.mode;
     if (draft.model) patch.model = draft.model;
     if (draft.museModel) patch.museModel = draft.museModel;
@@ -257,6 +259,12 @@
     box.innerHTML = '';
     const inner = h('div', { class: 'msgs-inner', id: 'msgsInner' });
     box.append(inner);
+    if (S.conv.remote && S.conv.id) {
+      const sv = currentServer();
+      inner.append(h('div', { class: 'card', style: 'margin:8px 0;padding:10px;display:flex;gap:8px;align-items:center' },
+        h('span', {}, `🌐 This chat works on ${sv ? sv.name : 'a server that was removed'}${S.conv.remote.path ? ` · ${S.conv.remote.path}` : ''}. Ask the agent below, or`),
+        sv ? h('button', { class: 'btn tiny', onclick: () => { show('remote'); renderRemote(); openTerminal(sv, S.conv.id); } }, S.conv.source === 'terminal' ? '⌨ Continue in terminal' : '⌨ Open terminal here') : null));
+    }
     if (!S.conv.messages.length) inner.append(emptyState());
     for (const m of S.conv.messages) inner.append(renderMsg(m));
     setRunning(S.running.has(S.conv.id));
@@ -985,15 +993,16 @@
   $('#btnAddServer').onclick = () => editServer(null);
   // terminal
   const T = { id: null, poll: null };
-  async function openTerminal(sv) {
+  async function openTerminal(sv, convId) {
     closeTerminal();
     $('#termCard').hidden = false;
     $('#termTitle').textContent = `Terminal — ${sv.name} (${sv.username}@${sv.host})`;
     const out = $('#termOut');
     out.textContent = 'Connecting…\n';
-    const r = await api(`/api/servers/${sv.id}/shell`, { body: {} });
+    const r = await api(`/api/servers/${sv.id}/shell`, { body: convId ? { convId } : {} });
     if (r.error) { out.textContent += `✕ ${r.error}\n`; return; }
-    T.id = r.id;
+    T.id = r.id; T.conv = r.convId;
+    $('#termTitle').textContent = `Terminal — ${sv.name} (${sv.username}@${sv.host}) · saved in Chats`;
     out.textContent = r.output === '(no new output)' ? '' : r.output + '\n';
     T.poll = setInterval(async () => {
       if (!T.id) return;
@@ -1066,11 +1075,19 @@
     const nm = h('input', { value: gh.name || '', placeholder: 'Commit author name' });
     const em = h('input', { value: gh.email || '', placeholder: 'Commit author e-mail' });
     const out = h('div', { class: 'small muted' }, gh.connected ? `✓ Connected as ${gh.login}` : 'Not connected');
+    const cid = h('input', { value: S.settings.githubClientId || '', placeholder: 'OAuth App Client ID (optional, e.g. Ov23li…)', style: 'width:100%;margin-top:6px' });
+    cid.onchange = async () => { S.settings = await api('/api/settings', { body: { githubClientId: cid.value.trim() } }); };
     body.append(h('div', { class: 'card plugin-card' },
       h('div', { class: 'head' }, h('span', { class: 'logo' }, '🐙'), h('div', { class: 'grow' }, h('h3', { style: 'margin:0' }, 'GitHub'), h('div', { class: 'small muted' }, 'Create repositories, publish folders (commit + push), clone, releases with installer uploads, issues and pull requests — the agent uses these as tools. Commits are made with the author below.')),
         h('span', { class: 'pill ' + (gh.connected ? 'ok' : '') }, gh.connected ? gh.login : 'off')),
       h('p', { class: 'small' }, '1. Create a token: ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); const u = 'https://github.com/settings/tokens/new?scopes=repo,workflow,read:org,write:packages&description=Muse%20Carpathron'; if (isDesktop) window.desktop.openExternal(u); else window.open(u); } }, 'github.com → New token (classic) with repo + workflow'), ' (or a fine-grained token with Contents, Metadata, Issues, Pull requests and Administration: read & write). 2. Paste it here and Connect.'),
-      tok, h('div', { class: 'row' }, nm, em), out,
+      h('div', { class: 'row' },
+        h('button', { class: 'btn primary', onclick: () => githubBrowserLogin(out) }, gh.connected ? '🌐 Sign in again with browser' : '🌐 Sign in with browser'),
+        h('span', { class: 'small muted' }, 'Opens GitHub in your browser — no token to copy.')),
+      h('details', { class: 'small', style: 'margin:8px 0' }, h('summary', {}, 'Other ways: paste a token, or use your own OAuth app'),
+        h('p', { class: 'small muted' }, 'Token: create one with the link above and paste it. OAuth app (optional): GitHub → Settings → Developer settings → OAuth Apps → New, tick “Enable Device Flow”, paste its Client ID here — then “Sign in with browser” uses it directly.'),
+        tok, cid),
+      h('div', { class: 'row' }, nm, em), out,
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', onclick: async () => {
           try {
@@ -1078,7 +1095,7 @@
             else { const r = await api('/api/github/author', { body: { name: nm.value, email: em.value } }); out.textContent = `Saved author: ${r.name} <${r.email}>`; }
             toast('GitHub saved');
           } catch (e) { out.textContent = `✕ ${e.message}`; }
-        } }, gh.connected ? 'Save' : 'Connect'),
+        } }, tok.value ? 'Connect' : 'Save'),
         gh.connected ? h('button', { class: 'btn', onclick: async () => { if (confirm('Disconnect GitHub and delete the saved token?')) { await api('/api/github', { method: 'DELETE' }); renderPlugins(); } } }, 'Disconnect') : null,
         gh.connected ? h('button', { class: 'btn', onclick: () => { newChat(); setTimeout(() => { $('#input').value = '/github-publish '; autoGrow(); $('#input').focus(); }, 50); } }, 'Publish a folder…') : null)));
     const e = S.boot.engines || {};
@@ -1093,6 +1110,47 @@
     for (const [icon, name, state, go, label] of rows) {
       body.append(h('div', { class: 'card plugin-card' }, h('div', { class: 'head' }, h('span', { class: 'logo' }, icon), h('div', { class: 'grow' }, h('b', {}, name), h('div', { class: 'small muted' }, state)), go ? h('button', { class: 'btn', onclick: go }, label) : null)));
     }
+  }
+
+  // GitHub sign-in through the browser: own OAuth app (device flow) if configured, else the official GitHub CLI.
+  async function githubBrowserLogin(out) {
+    const settings = await api('/api/settings');
+    const openUrl = (u) => (isDesktop ? window.desktop.openExternal(u) : window.open(u));
+    const status = h('div', { class: 'small muted' }, 'Starting…');
+    let stop = false;
+    const finish = async (ok, msg) => { stop = true; closeModal(); out.textContent = msg; toast(msg, !ok); renderPlugins(); };
+    if (settings.githubClientId) {
+      try {
+        const d = await api('/api/github/device', { body: {} });
+        modal(h('h3', {}, 'Sign in to GitHub'), h('p', {}, 'Your browser opens GitHub. Enter this code there and click Authorize:'),
+          h('div', { class: 'pin' }, d.user_code), h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => navigator.clipboard.writeText(d.user_code) }, 'Copy code'), h('button', { class: 'btn', onclick: () => openUrl(d.verification_uri) }, 'Open GitHub again')), status,
+          h('button', { class: 'btn', onclick: () => { stop = true; closeModal(); } }, 'Cancel'));
+        navigator.clipboard.writeText(d.user_code).catch(() => {});
+        openUrl(d.verification_uri);
+        while (!stop) {
+          await new Promise((r) => setTimeout(r, 2500));
+          const st = await api('/api/github/device');
+          if (st.status === 'done') return finish(true, `✓ Connected as ${st.info.login}`);
+          if (st.status === 'error' || st.status === 'expired') return finish(false, `✕ GitHub login ${st.status}: ${st.error || ''}`);
+          status.textContent = 'Waiting for you to authorize in the browser…';
+        }
+      } catch (e) { toast(e.message, true); }
+      return;
+    }
+    const r = await api('/api/github/gh/login', { body: {} }).catch((e) => ({ error: e.message }));
+    if (r.error) return toast(r.error, true);
+    modal(h('h3', {}, 'Sign in to GitHub'),
+      h('p', {}, r.installing ? 'A window opened: it installs the official GitHub CLI first (Windows may ask for permission), then opens GitHub in your browser.' : 'A window opened and your browser opens GitHub.'),
+      h('p', {}, 'In that window you see a one-time code: paste it on the GitHub page and click Authorize. This app connects automatically when you are done.'),
+      status, h('button', { class: 'btn', onclick: () => { stop = true; closeModal(); } }, 'Cancel'));
+    const until = Date.now() + 10 * 60 * 1000;
+    while (!stop && Date.now() < until) {
+      await new Promise((res) => setTimeout(res, 3000));
+      const x = await api('/api/github/gh/import', { body: {} }).catch((e) => ({ error: e.message }));
+      if (x && x.login) return finish(true, `✓ Connected as ${x.login}`);
+      status.textContent = /not installed/.test(x.error || '') ? 'Installing GitHub CLI…' : 'Waiting for the browser login…';
+    }
+    if (!stop) finish(false, 'GitHub login timed out — try again.');
   }
 
   async function editServer(sv) {

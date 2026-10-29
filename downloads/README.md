@@ -2,9 +2,9 @@
 
 Ready-to-install builds of the Carpathron apps.
 
-## 🧠 Muse Carpathron — Windows 10 / 11 / Server 2016+ (v1.5.1)
+## 🧠 Muse Carpathron — Windows 10 / 11 / Server 2016+ (v1.5.2)
 
-**[⬇️ Download Muse-Carpathron-Setup.exe (128 MB)](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe)** — from the [latest release](https://github.com/qubitpage/carpathron-muse/releases/latest) ([v1.5.1](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.5.1)).
+**[⬇️ Download Muse-Carpathron-Setup.exe (128 MB)](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe)** — from the [latest release](https://github.com/qubitpage/carpathron-muse/releases/latest) ([v1.5.2](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.5.2)).
 
 1. Double-click `Muse-Carpathron-Setup.exe`.
 2. If SmartScreen appears: **More info → Run anyway**. The app opens when the install finishes.

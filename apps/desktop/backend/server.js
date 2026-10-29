@@ -111,6 +111,25 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   const jobs = new Jobs(dataDir);
   const github = new GitHub({ store, secrets, log: logFn });
   seedSkills(skills);
+  // terminal session -> chat (transcript saved like a conversation)
+  const termConvs = new Map();
+  const logTerm = (shellId, input, output) => {
+    const convId = termConvs.get(shellId);
+    const c = convId && store.get(convId);
+    if (!c) return;
+    const out = String(output || '').replace(/^\(no new output\)$/, '').trim();
+    if (input !== null && input !== undefined && String(input).trim()) {
+      agent.addMsg(c, { role: 'user', text: `$ ${String(input).replace(/\{ctrl-c\}/i, '^C')}`, from: 'terminal' });
+    }
+    if (out) agent.addMsg(c, { role: 'assistant', text: '```text\n' + out.slice(-20000) + '\n```', from: 'terminal' });
+    if ((input && String(input).trim()) || out) {
+      c.llm = c.llm || [];
+      c.llm.push({ role: 'user', content: `[Terminal on this server — for context only]${input ? `\n$ ${input}` : ''}${out ? `\n${out.slice(-4000)}` : ''}` });
+      c.llm.push({ role: 'assistant', content: 'Noted.' });
+      if (c.llm.length > 400) c.llm.splice(0, c.llm.length - 400);
+    }
+    emit('conv:update', store.index[c.id]);
+  };
   const agent = new Agent({ store, robot, mcp, emit, log: logFn, memory, projects, skills, camera, remote, jobs, dataDir, github });
   const mapper = new Mapper({ robot, camera, api: agent.api, memory, getSettings: () => store.settings, emit, log: logFn });
   agent.mapper = mapper;
@@ -209,7 +228,9 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/convs' && m === 'GET') return send(res, 200, store.list());
     if (p === '/api/convs' && m === 'POST') {
       const b = await readJson(req);
-      const c = store.createConversation({ projectId: b.projectId || null, engine: b.engine || undefined, workspace: b.workspace || undefined });
+      let rem = null;
+      if (b.remote && b.remote.serverId) { const sv = remote.find(b.remote.serverId); if (sv) rem = { serverId: sv.id, path: String(b.remote.path || sv.defaultPath || '').trim() }; }
+      const c = store.createConversation({ projectId: b.projectId || null, engine: b.engine || undefined, workspace: b.workspace || undefined, remote: rem });
       if (b.projectId) { try { const pm = projects.meta(b.projectId); if (pm.workspace) c.workspace = pm.workspace; } catch {} }
       emit('conv:update', store.index[c.id]);
       return send(res, 200, c);
@@ -375,14 +396,31 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     }
     // Remote terminal (interactive shell sessions)
     if ((mm = p.match(/^\/api\/servers\/([\w-]+)\/shell$/)) && m === 'POST') {
-      try { const id = await remote.shellStart(mm[1]); const output = await remote.shellRead(id, { waitMs: 1500 }); return send(res, 200, { id, output }); }
+      // Every terminal session is also saved as a chat (listed with 🌐), so it can be continued another day —
+      // by typing commands again or by asking the agent, which works on the same server.
+      const b = await readJson(req);
+      try {
+        const sv = remote.need(mm[1]);
+        let c = b.convId ? store.get(b.convId) : null;
+        if (!c) {
+          c = store.createConversation({ title: `Terminal — ${sv.name} ${new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`, source: 'terminal', remote: { serverId: sv.id, path: sv.defaultPath || '' } });
+          c.mode = 'ask';
+          emit('conv:update', store.index[c.id]);
+        }
+        const id = await remote.shellStart(sv.id);
+        termConvs.set(id, c.id);
+        const output = await remote.shellRead(id, { waitMs: 1500 });
+        if (sv.defaultPath) await remote.shellSend(id, `cd ${sv.defaultPath.includes(' ') ? `'${sv.defaultPath}'` : sv.defaultPath}`, { waitMs: 400 }).catch(() => {});
+        logTerm(id, null, output);
+        return send(res, 200, { id, output, convId: c.id });
+      }
       catch (e) { return send(res, 200, { error: e.message }); }
     }
     if ((mm = p.match(/^\/api\/shells\/([\w-]+)$/))) {
       try {
-        if (m === 'POST') { const b = await readJson(req); return send(res, 200, { output: await remote.shellSend(mm[1], b.input ?? '', { waitMs: Number(b.waitMs) || 1200 }) }); }
-        if (m === 'GET') return send(res, 200, { output: await remote.shellRead(mm[1], { waitMs: Number(url.searchParams.get('wait')) || 300 }) });
-        if (m === 'DELETE') return send(res, 200, { ok: remote.shellClose(mm[1]) });
+        if (m === 'POST') { const b = await readJson(req); const output = await remote.shellSend(mm[1], b.input ?? '', { waitMs: Number(b.waitMs) || 1200 }); logTerm(mm[1], b.input, output); return send(res, 200, { output }); }
+        if (m === 'GET') { const output = await remote.shellRead(mm[1], { waitMs: Number(url.searchParams.get('wait')) || 300 }); logTerm(mm[1], null, output); return send(res, 200, { output }); }
+        if (m === 'DELETE') { termConvs.delete(mm[1]); return send(res, 200, { ok: remote.shellClose(mm[1]) }); }
       } catch (e) { return send(res, 200, { error: e.message }); }
     }
     // GitHub plugin
@@ -390,6 +428,28 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/github/connect' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await github.connect(String(b.token || '').trim(), b)); } catch (e) { return send(res, 400, { error: e.message }); } }
     if (p === '/api/github/author' && m === 'POST') { const b = await readJson(req); return send(res, 200, github.updateAuthor(b)); }
     if (p === '/api/github' && m === 'DELETE') { github.disconnect(); return send(res, 200, { ok: true }); }
+    if (p === '/api/github/device' && m === 'POST') {
+      const b = await readJson(req);
+      const clientId = String(b.clientId || store.settings.githubClientId || '').trim();
+      if (b.clientId !== undefined) store.updateSettings({ githubClientId: clientId });
+      if (!clientId) return send(res, 400, { error: 'No OAuth App client ID set.' });
+      try { return send(res, 200, await github.deviceStart(clientId)); } catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (p === '/api/github/device' && m === 'GET') return send(res, 200, { ...github.deviceStatus(), info: github.publicInfo() });
+    if (p === '/api/github/gh' && m === 'GET') return send(res, 200, await github.ghStatus());
+    if (p === '/api/github/gh/login' && m === 'POST') {
+      try {
+        const st = await github.ghStatus();
+        const lines = [];
+        if (!st.installed) lines.push("Write-Host 'Installing GitHub CLI (official, from GitHub via winget)...' -ForegroundColor Green", 'winget install --id GitHub.cli -e --accept-source-agreements --accept-package-agreements', "$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')");
+        lines.push("Write-Host 'Your browser opens GitHub: copy the one-time code shown here, paste it there and click Authorize.' -ForegroundColor Green",
+          'gh auth login --web --hostname github.com --git-protocol https --scopes "repo,workflow,read:org"',
+          "Write-Host ''", "Write-Host 'Done. Go back to Muse Carpathron - it connects automatically. You can close this window.' -ForegroundColor Green");
+        MuseEngine.openConsole('github-login', lines, os.homedir());
+        return send(res, 200, { ok: true, installing: !st.installed });
+      } catch (e) { return send(res, 400, { error: e.message }); }
+    }
+    if (p === '/api/github/gh/import' && m === 'POST') { try { return send(res, 200, await github.ghImport()); } catch (e) { return send(res, 200, { error: e.message }); } }
 
     // Muse Code ↔ app tools (MCP bridge, called by backend/bridge.js)
     if (p === '/api/bridge/tools') return send(res, 200, { tools: agent.bridgeTools() });

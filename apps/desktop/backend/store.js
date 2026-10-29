@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS = {
   museTrustWorkspace: true, // let Muse Code load skills/rules from the chat folder
   musePermissionProfile: '', // Muse Code permission profile ('' = host default, full mode picks a full-access one)
   arduinoCli: '',
+  githubClientId: '', // optional OAuth App (device flow) for "Sign in with browser"
   webSearch: 'auto', // auto (Meta search grounding, then DuckDuckGo) | duckduckgo
   autoMemory: true,
   autoSkills: true,
@@ -119,7 +120,7 @@ class Store {
     }
     this._saveIndex();
   }
-  _meta(c) { return { id: c.id, title: c.title, updatedAt: c.updatedAt, createdAt: c.createdAt, source: c.source, engine: c.engine, projectId: c.projectId || null }; }
+  _meta(c) { return { id: c.id, title: c.title, updatedAt: c.updatedAt, createdAt: c.createdAt, source: c.source, engine: c.engine, projectId: c.projectId || null, remote: c.remote && c.remote.serverId ? { serverId: c.remote.serverId, path: c.remote.path || '' } : null }; }
   _saveIndex() { writeAtomic(this.indexFile, JSON.stringify(this.index)); }
 
   saveSettings() { writeAtomic(this.settingsFile, JSON.stringify(this.settings, null, 2)); }
@@ -139,10 +140,10 @@ class Store {
     return s;
   }
 
-  createConversation({ title = 'New chat', engine, model, source = 'app', workspace, projectId = null } = {}) {
+  createConversation({ title = 'New chat', engine, model, source = 'app', workspace, projectId = null, remote = null } = {}) {
     const id = crypto.randomUUID();
     const now = Date.now();
-    const c = { id, title, engine, model, source, projectId, workspace: workspace || this.settings.workspace, createdAt: now, updatedAt: now, messages: [], llm: [], museSessionId: null };
+    const c = { id, title, engine, model, source, projectId, remote, workspace: workspace || this.settings.workspace, createdAt: now, updatedAt: now, messages: [], llm: [], museSessionId: null };
     this.loaded.set(id, c);
     this.touch(c);
     this._evict();

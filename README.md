@@ -33,6 +33,12 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 
 All files of this version: **[Release v1.5.1](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.5.1)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
 
+## What's new in 1.5.2
+
+- **Sign in to GitHub with the browser** (Plugins → GitHub): uses the GitHub CLI web login when it is installed, or the GitHub device code page. No token to copy.
+- **Server chats are saved.** A chat started on a remote server keeps that server, so you can come back another day and continue there. Chats on a server show 🌐 in the list.
+- **Terminal sessions are saved as chats** (⌨ in the list). Open one later to read what was run, ask the agent to continue, or press *Continue in terminal*.
+
 ## What's new in 1.5.1
 
 - Muse Code sessions now get the app tools (SSH, GitHub, PDF, research, Arduino, robot…) — tested on Windows with Muse Code 1.4.14, also in Full mode.

@@ -44,11 +44,13 @@ function tinyPdf(pages) {
   await fake.start(18631);
   const sshHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mc14-home-'));
   await fakeSsh.start(18632, { home: sshHome });
-  process.env.MC_GITHUB_API = 'http://127.0.0.1:18633'; process.env.MC_GITHUB_UPLOADS = 'http://127.0.0.1:18633/uploads';
+  process.env.MC_GITHUB_API = 'http://127.0.0.1:18633'; process.env.MC_GITHUB_WEB = 'http://127.0.0.1:18633'; process.env.MC_GITHUB_UPLOADS = 'http://127.0.0.1:18633/uploads';
   const gh = { repos: new Map(), releases: [], assets: [], issues: [] };
   await new Promise((r) => require('http').createServer((req, res) => {
     let b = []; req.on('data', (d) => b.push(d)); req.on('end', () => {
       const body = Buffer.concat(b); const J = (c, o) => { res.writeHead(c, { 'Content-Type': 'application/json', 'x-oauth-scopes': 'repo, workflow' }); res.end(JSON.stringify(o)); };
+      if (req.url === '/login/device/code') return J(200, { device_code: 'dc1', user_code: 'ABCD-1234', verification_uri: 'https://github.com/login/device', interval: 1, expires_in: 60 });
+      if (req.url === '/login/oauth/access_token') { gh.polls = (gh.polls || 0) + 1; return J(200, gh.polls < 2 ? { error: 'authorization_pending' } : { access_token: 'ghp_test' }); }
       if (req.headers.authorization !== 'Bearer ghp_test') return J(401, { message: 'Bad credentials' });
       const u = req.url;
       if (u === '/user') return J(200, { login: 'msrusu87', id: 7, name: 'Mircea', public_repos: 3, total_private_repos: 2 });
@@ -376,6 +378,19 @@ function tinyPdf(pages) {
     const x = await api(`/api/shells/${r.id}`, { input: 'echo term-$((6*7))', waitMs: 3000 });
     assert.ok(/term-42/.test(x.output), x.output);
     assert.ok((await api(`/api/shells/${r.id}`, null, 'DELETE')).ok);
+    // the terminal session is saved as a chat on that server, and can be continued later
+    assert.ok(r.convId, 'terminal saved as chat');
+    const c = await api(`/api/convs/${r.convId}`);
+    assert.strictEqual(c.source, 'terminal'); assert.strictEqual(c.remote.serverId, server.id);
+    assert.ok(c.messages.some((m) => /echo term-/.test(m.text)) && c.messages.some((m) => /term-42/.test(m.text)), JSON.stringify(c.messages));
+    const list = await api('/api/convs');
+    assert.ok((list.convs || list).find((x) => x.id === r.convId).remote, 'chat list shows remote');
+    const r2 = await api(`/api/servers/${server.id}/shell`, { convId: r.convId });
+    assert.strictEqual(r2.convId, r.convId, 'reopened in the same chat');
+    await api(`/api/shells/${r2.id}`, null, 'DELETE');
+    // a normal chat started on a server keeps it
+    const n = await api('/api/convs', { remote: { serverId: server.id, path: '/tmp' } });
+    assert.strictEqual((await api(`/api/convs/${n.id}`)).remote.path, '/tmp');
   });
 
   await step('GitHub plugin: connect (token encrypted), create repo, release with installer upload, issue', async () => {
@@ -411,6 +426,17 @@ function tinyPdf(pages) {
     assert.ok(fs.existsSync(path.join(ws, 'clone-test', 'b.txt')), cl);
     const tools = srv.agent.bridgeTools().map((t) => t.name);
     assert.ok(tools.includes('github_publish') && tools.includes('ssh_key'));
+  });
+
+  await step('GitHub: sign in with the browser (OAuth device flow) connects automatically', async () => {
+    await api('/api/github', null, 'DELETE');
+    const d = await api('/api/github/device', { clientId: 'Ov23test' });
+    assert.strictEqual(d.user_code, 'ABCD-1234');
+    let st;
+    for (let i = 0; i < 40; i++) { await sleep(250); st = await api('/api/github/device'); if (st.status !== 'pending') break; }
+    assert.strictEqual(st.status, 'done', JSON.stringify(st));
+    assert.strictEqual(st.info.login, 'msrusu87');
+    assert.strictEqual((await api('/api/settings')).githubClientId, 'Ov23test');
   });
 
   await step('projects: create a project and put a chat in it (no browser prompt needed)', async () => {

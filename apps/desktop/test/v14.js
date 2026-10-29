@@ -472,7 +472,7 @@ if (a === '--version') { console.log('gh version 9.9.9 (test)'); process.exit(0)
 if (a.startsWith('auth token')) { if (process.env.GH_TOKEN) { console.log('env-token-leaked'); process.exit(0); } console.log('ghp_test'); process.exit(0); }
 if (a.startsWith('auth login')) {
   if (process.env.GH_TOKEN) { console.error('The value of the GH_TOKEN environment variable is being used'); process.exit(1); }
-  process.stderr.write('! First copy your one-time code: WXYZ-9876\\nOpen this URL to continue in your web browser: https://github.com/login/device\\n');
+  process.stderr.write('\\n! One-time code (WXYZ-9876) copied to clipboard\\nOpen this URL to continue in your web browser: https://github.com/login/device\\n');
   setTimeout(() => { console.error('✓ Logged in as msrusu87'); process.exit(0); }, 1500);
 } else process.exit(2);
 `, { mode: 0o755 });

@@ -44,7 +44,8 @@ var shots_dir := ""   # --shots=DIR: store screenshots of the demo (desktop rend
 var shots_t0 := 0
 var rec_effect: AudioEffectRecord
 var recording := false
-var tts_voice := ""
+var mic: AudioStreamPlayer = null
+var mic_asked := false
 
 func _ready() -> void:
 	cfg.load("user://avatar.cfg")
@@ -80,6 +81,8 @@ func _ready() -> void:
 		var saved: String = cfg.get_value("robot", "host", "")
 		if saved != "":
 			link.connect_to(saved)
+		else:
+			_start_demo()   # something to see and drive at once; a real robot found on the Wi-Fi replaces it
 		link.scan(["carpathron.local"] + ([saved] if saved != "" else []))
 	_refresh_panel()
 
@@ -193,16 +196,13 @@ func _stop_demo() -> void:
 	screen_mat.albedo_texture = null
 
 func _on_muse() -> void:
+	# Answers are shown on the panel. (No text-to-speech: on Quest without a speech engine Godot's
+	# DisplayServer.tts_* calls crash the app — store review VRC.Quest.Functional.1.)
 	_refresh_panel()
-	var a: String = muse.last_answer
-	if a != "" and not a.ends_with("...") and tts_voice != "" and not test:
-		DisplayServer.tts_stop()
-		DisplayServer.tts_speak(a.split("\n")[-1], tts_voice)
 
 func _setup_audio() -> void:
-	# microphone -> "Record" bus (muted, so you don't hear yourself) with an AudioEffectRecord
-	if OS.get_name() == "Android":
-		OS.request_permissions()
+	# microphone -> "Record" bus (muted, so you don't hear yourself) with an AudioEffectRecord.
+	# The microphone itself starts only when it is first needed and allowed (see _mic_ready).
 	var idx := AudioServer.bus_count
 	AudioServer.add_bus(idx)
 	AudioServer.set_bus_name(idx, "Record")
@@ -210,17 +210,33 @@ func _setup_audio() -> void:
 	rec_effect = AudioEffectRecord.new()
 	rec_effect.format = AudioStreamWAV.FORMAT_16_BITS
 	AudioServer.add_bus_effect(idx, rec_effect)
-	var mic := AudioStreamPlayer.new()
+	if OS.get_name() == "Android":
+		get_tree().on_request_permissions_result.connect(func(perm: String, granted: bool):
+			if perm.ends_with("RECORD_AUDIO") and granted:
+				_mic_ready())
+
+## True when the microphone runs. On Android the permission is asked the first time push-to-talk is used.
+func _mic_ready() -> bool:
+	if mic != null:
+		return true
+	if OS.get_name() == "Android" and not OS.get_granted_permissions().has("android.permission.RECORD_AUDIO"):
+		if not mic_asked:
+			mic_asked = true
+			OS.request_permission("android.permission.RECORD_AUDIO")
+			link.note = "Allow the microphone to talk to Muse"
+			_refresh_panel()
+		return false
+	mic = AudioStreamPlayer.new()
 	mic.stream = AudioStreamMicrophone.new()
 	mic.bus = "Record"
 	add_child(mic)
 	mic.play()
-	var voices := DisplayServer.tts_get_voices_for_language("en")
-	if voices.size() > 0:
-		tts_voice = voices[0]
+	return true
 
 func _ptt(down: bool) -> void:
 	if down and not recording and muse.state == "linked":
+		if not _mic_ready():
+			return
 		recording = true
 		rec_effect.set_recording_active(true)
 		_refresh_panel()

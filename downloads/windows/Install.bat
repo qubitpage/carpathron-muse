@@ -1,13 +1,13 @@
 @echo off
-title Install Muse Carpathron 1.5.4
+title Install Muse Carpathron 1.5.5
 cd /d "%~dp0"
 echo.
-echo  Muse Carpathron 1.5.4 - preparing the installer...
+echo  Muse Carpathron 1.5.5 - preparing the installer...
 taskkill /im "Muse Carpathron.exe" /f >nul 2>&1
 del /q Muse-Carpathron-Setup.exe 2>nul
 copy /b /y Muse-Carpathron-Setup.part0+Muse-Carpathron-Setup.part1+Muse-Carpathron-Setup.part2+Muse-Carpathron-Setup.part3+Muse-Carpathron-Setup.part4 Muse-Carpathron-Setup.exe >nul
 if errorlevel 1 goto fail
-certutil -hashfile Muse-Carpathron-Setup.exe SHA256 | findstr /i /c:"8fc42b0ffff763d21a5597b294ae947e9493f83f599da471b2a36f4d9cfd7f17" >nul
+certutil -hashfile Muse-Carpathron-Setup.exe SHA256 | findstr /i /c:"8d5dd4cfcb5379e4240aa150d0cb3ea0a17a5769b1b0d455e183f5c2d30bcd7e" >nul
 if errorlevel 1 (
   echo  The installer file is damaged. Copy the parts again.
   goto fail

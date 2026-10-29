@@ -159,13 +159,15 @@ class GitHub {
         st.child = child;
         const onData = (d) => {
           st.out = (st.out + d).slice(-4000);
-          const c = st.out.match(/one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/);
+          // "! First copy your one-time code: ABCD-1234" (older gh) or "! One-time code (ABCD-1234) copied to clipboard" (gh 2.80+)
+          const c = st.out.match(/one-time code[^A-Z0-9]{0,40}([A-Z0-9]{4}-[A-Z0-9]{4})/i);
           const u = st.out.match(/https:\/\/github\.com\/login\/device\S*/);
           if (c && !st.code) { st.code = c[1]; st.url = u ? u[0] : 'https://github.com/login/device'; st.status = 'code'; st.message = 'Enter the code on GitHub and click Authorize.'; }
           if (/Press Enter/i.test(String(d))) { try { child.stdin.write('\n'); } catch {} }
         };
         child.stdout.on('data', onData); child.stderr.on('data', onData);
         const timer = setTimeout(() => { try { child.kill(); } catch {} }, 15 * 60 * 1000);
+        setTimeout(() => { if (st.status === 'starting') st.message = `Still waiting for GitHub… ${st.out.trim().split('\n').slice(-2).join(' ').slice(0, 200)}`; }, 15000);
         const code = await new Promise((r) => { child.on('error', (e) => { st.out += e.message; r(-1); }); child.on('close', r); });
         clearTimeout(timer); st.child = null;
         if (st.status === 'cancelled') return;

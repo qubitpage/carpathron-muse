@@ -46,6 +46,9 @@ var rec_effect: AudioEffectRecord
 var recording := false
 var mic: AudioStreamPlayer = null
 var mic_asked := false
+var world_env: Environment
+var floor_mesh: MeshInstance3D
+var screen_title: Label3D
 
 func _ready() -> void:
 	cfg.load("user://avatar.cfg")
@@ -85,6 +88,8 @@ func _ready() -> void:
 			_start_demo()   # something to see and drive at once; a real robot found on the Wi-Fi replaces it
 		link.scan(["carpathron.local"] + ([saved] if saved != "" else []))
 	_refresh_panel()
+	if shots_dir != "":
+		_shots_run()
 
 func _build_world() -> void:
 	var xri := XRServer.find_interface("OpenXR")
@@ -99,6 +104,7 @@ func _build_world() -> void:
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color(0.6, 0.6, 0.6)
 	env.environment = e
+	world_env = e
 	add_child(env)
 	origin = XROrigin3D.new()
 	add_child(origin)
@@ -125,6 +131,7 @@ func _build_world() -> void:
 	fm.albedo_color = Color(0.08, 0.1, 0.13)
 	floor.material_override = fm
 	add_child(floor)
+	floor_mesh = floor
 	pivot = Node3D.new()
 	pivot.position = Vector3(0, 1.6, 0)
 	add_child(pivot)
@@ -136,6 +143,26 @@ func _build_world() -> void:
 	screen_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	screen_mat.albedo_color = Color(1, 1, 1)
 	screen.material_override = screen_mat
+	screen.layers = 2   # screens and text are not seen by the demo robot's camera
+	var bezel := MeshInstance3D.new()
+	var bm := BoxMesh.new(); bm.size = Vector3(3.34, 2.54, 0.03)
+	bezel.mesh = bm
+	var bmat := StandardMaterial3D.new(); bmat.albedo_color = Color(0.08, 0.09, 0.11)
+	bezel.material_override = bmat
+	bezel.position = Vector3(0, 0, -0.02)
+	bezel.layers = 2
+	screen.add_child(bezel)
+	screen_title = Label3D.new()
+	screen_title.text = "ROBOT CAMERA"
+	screen_title.font_size = 96
+	screen_title.pixel_size = 0.003
+	screen_title.position = Vector3(0, 1.5, 0)
+	screen_title.modulate = Color(1.0, 0.7, 0.28)
+	screen_title.outline_size = 18
+	screen_title.outline_modulate = Color(0.05, 0.06, 0.08)
+	screen_title.layers = 2
+	screen_title.visible = false
+	screen.add_child(screen_title)
 	pivot.add_child(screen)
 	panel = Label3D.new()
 	panel.position = Vector3(0, -1.45, -2.1)
@@ -145,12 +172,16 @@ func _build_world() -> void:
 	panel.modulate = Color(0.92, 0.93, 0.95)
 	panel.width = 1500
 	panel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	panel.layers = 2
 	pivot.add_child(panel)
 	info = Label3D.new()
 	info.position = Vector3(0, 1.35, -2.15)
 	info.pixel_size = 0.0025
 	info.font_size = 44
 	info.modulate = Color(1.0, 0.7, 0.28)
+	info.layers = 2
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.width = 1400
 	pivot.add_child(info)
 
 func _refresh_panel() -> void:
@@ -164,11 +195,14 @@ func _refresh_panel() -> void:
 	if l.found.size() > 1:
 		found = "\nRobots found: %d — press Menu to switch" % l.found.size()
 	panel.text = "CARPATHRON AVATAR · %s%s\n%s · head steering %s · A/X stop · B photo · Y head steering · trigger turbo · hold both grips: search again" % [who, found, "arcade (right stick)" if arcade else "tank (two sticks)", "ON" if head_steer else "off"]
-	info.text = "DEMO ROBOT · drive around the virtual room · Menu = search for your robot" if demo != null else l.note
+	info.text = demo.tour_text() if demo != null else l.note
 	if muse:
 		panel.text += "\n" + muse.status_text() + ("   🎤 listening..." if recording else "")
 		if muse.last_answer != "":
-			info.text = muse.last_answer
+			if demo != null:
+				panel.text += "\nMuse: " + muse.last_answer
+			else:
+				info.text = muse.last_answer
 	if test:
 		return
 	if demo != null and l.online:
@@ -183,10 +217,57 @@ func _start_demo() -> void:
 	if demo != null:
 		return
 	demo = DemoRobot.new()
+	demo.cfg = cfg
+	demo.arcade = arcade
 	add_child(demo)
+	demo.changed.connect(_refresh_panel)
+	_place_demo()
 	screen_mat.albedo_texture = demo.texture
 	link.note = "Demo robot: drive around the virtual room. Press Menu to search for your real robot."
+	_demo_layout(true)
 	_refresh_panel()
+
+## The demo room is built around you: you stand near the back wall, the robot 1.3 m in front of you.
+func _place_demo() -> void:
+	if demo == null:
+		return
+	var yaw := pivot.rotation.y
+	var here := Vector3(cam.position.x, 0, cam.position.z) if xr_on and placed else Vector3.ZERO
+	demo.rotation.y = yaw
+	demo.position = here + Basis(Vector3.UP, yaw) * Vector3(0, 0, -2.6)
+
+## Demo: a small camera screen on the left, the status panel on the right, the tour text above the room.
+func _demo_layout(on: bool) -> void:
+	floor_mesh.visible = not on
+	screen_title.visible = on
+	world_env.background_color = Color(0.55, 0.62, 0.7) if on else Color(0.03, 0.04, 0.06)
+	world_env.ambient_light_color = Color(0.75, 0.75, 0.78) if on else Color(0.6, 0.6, 0.6)
+	if on:
+		screen.scale = Vector3(0.34, 0.34, 1)
+		screen.position = Vector3(-1.15, -0.1, -1.7)
+		screen.rotation_degrees = Vector3(0, 30, 0)
+		panel.position = Vector3(1.15, -0.2, -1.7)
+		panel.rotation_degrees = Vector3(0, -30, 0)
+		panel.pixel_size = 0.0014
+		panel.width = 900
+		panel.outline_size = 14
+		panel.outline_modulate = Color(0.05, 0.06, 0.08, 0.9)
+		info.position = Vector3(0, 0.62, -2.3)
+		info.pixel_size = 0.0021
+		info.outline_size = 16
+		info.outline_modulate = Color(0.05, 0.06, 0.08, 0.9)
+	else:
+		screen.scale = Vector3.ONE
+		screen.position = Vector3(0, 0.05, -2.2)
+		screen.rotation_degrees = Vector3.ZERO
+		panel.position = Vector3(0, -1.45, -2.1)
+		panel.rotation_degrees = Vector3.ZERO
+		panel.pixel_size = 0.0022
+		panel.width = 1500
+		panel.outline_size = 0
+		info.position = Vector3(0, 1.35, -2.15)
+		info.pixel_size = 0.0025
+		info.outline_size = 12
 
 func _stop_demo() -> void:
 	if demo == null:
@@ -194,6 +275,7 @@ func _stop_demo() -> void:
 	demo.queue_free()
 	demo = null
 	screen_mat.albedo_texture = null
+	_demo_layout(false)
 
 func _on_muse() -> void:
 	# Answers are shown on the panel. (No text-to-speech: on Quest without a speech engine Godot's
@@ -281,6 +363,7 @@ func _process(delta: float) -> void:
 		pivot.position.y = cam.position.y         # screen at your eye height, in the direction you face at start
 		pivot.rotation.y = cam.rotation.y
 		placed = true
+		_place_demo()
 	var ls := Vector2.ZERO
 	var rs := Vector2.ZERO
 	var stop := false
@@ -291,16 +374,25 @@ func _process(delta: float) -> void:
 		stop = left_hand.is_button_pressed("ax_button") or right_hand.is_button_pressed("ax_button")
 		turbo = right_hand.get_float("trigger") > 0.5 or left_hand.get_float("trigger") > 0.5
 		if _pressed("B", right_hand.is_button_pressed("by_button")):
-			link.take_photo()
+			if demo != null:
+				demo.photo()
+			else:
+				link.take_photo()
 			right_hand.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.08, 0.0)
 		if _pressed("Y", left_hand.is_button_pressed("by_button")):
 			head_steer = not head_steer
 			cfg.set_value("ui", "head_steer", head_steer); cfg.save("user://avatar.cfg")
-			link.note = "Head steering " + ("ON" if head_steer else "off"); _refresh_panel()
+			link.note = "Head steering " + ("ON" if head_steer else "off")
+			if demo != null: demo.event("y")
+			_refresh_panel()
 		if _pressed("RS", right_hand.is_button_pressed("primary_click")):
 			arcade = not arcade
 			cfg.set_value("ui", "arcade", arcade); cfg.save("user://avatar.cfg")
-			link.note = "Arcade mode (right stick)" if arcade else "Tank mode (two sticks)"; _refresh_panel()
+			link.note = "Arcade mode (right stick)" if arcade else "Tank mode (two sticks)"
+			if demo != null: demo.arcade = arcade
+			_refresh_panel()
+		if _pressed("LS", left_hand.is_button_pressed("primary_click")) and demo != null:
+			demo.event("skip")
 		if _pressed("MENU", left_hand.is_button_pressed("menu_button")):
 			if demo != null or link.found.is_empty():
 				_stop_demo()
@@ -320,10 +412,12 @@ func _process(delta: float) -> void:
 		else:
 			grip_hold = 0.0
 			_ptt(rg)
+			if _pressed("RG", rg) and demo != null:
+				demo.event("talk")
 			if _pressed("LG", lg):
+				if demo != null:
+					demo.event("look")
 				muse.ask("What do you see? Anything in the way?")
-	if shots_dir != "":
-		_shots()
 	if demo_test > 0:
 		var dt_ms := Time.get_ticks_msec() - demo_test
 		if demo != null and dt_ms < 40000:
@@ -355,6 +449,8 @@ func _process(delta: float) -> void:
 		var off := wrapf(cam.rotation.y - pivot.rotation.y, -PI, PI)   # + = you look left
 		var deg := rad_to_deg(off)
 		if absf(deg) > 15.0:
+			if not steer_on and demo != null:
+				demo.event("head")
 			steer_on = true
 		if absf(deg) < 3.0:
 			steer_on = false
@@ -369,6 +465,7 @@ func _process(delta: float) -> void:
 			link.stop_now()
 			if demo != null:
 				demo.drive(0, 0)
+				demo.event("stop")
 			link.note = "STOP"; _refresh_panel()
 			if xr_on:
 				right_hand.trigger_haptic_pulse("haptic", 0.0, 0.7, 0.1, 0.0)
@@ -409,33 +506,78 @@ func _test_step() -> Array:
 	return [Vector2.ZERO, Vector2.ZERO, false]
 
 
-# ---------------------------------------------------------------- store screenshots (desktop render of the demo)
-func _shots() -> void:
+# ---------------------------------------------------------------- store screenshots (desktop render of the demo tour)
+func _wait(sec: float) -> void:
+	await get_tree().create_timer(sec).timeout
+
+func _snap(n: String) -> void:
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(shots_dir + "/shot" + n + ".png")
+	print("SHOT ", n, " step=", demo.step, " pos=", demo.body.position)
+
+## steer the demo robot towards a room point (autopilot for the screenshots)
+func _steer_to(target: Vector2, speed := 70.0) -> float:
+	var p := Vector2(demo.body.position.x, demo.body.position.z)
+	var to := target - p
+	var want := atan2(-to.x, -to.y)
+	var err := wrapf(want - demo.body.rotation.y, -PI, PI)
+	var turn := clampf(err * 120.0, -60.0, 60.0)
+	var fw := speed if absf(err) < 0.5 else 0.0
+	demo.drive(int(fw - turn), int(fw + turn))
+	return to.length()
+
+func _shots_run() -> void:
+	await _wait(0.5)
 	if demo == null:
 		_start_demo()
-		shots_t0 = Time.get_ticks_msec()
-		return
-	var t := Time.get_ticks_msec() - shots_t0
-	# scripted drive: forward, turn left, forward, turn right
-	var plan := [[0, 1500, 0, 0], [1500, 3200, 70, 70], [3200, 4300, -60, 60], [4300, 6000, 70, 70], [6000, 7600, 60, -60], [7600, 9000, 60, 60], [9000, 99999, 0, 0]]
-	for p in plan:
-		if t >= p[0] and t < p[1]:
-			demo.drive(p[2], p[3])
-	var marks := {1400: "1", 3100: "2", 4250: "3", 5900: "4", 8900: "5"}
-	for m in marks:
-		var key: String = "shot" + str(marks[m])
-		if t >= m and not test.has(key):
-			test[key] = true
-			# the robot's view fills the whole 16:9 frame (store rule VRC.Quest.Asset.5: no empty borders)
-			demo.vp.size = Vector2i(2560, 1920)
-			var c3 := cam as Camera3D
-			c3.fov = 60.0
-			var half_w := 1.6 * 0.97   # a little inside the screen edge
-			var d := half_w / (tan(deg_to_rad(c3.fov / 2.0)) * 16.0 / 9.0)
-			cam.position = Vector3(0, 1.65, -2.2 + d); cam.rotation = Vector3.ZERO
-			await RenderingServer.frame_post_draw
-			await RenderingServer.frame_post_draw
-			get_viewport().get_texture().get_image().save_png(shots_dir + "/shot" + marks[m] + ".png")
-			print("SHOT ", marks[m])
-	if t > 9500:
-		get_tree().quit()
+	demo._enter(0)
+	await _wait(1.6)
+	await _snap("1")                       # hello wave + step 1
+	demo._enter(2)
+	demo.drive(60, -60)
+	await _wait(1.7)
+	demo._enter(3)
+	demo.drive(100, 100)
+	await _wait(1.2)
+	await _snap("2")                       # walking into the room, turbo step
+	demo._enter(8)
+	var t0 := Time.get_ticks_msec()
+	var snapped := false
+	while Time.get_ticks_msec() - t0 < 9000 and demo.step == 8:
+		_steer_to(demo.TARGET)
+		if not snapped and Time.get_ticks_msec() - t0 > 1500:
+			snapped = true
+			await _snap("3")               # cone course + orange marker
+		await get_tree().process_frame
+	demo.drive(0, 0)
+	# close-up of the robot from the front, photo step
+	demo._enter(6)
+	var t1 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t1 < 2500:   # turn to face you
+		if _steer_to(Vector2(0, 2.6), 0.0) < 0.0: break
+		await get_tree().process_frame
+	demo.drive(0, 0)
+	await _wait(0.6)
+	var fwd: Vector3 = -demo.body.global_transform.basis.z
+	cam.position = demo.body.global_position + fwd * 1.25 + Vector3(-0.25, 1.05, 0)
+	cam.look_at(demo.body.global_position + Vector3(0, 0.62, 0))
+	demo.model.wave(3.0)
+	await _wait(1.0)
+	await _snap("4")
+	cam.position = Vector3(0, 1.6, 0)
+	cam.rotation = Vector3.ZERO
+	demo._enter(10)
+	while Time.get_ticks_msec() - t1 < 9000:   # walk back towards you
+		if _steer_to(Vector2(0, 1.3), 60.0) < 0.35: break
+		await get_tree().process_frame
+	demo.drive(0, 0)
+	var t2 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t2 < 2000:
+		_steer_to(Vector2(0, 2.6), 0.0)
+		await get_tree().process_frame
+	demo.drive(0, 0)
+	demo.model.wave(3.0)
+	await _wait(1.2)
+	await _snap("5")                       # tour complete
+	get_tree().quit()

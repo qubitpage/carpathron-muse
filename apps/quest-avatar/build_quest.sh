@@ -3,10 +3,11 @@
 # Needs: Godot 4.4.1 + Android export templates, JDK 17, apktool 2.11+, zipalign, apksigner, the Khronos OpenXR loader AAR.
 set -euo pipefail
 cd "$(dirname "$0")"
-GODOT=${GODOT:-godot}
-APKTOOL=${APKTOOL:-apktool.jar}
-LOADER_AAR=${LOADER_AAR:-openxr_loader_for_android-1.1.49.aar}
-KS=${KS:?set KS to your keystore}; KS_PASS=${KS_PASS:?set KS_PASS}; KS_ALIAS=${KS_ALIAS:?set KS_ALIAS}
+GODOT=${GODOT:-/home/claude/godot/Godot_v4.4.1-stable_linux.x86_64}
+APKTOOL=${APKTOOL:-/home/claude/godot/apktool.jar}
+LOADER_AAR=${LOADER_AAR:-/home/claude/godot/loader.aar}
+# Store builds must always be signed with the RELEASE key (Meta rejects a different certificate)
+KS=${KS:-/home/claude/keys/carpathron-release.keystore}; KS_PASS=${KS_PASS:-$(cat /home/claude/keys/release.pass)}; KS_ALIAS=${KS_ALIAS:-carpathron}
 mkdir -p build && rm -rf build/dec build/*.apk build/*.idsig
 "$GODOT" --headless --path . --export-${EXPORT:-release} "Quest" build/CarpathronAvatar-unsigned.apk > build/export.log 2>&1 || { tail -20 build/export.log; exit 1; }
 java -jar "$APKTOOL" d -f -s -o build/dec build/CarpathronAvatar-unsigned.apk > /dev/null

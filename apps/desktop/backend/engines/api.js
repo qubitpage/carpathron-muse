@@ -1,4 +1,8 @@
-// "API key" engine: an agent loop over the Meta Model API (OpenAI-compatible chat/completions with tool calling).
+// "API key" engine: an agent loop over the Meta Model API.
+// Two wire formats: the Responses API (/v1/responses: reasoning summaries, function calls as items) and
+// Chat Completions (/v1/chat/completions). "auto" uses Responses and falls back to Chat Completions for the rest
+// of the session if the endpoint refuses a request. The agent keeps its history in Chat Completions form;
+// it is converted to Responses input items for each call (stateless replay, store: false).
 'use strict';
 const { clip } = require('../tools');
 
@@ -61,7 +65,137 @@ class ApiEngine {
     }
   }
 
-  async _complete({ model, messages, tools, signal, onText, onReasoning, idle, effort }) {
+  wire() {
+    const w = this.getSettings().apiWire || 'auto';
+    if (w === 'chat' || w === 'responses') return w;
+    return this.responsesBroken ? 'chat' : 'responses';
+  }
+
+  async _complete(args) {
+    if (this.wire() === 'chat') return this._completeChat(args);
+    try {
+      const r = await this._completeResponses(args);
+      if (r.content || r.toolCalls.length || r.reasoning) return r;
+      if (args.signal.aborted) return r;
+      // An empty answer from /responses: ask again through Chat Completions once.
+      return await this._completeChat(args);
+    } catch (e) {
+      if (args.signal.aborted || !e.wireRefused || (this.getSettings().apiWire === 'responses')) throw e;
+      this.responsesBroken = true; // remember for this session
+      this.onWireFallback?.(e.message);
+      return this._completeChat(args);
+    }
+  }
+
+  async _completeResponses({ model, messages, tools, signal, onText, onReasoning, idle, effort }) {
+    const { instructions, input } = toResponsesInput(messages);
+    const body = { model, input, stream: true, store: false };
+    if (instructions) body.instructions = instructions;
+    if (tools && tools.length) {
+      body.tools = tools.map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters }));
+      body.tool_choice = 'auto';
+    }
+    const send = (b) => fetch(`${this.base()}/responses`, { method: 'POST', headers: this.headers(), body: JSON.stringify(b), signal });
+    body.reasoning = effort ? { effort, summary: 'auto' } : { summary: 'auto' };
+    let res = await send(body);
+    if (!res.ok && res.status === 400) { // maybe this model takes no reasoning options: once more without them
+      const txt = await res.text();
+      if (/reason|summary|effort/i.test(txt)) { delete body.reasoning; res = await send(body); }
+      else { const e = new Error(friendlyHttpError(400, txt)); e.wireRefused = true; throw e; }
+    }
+    if (!res.ok) {
+      const txt = await res.text();
+      const e = new Error(friendlyHttpError(res.status, txt));
+      e.wireRefused = [400, 404, 405, 415, 422, 501].includes(res.status);
+      throw e;
+    }
+    idle();
+    const type = res.headers.get('content-type') || '';
+    if (!type.includes('event-stream')) {
+      const j = await res.json();
+      const r = fromResponsesOutput(j);
+      if (r.content) onText?.(r.content);
+      if (r.reasoning) onReasoning?.(r.reasoning);
+      return r;
+    }
+    let content = '', reasoning = '', final = null;
+    const calls = new Map(); // output_index -> { id, name, arguments }
+    const byItem = new Map(); // item id -> output_index
+    const decoder = new TextDecoder();
+    let buf = '';
+    for await (const chunk of res.body) {
+      idle();
+      buf += decoder.decode(chunk, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        let ev; try { ev = JSON.parse(data); } catch { continue; }
+        switch (ev.type) {
+          case 'response.output_text.delta':
+            if (ev.delta) { content += ev.delta; onText?.(ev.delta); }
+            break;
+          case 'response.reasoning_summary_text.delta':
+            if (ev.delta) { reasoning += ev.delta; onReasoning?.(ev.delta); }
+            break;
+          case 'response.reasoning_summary_part.added':
+            if (reasoning) { reasoning += '\n\n'; onReasoning?.('\n\n'); }
+            break;
+          case 'response.output_item.added':
+          case 'response.output_item.done': {
+            const it = ev.item || {};
+            if (it.type !== 'function_call') break;
+            const i = ev.output_index ?? calls.size;
+            const c = calls.get(i) || { id: '', name: '', arguments: '' };
+            c.id = it.call_id || c.id || it.id || '';
+            c.name = it.name || c.name;
+            if (ev.type === 'response.output_item.done' && typeof it.arguments === 'string') c.arguments = it.arguments;
+            else if (!c.arguments && typeof it.arguments === 'string') c.arguments = it.arguments;
+            calls.set(i, c);
+            if (it.id) byItem.set(it.id, i);
+            break;
+          }
+          case 'response.function_call_arguments.delta': {
+            const i = ev.output_index ?? byItem.get(ev.item_id);
+            const c = calls.get(i) || { id: '', name: '', arguments: '' };
+            c.arguments += ev.delta || '';
+            calls.set(i, c);
+            break;
+          }
+          case 'response.function_call_arguments.done': {
+            const i = ev.output_index ?? byItem.get(ev.item_id);
+            const c = calls.get(i);
+            if (c && typeof ev.arguments === 'string') c.arguments = ev.arguments;
+            break;
+          }
+          case 'response.completed':
+          case 'response.incomplete':
+            final = ev.response || null;
+            break;
+          case 'response.failed':
+          case 'error': {
+            const err = ev.response?.error || ev.error || ev;
+            throw new Error(`Meta API: ${err.message || JSON.stringify(err).slice(0, 300)}`);
+          }
+          default: break;
+        }
+      }
+    }
+    let toolCalls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, c]) => c);
+    if (final && Array.isArray(final.output)) {
+      // The final response is authoritative (complete arguments, text if no deltas were sent).
+      const f = fromResponsesOutput(final);
+      if (!content && f.content) { content = f.content; onText?.(f.content); }
+      if (!reasoning && f.reasoning) { reasoning = f.reasoning; onReasoning?.(f.reasoning); }
+      if (f.toolCalls.length) toolCalls = f.toolCalls;
+    }
+    return { content, reasoning, toolCalls: toolCalls.filter((c) => c.name).map((c, i) => ({ ...c, arguments: c.arguments || '{}', id: c.id || `call_${Date.now()}_${i}` })) };
+  }
+
+  async _completeChat({ model, messages, tools, signal, onText, onReasoning, idle, effort }) {
     const body = { model, messages, stream: true };
     if (effort) body.reasoning_effort = effort;
     if (tools && tools.length) {
@@ -128,8 +262,86 @@ class ApiEngine {
   }
 }
 
-// Keeps the request under a size budget by blanking the oldest tool outputs.
-function compactHistory(llm, budget = 350000) {
+// Chat Completions history -> Responses API input items.
+function toResponsesInput(messages) {
+  const input = [];
+  let instructions = '';
+  const text = (c) => (Array.isArray(c) ? c.map((p) => p.text || '').join('') : String(c ?? ''));
+  messages.forEach((m, i) => {
+    if (m.role === 'system') {
+      if (i === 0 || !input.length) instructions += (instructions ? '\n\n' : '') + text(m.content);
+      else input.push({ role: 'system', content: text(m.content) });
+      return;
+    }
+    if (m.role === 'user') {
+      if (Array.isArray(m.content)) {
+        input.push({ role: 'user', content: m.content.map((p) => {
+          if (p.type === 'image_url') return { type: 'input_image', image_url: p.image_url?.url || p.image_url };
+          if (p.type === 'input_image' || p.type === 'input_text') return p;
+          return { type: 'input_text', text: p.text || '' };
+        }) });
+      } else input.push({ role: 'user', content: String(m.content ?? '') });
+      return;
+    }
+    if (m.role === 'assistant') {
+      const t = text(m.content);
+      if (t) input.push({ role: 'assistant', content: t });
+      for (const c of m.tool_calls || []) input.push({ type: 'function_call', call_id: c.id, name: c.function?.name || c.name, arguments: c.function?.arguments || c.arguments || '{}' });
+      return;
+    }
+    if (m.role === 'tool') input.push({ type: 'function_call_output', call_id: m.tool_call_id, output: text(m.content) });
+  });
+  return { instructions, input };
+}
+
+// Responses API result (non-streaming, or the final "response.completed" object) -> { content, reasoning, toolCalls }
+function fromResponsesOutput(j) {
+  let content = '', reasoning = '';
+  const toolCalls = [];
+  for (const o of j.output || []) {
+    if (o.type === 'message') for (const c of o.content || []) { if (c.type === 'output_text' || c.text) content += c.text || ''; }
+    else if (o.type === 'reasoning') reasoning += (o.summary || []).map((x) => x.text || '').filter(Boolean).join('\n\n');
+    else if (o.type === 'function_call') toolCalls.push({ id: o.call_id || o.id, name: o.name, arguments: o.arguments || '{}' });
+  }
+  if (!content && typeof j.output_text === 'string') content = j.output_text;
+  return { content, reasoning, toolCalls };
+}
+
+// Rough token count of a request (JSON characters / 3.5).
+const estTokens = (x) => Math.ceil((typeof x === 'string' ? x.length : JSON.stringify(x).length) / 3.5);
+
+// Keeps a request under the model's context budget. Muse models take 1,048,576 tokens, so long jobs keep their
+// full history; only when the budget is reached the oldest tool outputs are shortened, then the oldest turns are
+// dropped (the system prompt and the latest turns always stay).
+function compactHistory(llm, budgetTokens = 700000) {
+  repairToolPairs(llm);
+  const budget = Math.floor(budgetTokens * 3.5); // characters
+  let size = JSON.stringify(llm).length;
+  if (size <= budget) return;
+  for (let i = 0; i < llm.length && size > budget * 0.9; i++) {
+    const m = llm[i];
+    if (m.role === 'tool' && typeof m.content === 'string' && m.content.length > 400) {
+      size -= m.content.length - 60;
+      m.content = '[older tool output removed to save space]';
+    }
+  }
+  if (size <= budget) return;
+  // Still too big: drop whole old turns (a user message up to the next user message), never the last 4 turns.
+  const userIdx = llm.map((m, i) => (m.role === 'user' ? i : -1)).filter((i) => i > 0);
+  const keepFrom = userIdx.length > 4 ? userIdx[userIdx.length - 4] : (userIdx[0] || 1);
+  let cut = 1;
+  while (size > budget && cut < keepFrom) {
+    const next = userIdx.find((i) => i > cut) || keepFrom;
+    const removed = llm.slice(cut, Math.min(next, keepFrom));
+    if (!removed.length) break;
+    size -= JSON.stringify(removed).length;
+    cut = Math.min(next, keepFrom);
+  }
+  if (cut > 1) llm.splice(1, cut - 1, { role: 'user', content: '[Earlier parts of this conversation were removed to fit the model context. Ask the user if you need details from them.]' });
+  repairToolPairs(llm);
+}
+
+function repairToolPairs(llm) {
   // Every assistant tool call must be followed by its tool result, or the API rejects the request.
   for (let i = 0; i < llm.length; i++) {
     const m = llm[i];
@@ -141,14 +353,13 @@ function compactHistory(llm, budget = 350000) {
     const missing = m.tool_calls.filter((c) => !have.has(c.id)).map((c) => ({ role: 'tool', tool_call_id: c.id, content: '(no result — interrupted)' }));
     if (missing.length) llm.splice(at, 0, ...missing);
   }
-  let size = JSON.stringify(llm).length;
-  for (let i = 0; i < llm.length && size > budget; i++) {
+  // A tool result whose call was removed (old turns dropped) is not allowed either.
+  const known = new Set();
+  for (let i = 0; i < llm.length; i++) {
     const m = llm[i];
-    if (m.role === 'tool' && m.content.length > 400) {
-      size -= m.content.length - 60;
-      m.content = '[older tool output removed to save space]';
-    }
+    if (m.role === 'assistant' && m.tool_calls) for (const c of m.tool_calls) known.add(c.id);
+    if (m.role === 'tool' && !known.has(m.tool_call_id)) { llm.splice(i, 1); i--; }
   }
 }
 
-module.exports = { ApiEngine, compactHistory, FALLBACK_MODELS, clip };
+module.exports = { ApiEngine, compactHistory, estTokens, toResponsesInput, fromResponsesOutput, FALLBACK_MODELS, clip };

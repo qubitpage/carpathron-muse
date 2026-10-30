@@ -40,6 +40,23 @@ function toWav({ channels, sampleRate }, rate = 24000) {
 
 async function oggToWav(buf) { return toWav(await decodeOggOpus(buf)); }
 
+const isWav = (buf) => buf.length > 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE';
+const isOgg = (buf) => buf.length > 4 && buf.toString('ascii', 0, 4) === 'OggS';
+
+// Any audio file -> WAV for Muse Voice Transcribe: WAV and Ogg/Opus here in Node; MP3, M4A, WebM, FLAC… through
+// the desktop app's built-in Chromium decoder.
+async function anyToWav(buf, mime = '') {
+  buf = Buffer.from(buf);
+  if (isWav(buf)) {
+    try { return normalizeWav(buf); } catch {} // e.g. 24/32-bit or float WAV: decode below
+  } else if (isOgg(buf)) {
+    try { return await oggToWav(buf); } catch {} // Ogg Vorbis: decode below
+  }
+  const decoded = await require('./render').decodeAudio(buf).catch((e) => { throw new Error(`Could not read this audio file (${mime || 'unknown type'}): ${e.message}`); });
+  if (!decoded) throw new Error(`This audio format (${mime || 'unknown'}) can be converted only in the desktop app. Use WAV or OGG.`);
+  return toWav(decoded);
+}
+
 // Any 16-bit PCM WAV (e.g. 44.1/48 kHz stereo from the Quest microphone) -> channels as floats.
 function decodeWav(buf) {
   if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') throw new Error('not a WAV file');
@@ -61,7 +78,8 @@ function normalizeWav(buf) { return toWav(decodeWav(buf)); }
 // Returns the transcript text ('' if nothing was heard).
 async function transcribe(audio, { apiKey, apiBase = 'https://api.meta.ai/v1', mime = 'audio/ogg', languageBias } = {}) {
   if (!apiKey) throw new Error('Voice notes need the Meta API key (Settings → Meta API key): they are transcribed with Muse Voice Transcribe.');
-  const { wav, seconds } = /wav/i.test(mime) ? normalizeWav(audio) : await oggToWav(audio);
+  const { wav, seconds } = await anyToWav(audio, mime);
+  if (seconds < 0.2) return '';
   if (seconds > 600) throw new Error('Voice note is longer than 10 minutes.');
   const request = { model: 'muse-voice-transcribe-1.0', audioEncoding: 'WAV', mode: 'PUSH_TO_TALK' };
   if (languageBias && languageBias.length) request.languageBias = languageBias;
@@ -119,4 +137,4 @@ function voiceToCommand(t) {
   return null;
 }
 
-module.exports = { decodeOggOpus, toWav, oggToWav, decodeWav, normalizeWav, transcribe, voiceToCommand };
+module.exports = { decodeOggOpus, toWav, oggToWav, anyToWav, decodeWav, normalizeWav, transcribe, voiceToCommand };

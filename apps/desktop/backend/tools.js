@@ -6,7 +6,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const IS_WIN = process.platform === 'win32';
-const MAX_OUT = 30000;
+const MAX_OUT = 100000; // characters of one tool result (~28k tokens); Muse models have a 1M-token context
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', '.venv', 'venv', '$RECYCLE.BIN', 'System Volume Information']);
 
 // risk: 'read' (always allowed), 'write' (files), 'exec' (commands), 'robot' (moves hardware), 'external' (MCP / unknown)
@@ -19,7 +19,7 @@ const BUILTIN = [
   {
     name: 'read_file', risk: 'read',
     description: 'Read a text file. Returns numbered lines. Use offset/limit for big files.',
-    parameters: { type: 'object', properties: { path: { type: 'string' }, offset: { type: 'integer', description: '1-based first line' }, limit: { type: 'integer', description: 'max lines (default 400)' } }, required: ['path'] },
+    parameters: { type: 'object', properties: { path: { type: 'string' }, offset: { type: 'integer', description: '1-based first line' }, limit: { type: 'integer', description: 'max lines (default 1500)' } }, required: ['path'] },
   },
   {
     name: 'write_file', risk: 'write',
@@ -193,7 +193,7 @@ async function execRemote(name, args, ctx) {
       if (buf.subarray(0, 8000).includes(0)) return `Binary file (${st.size} bytes), not shown.`;
       const lines = buf.toString('utf8').split(/\r?\n/);
       const start = Math.max(1, Number(args.offset) || 1);
-      const limit = Math.min(2000, Math.max(1, Number(args.limit) || 400));
+      const limit = Math.min(5000, Math.max(1, Number(args.limit) || 1500));
       let res = lines.slice(start - 1, start - 1 + limit).map((l, i) => `${String(start + i).padStart(5)}  ${l}`).join('\n');
       if (start - 1 + limit < lines.length) res += `\n… (${lines.length} lines total; continue with offset=${start + limit})`;
       return clip(res);
@@ -257,7 +257,7 @@ async function execBuiltin(name, args, ctx) {
       if (buf.subarray(0, 8000).includes(0)) return `Binary file (${st.size} bytes), not shown.`;
       const lines = buf.toString('utf8').split(/\r?\n/);
       const start = Math.max(1, Number(args.offset) || 1);
-      const limit = Math.min(2000, Math.max(1, Number(args.limit) || 400));
+      const limit = Math.min(5000, Math.max(1, Number(args.limit) || 1500));
       const slice = lines.slice(start - 1, start - 1 + limit).map((l, i) => `${String(start + i).padStart(5)}  ${l}`);
       let res = slice.join('\n');
       if (start - 1 + limit < lines.length) res += `\n… (${lines.length} lines total; continue with offset=${start + limit})`;
@@ -320,7 +320,7 @@ async function execBuiltin(name, args, ctx) {
       }
       const body = Buffer.concat(chunks).toString('utf8');
       const text = /html/i.test(type) ? htmlToText(body) : body;
-      return clip(`HTTP ${res.status} ${type}\n\n${text}`, 20000);
+      return clip(`HTTP ${res.status} ${type}\n\n${text}`, 60000);
     }
     case 'robot_photo': {
       const ph = await ctx.camera.capture();

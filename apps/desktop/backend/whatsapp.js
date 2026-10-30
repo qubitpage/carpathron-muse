@@ -42,6 +42,7 @@ class WhatsApp {
     this.agent = agent;
     this.emit = emit;
     this.log = log;
+    this.dataDir = dataDir;
     this.authDir = path.join(dataDir, 'whatsapp-auth');
     this.personal = { status: 'off', qr: null, me: null, sock: null };
     this.cloud = { status: 'off', tunnelUrl: '', tunnel: null };
@@ -93,9 +94,22 @@ class WhatsApp {
     return { label: dir, steps: [{ type: 'drive', left: v[0], right: v[1], ms }, { type: 'stop' }] };
   }
 
-  async handle(channel, number, text, reply, sendImage) {
+  // Saves a photo / video / file received on WhatsApp so the agent can see or read it.
+  saveMedia(buf, mime, name) {
+    const ext = ({ 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif', 'video/mp4': '.mp4', 'application/pdf': '.pdf', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/ogg': '.ogg', 'audio/aac': '.aac', 'audio/wav': '.wav' })[String(mime || '').split(';')[0]] || path.extname(String(name || '')) || '.bin';
+    const dir = path.join(this.dataDir || require('os').tmpdir(), 'attachments', new Date().toISOString().slice(0, 10));
+    fs.mkdirSync(dir, { recursive: true });
+    const safe = path.basename(String(name || 'whatsapp')).replace(/[<>:"/\\|?*]/g, '_').replace(/\.[^.]+$/, '') || 'whatsapp';
+    const file = path.join(dir, `${Date.now().toString(36)}-${safe}${ext}`);
+    fs.writeFileSync(file, buf);
+    const m = String(mime || '').split(';')[0] || 'application/octet-stream';
+    if (/^(image|video|audio)\//.test(m)) this.agent.shown?.add(path.resolve(file));
+    return { name: path.basename(file), path: file, mime: m, text: '' };
+  }
+
+  async handle(channel, number, text, reply, sendImage, attachments = []) {
     text = String(text || '').trim();
-    if (!text) return;
+    if (!text && !attachments.length) return;
     const key = `${channel}:${digits(number)}`;
     this.chatFor.set(key, reply);
     let conv = this.convFor(key);
@@ -171,7 +185,8 @@ class WhatsApp {
 
     await reply('⏳ Working on it…');
     try {
-      const answer = await this.agent.send(conv.id, text, { from: 'whatsapp' });
+      if (attachments.length) await reply(`📎 Got ${attachments.map((a) => a.mime.startsWith('image/') ? 'the photo' : a.mime.startsWith('audio/') ? 'the audio' : a.name).join(', ')} — looking at it…`);
+      const answer = await this.agent.send(conv.id, text, { from: 'whatsapp', attachments });
       await this.replyLong(reply, answer || '(done)');
       const c = this.store.get(conv.id);
       for (const img of (c && c.turnImages) || []) {
@@ -317,9 +332,11 @@ class WhatsApp {
     this.seenIds.add(id);
     if (this.seenIds.size > 1000) this.seenIds.delete(this.seenIds.values().next().value);
     const content = baileys.normalizeMessageContent(msg.message) || {};
-    const text = content.conversation || content.extendedTextMessage?.text || content.imageMessage?.caption || content.videoMessage?.caption || '';
-    const audio = content.audioMessage;
-    if (!text && !audio) return this._ignore('no text', msg);
+    const text = content.conversation || content.extendedTextMessage?.text || content.imageMessage?.caption || content.videoMessage?.caption || content.documentMessage?.caption || '';
+    const doc = content.documentMessage;
+    const audio = content.audioMessage || (doc && /^audio\//.test(doc.mimetype || '') ? doc : null);
+    const visual = content.imageMessage || content.videoMessage || (doc && !audio ? doc : null);
+    if (!text && !audio && !visual) return this._ignore('no text', msg);
     if (text.startsWith(BOT_MARK.trim())) return;
     const user = (j) => digits(String(j || '').split('@')[0].split(':')[0]);
     const creds = sock.authState?.creds?.me || {};
@@ -338,10 +355,18 @@ class WhatsApp {
     const remember = (sent) => { if (sent?.key?.id) { this.sentIds.add(sent.key.id); if (this.sentIds.size > 500) this.sentIds.delete(this.sentIds.values().next().value); } };
     const reply = async (t) => remember(await sock.sendMessage(jid, { text: BOT_MARK + t }));
     const sendImage = async (buf, caption, mimetype) => remember(await sock.sendMessage(jid, { image: buf, caption: BOT_MARK + (caption || ''), ...(mimetype ? { mimetype } : {}) }));
+    const download = async () => baileys.downloadMediaMessage(msg, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage });
     if (!text && audio) {
-      const said = await this.voiceText(async () => baileys.downloadMediaMessage(msg, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage }), audio.mimetype, reply);
+      const said = await this.voiceText(download, audio.mimetype, reply);
       if (said) await this.handle('wa', number, said, reply, sendImage);
       return;
+    }
+    if (visual) {
+      try {
+        const att = this.saveMedia(await download(), visual.mimetype, visual.fileName || (content.imageMessage ? 'photo' : content.videoMessage ? 'video' : 'file'));
+        if (att.mime.startsWith('application/') || att.mime.startsWith('text/')) { try { att.text = await require('./knowledge').extractText(att.path); } catch {} }
+        return await this.handle('wa', number, text, reply, sendImage, [att]);
+      } catch (e) { await reply(`📎 Could not download the file: ${e.message}`); return; }
     }
     await this.handle('wa', number, text, reply, sendImage);
   }
@@ -394,13 +419,20 @@ class WhatsApp {
         const v = ch.value || {};
         if (c.phoneNumberId && v.metadata?.phone_number_id && v.metadata.phone_number_id !== c.phoneNumberId) continue;
         for (const m of v.messages || []) {
-          if (m.type !== 'text' && m.type !== 'audio') continue;
+          if (!['text', 'audio', 'image', 'video', 'document'].includes(m.type)) continue;
           if (!this.isAllowed(m.from)) { this.log(`WhatsApp Cloud: ignored message from non-allowed ${m.from}`); continue; }
           const reply = (t) => this.cloudSend(m.from, t);
           const sendImage = (buf, caption, mime) => this.cloudSendImage(m.from, buf, caption, mime);
           const run = async () => {
             let text = m.text?.body || '';
-            if (m.type === 'audio') text = await this.voiceText(() => this.cloudDownload(m.audio?.id), m.audio?.mime_type, reply);
+            const media = m[m.type] && m.type !== 'text' ? m[m.type] : null;
+            const isAudio = m.type === 'audio' || (m.type === 'document' && /^audio\//.test(media?.mime_type || ''));
+            if (isAudio) text = await this.voiceText(() => this.cloudDownload(media?.id), media?.mime_type, reply);
+            else if (media) {
+              const att = this.saveMedia(await this.cloudDownload(media.id), media.mime_type, media.filename || m.type);
+              if (att.mime.startsWith('application/') || att.mime.startsWith('text/')) { try { att.text = await require('./knowledge').extractText(att.path); } catch {} }
+              return this.handle('cloud', m.from, media.caption || '', reply, sendImage, [att]);
+            }
             if (text) await this.handle('cloud', m.from, text, reply, sendImage);
           };
           run().catch((e) => this.log(`WhatsApp Cloud: ${e.message}`));

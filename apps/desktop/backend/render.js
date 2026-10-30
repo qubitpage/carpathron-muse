@@ -111,7 +111,7 @@ async function overlayBoxes(imageFile, boxes, labels = []) {
   const rects = boxes.map((b, i) => {
     const sx = width / (b.w || width), sy = height / (b.h || height);
     const x = b.x1 * sx, y = b.y1 * sy, w = (b.x2 - b.x1) * sx, h = (b.y2 - b.y1) * sy, c = colors[i % colors.length];
-    const t = `${labels[i] || `#${i + 1}`}${b.conf != null ? ` ${(b.conf * 100).toFixed(0)}%` : ''}`;
+    const t = `${labels[i] || `#${i + 1}`}${b.conf != null ? ` ${(b.conf * 100).toFixed(0)}%` : ''}`.replace(/[<>&"]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[ch]));
     return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${c}22" stroke="${c}" stroke-width="${Math.max(2, width / 400)}"/><text x="${x + 4}" y="${y + Math.max(14, width / 60)}" fill="${c}" font-size="${Math.max(14, width / 60)}" font-family="Arial" font-weight="bold">${t}</text>`;
   }).join('');
   const html = `<!doctype html><html><head><style>html,body{margin:0;overflow:hidden}svg{display:block}</style></head><body><svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><image href="${data}" width="${width}" height="${height}"/>${rects}</svg></body></html>`;
@@ -123,4 +123,31 @@ async function overlayBoxes(imageFile, boxes, labels = []) {
   } finally { try { fs.unlinkSync(tmp); } catch {} }
 }
 
-module.exports = { available, toPdf, screenshot, overlayBoxes, markdownToHtml, PRINT_CSS };
+// Decodes any audio format Chromium knows (MP3, M4A/AAC, WebM/Opus, Ogg, FLAC, WAV…) to mono floats at `rate` Hz.
+async function decodeAudio(buf, rate = 24000) {
+  const e = electron();
+  if (!e) return null;
+  return withWindow(200, 200, async (win) => {
+    await win.loadURL('about:blank');
+    const b64 = Buffer.from(buf).toString('base64');
+    const out = await win.webContents.executeJavaScript(`(async () => {
+      const bin = atob(${JSON.stringify(b64)});
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const probe = new OfflineAudioContext(1, 1, 44100);
+      const decoded = await probe.decodeAudioData(bytes.buffer);
+      const len = Math.max(1, Math.ceil(decoded.duration * ${rate}));
+      const ctx = new OfflineAudioContext(1, len, ${rate});
+      const src = ctx.createBufferSource(); src.buffer = decoded; src.connect(ctx.destination); src.start();
+      const r = await ctx.startRendering();
+      const f = r.getChannelData(0);
+      const u8 = new Uint8Array(f.buffer, f.byteOffset, f.byteLength);
+      let s = ''; for (let i = 0; i < u8.length; i += 32768) s += String.fromCharCode.apply(null, u8.subarray(i, i + 32768));
+      return btoa(s);
+    })()`, true);
+    const raw = Buffer.from(out, 'base64');
+    return { channels: [new Float32Array(raw.buffer, raw.byteOffset, raw.length / 4)], sampleRate: rate };
+  });
+}
+
+module.exports = { available, toPdf, screenshot, overlayBoxes, decodeAudio, markdownToHtml, PRINT_CSS };

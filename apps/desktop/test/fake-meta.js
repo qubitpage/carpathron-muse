@@ -12,6 +12,8 @@ function plan(body) {
     const heads = last.content.filter((c) => /^Heading/.test(c.text || '')).map((c) => Number(c.text.match(/\d+/)[0]));
     return { text: JSON.stringify({ views: heads.map((h, i) => ({ heading: h, description: i === 0 ? 'a desk' : 'a wall', objects: i === 0 ? [{ name: 'chair', bearing: -10, distance_m: 1.2 }] : [{ name: 'wall', bearing: 0, distance_m: 2 }], free_m: i === 0 ? 1 : 2 })), room: 'small office', summary: 'Chair ahead at 1.2 m, walls around, open space to the right.' }) };
   }
+  if (last.role === 'user' && Array.isArray(last.content) && /Reply with JSON only: \{"answer"/.test(last.content[0].text || '')) return { text: '{"answer":"This is a small white robot.","objects":["robot","table"]}' };
+  if (last.role === 'user' && Array.isArray(last.content) && /SAM found no/.test(last.content[0].text || '')) return { text: 'No, there is no unicorn here — it is a robot on a table.' };
   if (last.role === 'user' && Array.isArray(last.content)) {
     const img = last.content.find((c) => c.type === 'image_url');
     return { text: `I can see the photo (${img ? img.image_url.url.slice(0, 23) : 'none'}).` };
@@ -50,6 +52,29 @@ function plan(body) {
   if (/drive robot/i.test(u)) return { tool: ['robot_drive', { steps: [{ type: 'drive', left: 50, right: 50, ms: 300 }, { type: 'stop' }] }] };
   return { text: `Hello from fake Muse. You said: ${u.slice(0, 60)}. Memory in prompt: ${/favorite color/.test(sys) ? 'yes' : 'no'}` };
 }
+// Responses API agent request (not web search / SAM, which use /v1/responses too)?
+function isAgentResponses(j) {
+  if (j.model === 'sam-3.1') return false;
+  if ((j.tools || []).some((t) => t.type === 'web_search')) return false;
+  return true;
+}
+// Responses input items -> Chat Completions messages (so plan() and the tests read one format).
+function fromInput(j) {
+  const msgs = [];
+  if (j.instructions) msgs.push({ role: 'system', content: j.instructions });
+  for (const it of j.input || []) {
+    if (it.type === 'function_call') {
+      const last = msgs[msgs.length - 1];
+      const call = { id: it.call_id, type: 'function', function: { name: it.name, arguments: it.arguments } };
+      if (last && last.role === 'assistant' && last.tool_calls) last.tool_calls.push(call);
+      else msgs.push({ role: 'assistant', content: '', tool_calls: [call] });
+    } else if (it.type === 'function_call_output') msgs.push({ role: 'tool', tool_call_id: it.call_id, content: it.output });
+    else if (Array.isArray(it.content)) msgs.push({ role: it.role, content: it.content.map((c) => (c.type === 'input_image' ? { type: 'image_url', image_url: { url: c.image_url } } : { type: 'text', text: c.text })) });
+    else msgs.push({ role: it.role, content: it.content });
+  }
+  return msgs;
+}
+const opts = { noResponses: false };
 let calls = [];
 const media = [];
 const asr = [];
@@ -70,10 +95,52 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ created: 1, data: [{ b64_json: png }], output_format: j.output_format || 'webp' }));
     }
+    if (req.url === '/v1/responses' && isAgentResponses(JSON.parse(b))) {
+      const j = JSON.parse(b);
+      if (opts.noResponses || /chat-only/.test(j.model)) { res.writeHead(404, { 'Content-Type': 'application/json' }); return res.end('{"error":{"message":"Unknown endpoint /v1/responses"}}'); }
+      const chatBody = { model: j.model, messages: fromInput(j), tools: (j.tools || []).map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } })), stream: j.stream, _wire: 'responses', reasoning: j.reasoning };
+      calls.push(chatBody);
+      const p = plan(chatBody);
+      const out = p.tool
+        ? [{ type: 'function_call', id: 'fc_' + calls.length, call_id: 'call_r' + calls.length, name: p.tool[0], arguments: JSON.stringify(p.tool[1]), status: 'completed' }]
+        : [{ type: 'message', id: 'msg_' + calls.length, role: 'assistant', content: [{ type: 'output_text', text: p.text, annotations: [] }] }];
+      const reasoningItem = { type: 'reasoning', id: 'rs_' + calls.length, summary: [{ type: 'summary_text', text: 'Thinking about the request.' }] };
+      const full = { id: 'resp_' + calls.length, object: 'response', status: 'completed', output: [reasoningItem, ...out] };
+      const slow = /slow/i.test(JSON.stringify(chatBody.messages[chatBody.messages.length - 1].content));
+      if (!j.stream) { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify(full)); }
+      const go = () => {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const ev = (o) => res.write(`event: ${o.type}\ndata: ${JSON.stringify(o)}\n\n`);
+        ev({ type: 'response.created', response: { id: full.id, status: 'in_progress', output: [] } });
+        ev({ type: 'response.output_item.added', output_index: 0, item: { type: 'reasoning', id: reasoningItem.id, summary: [] } });
+        ev({ type: 'response.reasoning_summary_part.added', item_id: reasoningItem.id, output_index: 0, summary_index: 0 });
+        ev({ type: 'response.reasoning_summary_text.delta', item_id: reasoningItem.id, output_index: 0, delta: 'Thinking about ' });
+        ev({ type: 'response.reasoning_summary_text.delta', item_id: reasoningItem.id, output_index: 0, delta: 'the request.' });
+        if (p.tool) {
+          const it = out[0]; const args = it.arguments;
+          ev({ type: 'response.output_item.added', output_index: 1, item: { ...it, arguments: '' } });
+          ev({ type: 'response.function_call_arguments.delta', item_id: it.id, output_index: 1, delta: args.slice(0, 10) });
+          ev({ type: 'response.function_call_arguments.delta', item_id: it.id, output_index: 1, delta: args.slice(10) });
+          ev({ type: 'response.function_call_arguments.done', item_id: it.id, output_index: 1, arguments: args });
+          ev({ type: 'response.output_item.done', output_index: 1, item: it });
+        } else {
+          ev({ type: 'response.output_item.added', output_index: 1, item: { type: 'message', id: out[0].id, role: 'assistant', content: [] } });
+          for (const part of p.text.match(/.{1,12}/gs)) ev({ type: 'response.output_text.delta', item_id: out[0].id, output_index: 1, content_index: 0, delta: part });
+        }
+        ev({ type: 'response.completed', response: full });
+        res.end();
+      };
+      if (slow) setTimeout(go, 3000); else go();
+      return;
+    }
     if (req.url === '/v1/responses') {
       const j = JSON.parse(b); media.push({ url: req.url, body: j });
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      if (j.model === 'sam-3.1') return res.end(JSON.stringify({ output_text: '<0f>1<|box;x1=10;y1=20;x2=110;y2=220;w=640;h=480;c=0.93|>,<|mask;x=0;y=0;c=0.93;data=2,2,~abc|>' }));
+      if (j.model === 'sam-3.1') {
+        const what = (j.input?.[0]?.content || []).find((c) => c.type === 'input_text')?.text || '';
+        if (/unicorn|what is this/i.test(what)) return res.end(JSON.stringify({ output_text: '<0f>0' }));
+        return res.end(JSON.stringify({ output_text: '<0f>1<|box;x1=10;y1=20;x2=110;y2=220;w=640;h=480;c=0.93|>,<|mask;x=0;y=0;c=0.93;data=2,2,~abc|>' }));
+      }
       return res.end(JSON.stringify({ output: [
         { type: 'web_search_call', results: [{ type: 'result', title: 'Carpathron robots', url: 'https://example.com/a', snippet: 'modular robots' }] },
         { type: 'message', content: [{ type: 'output_text', text: 'Carpathron builds robots.', annotations: [{ type: 'url_citation', url: 'https://example.com/b', title: 'B page' }] }] },
@@ -105,4 +172,4 @@ const server = http.createServer((req, res) => {
     if (slow) setTimeout(go, 3000); else go();
   });
 });
-module.exports = { start: (port) => new Promise((r) => server.listen(port, () => r(server))), calls: () => calls, asr: () => asr, media: () => media };
+module.exports = { opts, start: (port) => new Promise((r) => server.listen(port, () => r(server))), calls: () => calls, asr: () => asr, media: () => media };

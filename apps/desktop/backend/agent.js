@@ -122,6 +122,7 @@ class Agent {
     this.emit = emit; // (event, data) → all UI clients + bridges
     this.log = log;
     this.api = new ApiEngine({ getSettings: () => this.store.settings });
+    this.api.onWireFallback = (why) => this.log(`Meta API: Responses endpoint refused a request (${String(why).slice(0, 160)}); using Chat Completions for this session.`);
     this.muse = new MuseEngine({ getSettings: () => this.store.settings, log });
     this.media = new models.Media({ getSettings: () => this.store.settings });
     this.runtime = new Map(); // convId -> { running, abort, turnId }
@@ -357,6 +358,7 @@ class Agent {
     const exp = this.expandSkill(text);
     let modelText = exp.text;
     const imageAtt = attachments.filter((a) => a.path && /^image\//.test(a.mime || ''));
+    if (!String(modelText).trim() && imageAtt.length) modelText = 'What is in this picture? Describe it and name the main objects you can see.';
     for (const a of attachments.slice(0, 10)) {
       if (imageAtt.includes(a)) { modelText += `\n\n[attached image "${a.name}", saved at ${a.path}]`; continue; }
       if (a.path && /^(audio|video)\//.test(a.mime || '')) { modelText += `\n\n[attached ${a.mime.split('/')[0]} "${a.name}", saved at ${a.path}]`; continue; }
@@ -430,13 +432,14 @@ class Agent {
     const conv = this.store.get(convId);
     if (!conv) throw new Error('Conversation not found');
     text = String(text || '').trim();
-    if (!text) throw new Error('Empty message');
+    if (!text && !attachments.length) throw new Error('Empty message');
     if (this.isRunning(convId)) {
       if (when === 'queue') { this.enqueue(conv, text, attachments, from); return 'Queued: it runs when the current work finishes.'; }
       return this.steer(conv, text, attachments, from);
     }
     if (conv.messages.filter((m) => m.role === 'user').length === 0 && (!conv.title || conv.title === 'New chat')) {
-      conv.title = text.replace(/\s+/g, ' ').slice(0, 60);
+      const first = attachments[0] && attachments[0].name;
+      conv.title = (text || (first ? `${/^audio\//.test(attachments[0].mime || '') ? '🎤' : /^image\//.test(attachments[0].mime || '') ? '📷' : '📎'} ${first}` : 'New chat')).replace(/\s+/g, ' ').slice(0, 60);
       this.emit('conv:update', { id: conv.id, title: conv.title, updatedAt: Date.now() });
     }
     this.addMsg(conv, { role: 'user', text, from, attachments: attachments.map((a) => ({ name: a.name, chars: (a.text || '').length })) });
@@ -448,7 +451,7 @@ class Agent {
       this.emit('conv:update', { id: conv.id, title: conv.title, updatedAt: conv.updatedAt });
       return `Saved to memory: ${mem.text}`;
     }
-    const { modelText, imageAtt, skill } = this.modelInput(text, attachments);
+    let { modelText, imageAtt, skill } = this.modelInput(text, attachments);
     if (skill) this.addMsg(conv, { role: 'info', text: `Using skill /${skill}` });
     const rt = { running: true, abort: new AbortController(), toolCalls: 0, finished: false, inbox: [] };
     this.runtime.set(convId, rt);
@@ -462,6 +465,13 @@ class Agent {
     try {
       this.store.pinned.add(convId);
       const kind = models.capsFor(conv.model || this.settings().model).kind;
+      if (kind === 'chat' || engine === 'muse') {
+        // Voice messages / audio files: Muse Voice Transcribe turns them into text the agent acts on.
+        const heard = await this.transcribeAttachments(conv, attachments, rt);
+        if (heard) modelText = text ? `${modelText}\n\n${heard}` : `${heard}\n\n${modelText}`.trim();
+        // The Meta-account engine gets files by path only: describe photos with a vision model first.
+        if (engine === 'muse' && imageAtt.length && this.settings().apiKey) modelText += await this.describeImages(imageAtt, text, rt);
+      }
       if (engine === 'muse') {
         await this.runMuse(conv, modelText, rt, text);
         // Muse Code: keep going while tasks it listed are unfinished (it reports them with task_update)
@@ -552,6 +562,15 @@ class Agent {
     return specs;
   }
 
+  // How much of the model's context window a request may use before old parts are shortened.
+  // Muse models: 1,048,576 tokens -> 70 % (about 730k tokens); a custom value can be set in Settings.
+  contextBudget(model) {
+    const set = Number(this.settings().contextTokens);
+    const ctx = (models.KNOWN[model] && models.KNOWN[model].context) || 128000;
+    if (Number.isFinite(set) && set >= 16000) return Math.min(set, Math.floor(ctx * 0.95));
+    return Math.floor(ctx * 0.7);
+  }
+
   async runApi(conv, text, rt, images = []) {
     conv.llm = conv.llm || [];
     const model = conv.model || this.settings().model;
@@ -588,7 +607,7 @@ class Agent {
       }
       if (rt.abort.signal.aborted) return finalText;
       if (!sub) this.drainInbox(conv, llm, rt);
-      compactHistory(llm);
+      compactHistory(llm, this.contextBudget(model));
       const prefix = sub ? `[${label}] ` : '';
       let textMsg = null, thinkMsg = null;
       const sentChars = JSON.stringify(llm).length;
@@ -773,6 +792,79 @@ class Agent {
   }
 
   // ---------------------------------------------------------------- non-chat models picked in the model menu
+  // Audio attachments -> transcript lines (also shown in the chat).
+  async transcribeAttachments(conv, attachments, rt) {
+    const audio = attachments.filter((a) => a.path && /^audio\//.test(a.mime || '')).slice(0, 3);
+    if (!audio.length) return '';
+    if (!this.settings().apiKey) { this.addMsg(conv, { role: 'info', text: '🎤 Audio attached, but transcription needs the Meta API key (Settings → Meta API key).' }); return ''; }
+    const out = [];
+    for (const a of audio) {
+      if (rt.abort.signal.aborted) break;
+      this.status(conv, `Listening to ${a.name}…`);
+      try {
+        const t = await this.media.transcribe(a.path);
+        this.addMsg(conv, { role: 'info', text: t ? `🎤 ${a.name}: “${t}”` : `🎤 ${a.name}: no speech found.` });
+        this.track({ kind: 'cloud', convId: conv.id, text: `Transcribed ${a.name} with Muse Voice Transcribe` });
+        if (t) out.push(audio.length > 1 || attachments.length > 1 ? `[What was said in ${a.name}]: ${t}` : t);
+        if (t && /^🎤 /.test(conv.title || '')) { conv.title = `🎤 ${t}`.replace(/\s+/g, ' ').slice(0, 60); this.emit('conv:update', { id: conv.id, title: conv.title, updatedAt: Date.now() }); }
+      } catch (e) { this.addMsg(conv, { role: 'info', text: `🎤 ${a.name}: ${e.message}` }); }
+    }
+    return out.join('\n');
+  }
+
+  // Short vision description of photos (for engines that cannot see images themselves).
+  async describeImages(images, question, rt) {
+    try {
+      const s = this.settings();
+      const model = models.has(s.model, 'vision') ? s.model : 'muse-spark-1.3';
+      const content = [{ type: 'text', text: `Describe these pictures for an assistant that cannot see them: what they show, every important object (name it), any visible text, and anything relevant to this request: "${String(question || '').slice(0, 300)}".` }];
+      for (const im of images.slice(0, 4)) content.push({ type: 'image_url', image_url: { url: models.dataUrl(fs.readFileSync(im.path), im.mime) } });
+      const r = await this.api.complete({ model, messages: [{ role: 'user', content }], signal: rt.abort.signal });
+      return r.content ? `\n\n[What the attached picture(s) show — described by ${model}]:\n${r.content.trim()}` : '';
+    } catch (e) { return `\n\n[Could not describe the picture(s): ${e.message}]`; }
+  }
+
+  // SAM finds objects by name. A question ("what is this?") is first answered by a vision model, which also names
+  // the objects; SAM then outlines them. A name SAM cannot find gets a vision answer too.
+  async smartSegment(conv, file, text, rt, show) {
+    const s = this.settings();
+    const visionModel = models.has(s.model, 'vision') && models.capsFor(s.model).kind === 'chat' ? s.model : 'muse-spark-1.3';
+    const q = String(text || '').trim();
+    const isName = q && q.length <= 40 && q.split(/\s+/).length <= 4 && !/[?]/.test(q) && !/^(what|which|who|where|how|why|is|are|can|does|do|describe|identify|recognize|recognise|tell|show|find all|list|ce|cine|unde|cum)\b/i.test(q);
+    let answer = '', names = isName ? [q] : [];
+    const ask = async (prompt) => {
+      const img = { type: 'image_url', image_url: { url: models.dataUrl(fs.readFileSync(file), models.mimeOf(file)) } };
+      const r = await this.api.complete({ model: visionModel, messages: [{ role: 'user', content: [{ type: 'text', text: prompt }, img] }], signal: rt.abort.signal });
+      return String(r.content || '').trim();
+    };
+    if (!isName && s.apiKey) {
+      this.status(conv, `${visionModel} is looking at the picture…`);
+      const raw = await ask(`${q ? `The user asks: "${q}".\n` : ''}Look at the picture. Reply with JSON only: {"answer": "a short helpful answer in the user's language", "objects": ["up to 5 distinct visible objects as short English nouns SAM can segment, most important first, e.g. robot, person, cup"]}`);
+      try { const j = JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/g, '')); answer = String(j.answer || ''); names = (j.objects || []).map(String).filter(Boolean).slice(0, 5); }
+      catch { answer = raw; }
+    }
+    if (!names.length) names = ['object'];
+    const all = []; const labels = []; const found = [];
+    for (const n of names) {
+      if (rt.abort.signal.aborted) break;
+      this.status(conv, `SAM 3.1 is outlining "${n}"…`);
+      const r = await this.media.segment({ file, prompt: n, signal: rt.abort.signal });
+      if (r.boxes.length) found.push(`${n} ×${r.boxes.length}`);
+      for (const b of r.boxes) { all.push(b); labels.push(n); }
+    }
+    if (isName && !all.length && s.apiKey) answer = await ask(`SAM found no "${q}" in this picture. In one or two sentences: is there a ${q}? If not, what is in the picture?`).catch(() => '');
+    let overlay = '';
+    const render = require('./render');
+    if (all.length && render.available()) {
+      const png = await render.overlayBoxes(file, all, labels);
+      if (png) { overlay = path.join(this.dataDir, 'media', `sam-${Date.now()}.png`); fs.writeFileSync(overlay, png); show(overlay); }
+    }
+    const lines = [];
+    if (answer) lines.push(answer);
+    lines.push(all.length ? `**SAM 3.1 found:** ${found.join(', ')}${overlay ? ' — outlined in the picture.' : '.'}` : `**SAM 3.1** found nothing for: ${names.join(', ')}.`);
+    this.addMsg(conv, { role: 'assistant', text: lines.join('\n\n'), ...(overlay ? { image: overlay } : {}) });
+  }
+
   async runMedia(conv, text, attachments, rt, kind) {
     const model = conv.model || this.settings().model;
     const signal = rt.abort.signal;
@@ -793,14 +885,12 @@ class Agent {
     if (kind === 'segment') {
       let file = (attachments.find((a) => a.path && /^(image|video)\//.test(a.mime || '')) || {}).path;
       if (!file) { this.status(conv, 'No image attached — taking a robot photo…'); const ph = await this.camera.capture(); file = ph.path; }
-      this.status(conv, `SAM 3.1 is looking for "${text}"…`);
-      const out = await execX('segment_image', { path: file, prompt: text }, this.toolCtx(conv, rt, { onPhoto: (ph) => { show(ph.path); this.addMsg(conv, { role: 'assistant', text: `Segmentation overlay for "${text}"`, image: ph.path }); }, status: (t) => this.status(conv, t) }));
-      this.addMsg(conv, { role: 'assistant', text: out });
+      await this.smartSegment(conv, file, text, rt, show);
       return;
     }
     if (kind === 'transcribe') {
-      const a = attachments.find((x) => x.path && /^audio\//.test(x.mime || '') || /\.(wav|ogg|opus|oga)$/i.test(x.name || ''));
-      if (!a) { this.addMsg(conv, { role: 'error', text: `${model} turns speech into text: attach a WAV or OGG audio file.` }); return; }
+      const a = attachments.find((x) => x.path && /^audio\//.test(x.mime || '') || /\.(wav|ogg|opus|oga|mp3|m4a|aac|flac|webm)$/i.test(x.name || ''));
+      if (!a) { this.addMsg(conv, { role: 'error', text: `${model} turns speech into text: attach an audio file or use the 🎤 button.` }); return; }
       this.status(conv, 'Transcribing…');
       const t = await this.media.transcribe(a.path);
       this.addMsg(conv, { role: 'assistant', text: t ? `**Transcript of ${a.name}:**\n\n${t}` : 'No speech found.' });

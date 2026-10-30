@@ -107,9 +107,7 @@ class Media {
   async transcribe(file) {
     const voice = require('./voice');
     const s = this.getSettings();
-    const ext = path.extname(file).toLowerCase();
-    if (!['.wav', '.ogg', '.opus', '.oga'].includes(ext)) throw new Error('Transcription supports WAV and OGG/Opus files. Convert other formats first (e.g. with ffmpeg: ffmpeg -i in.mp3 out.wav).');
-    return voice.transcribe(fs.readFileSync(file), { apiKey: s.apiKey, apiBase: s.apiBase, mime: ext === '.wav' ? 'audio/wav' : 'audio/ogg' });
+    return voice.transcribe(fs.readFileSync(file), { apiKey: s.apiKey, apiBase: s.apiBase, mime: mimeOf(file) });
   }
 
   // Web search with Meta search grounding (Responses API). Returns { answer, sources: [{title,url,snippet}] }.

@@ -1,8 +1,8 @@
 {
-  "name": "muse-carpathron",
+  "name": "carpathron-robotics-coding",
   "productName": "Carpathron Robotics & Coding",
-  "version": "1.7.0",
-  "description": "Carpathron Robotics & Coding: an AI agent for Windows powered by Meta Muse models. Coding, servers, GitHub, MCP, computer use and robot control.",
+  "version": "1.7.2",
+  "description": "Carpathron Robotics and Coding: an AI agent for Windows powered by Meta Muse models. Coding, servers, GitHub, MCP, computer use and robot control.",
   "main": "main.js",
   "author": {
     "name": "Qubitpage LIMITED",
@@ -17,8 +17,9 @@
     "test": "node test/run-all.js && node test/v14.js && node test/security.js",
     "dist": "node build/patch-sdk.js && electron-builder --win nsis --x64",
     "postinstall": "node build/patch-sdk.js",
-    "test:electron": "xvfb-run -a electron --no-sandbox test/electron-browser.js /tmp",
-    "dist:store": "node build/patch-sdk.js && electron-builder --win appx --x64"
+    "test:electron": "xvfb-run -a electron --no-sandbox test/electron-browser.js /tmp && xvfb-run -a electron --no-sandbox test/electron-audio.js test/audio",
+    "dist:store": "node build/patch-sdk.js && electron-builder --win appx --x64",
+    "dist:msix": "electron-builder --win dir --x64 && node build/make-appx-manifest.js dist/AppxManifest.xml > /dev/null && python3 build/pack-msix.py dist/win-unpacked build/appx dist/AppxManifest.xml dist/Carpathron-Robotics-Coding-$npm_package_version.msix"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
@@ -106,10 +107,10 @@
     "compression": "maximum",
     "appx": {
       "applicationId": "CarpathronRoboticsCoding",
-      "identityName": "QubitpageLIMITED.CarpathronRoboticsCoding",
-      "publisher": "CN=00000000-0000-0000-0000-000000000000",
-      "publisherDisplayName": "Qubitpage LIMITED",
-      "displayName": "Carpathron Robotics & Coding",
+      "identityName": "Qubitpage.CarpathronRoboticsCoding",
+      "publisher": "CN=A6FF3E1A-C5BD-40B8-A525-8A5E0894E503",
+      "publisherDisplayName": "Qubitpage",
+      "displayName": "Carpathron Robotics &amp; Coding",
       "backgroundColor": "#0d0f12",
       "languages": [
         "en-US"
@@ -117,7 +118,6 @@
       "minVersion": "10.0.17763.0",
       "maxVersionTested": "10.0.26100.0",
       "showNameOnTiles": true,
-      "customExtensionsPath": "build/appx/extensions.xml",
       "artifactName": "Carpathron-Robotics-Coding-${version}.${ext}"
     }
   },

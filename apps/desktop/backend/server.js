@@ -142,11 +142,20 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   seedSkills(skills);
   // terminal session -> chat (transcript saved like a conversation)
   const termConvs = new Map();
+  const termLast = new Map(); // shellId -> tail of the last output (to spot password prompts)
+  // A line typed right after "Password:", "[sudo] password for…", "Passphrase", "PIN", "token:" … is a secret:
+  // never store it in the chat or send it to the model.
+  const SECRET_PROMPT = /(pass(word|phrase|code)?|pin|secret|token|otp|verification code)[^\n]{0,60}[:?]\s*$/i;
   const logTerm = (shellId, input, output) => {
     const convId = termConvs.get(shellId);
     const c = convId && store.get(convId);
-    if (!c) return;
+    const prev = termLast.get(shellId) || '';
     const out = String(output || '').replace(/^\(no new output\)$/, '').trim();
+    if (out) termLast.set(shellId, out.slice(-400));
+    if (!c) return;
+    if (input !== null && input !== undefined && String(input).trim() && SECRET_PROMPT.test(prev.trimEnd().split('\n').pop() || '')) {
+      input = '•••••• (typed at a password prompt — not saved)';
+    }
     if (input !== null && input !== undefined && String(input).trim()) {
       agent.addMsg(c, { role: 'user', text: `$ ${String(input).replace(/\{ctrl-c\}/i, '^C')}`, from: 'terminal' });
     }
@@ -230,7 +239,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   const send = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
 
   // Attachments are kept (images for vision / Muse Image / SAM, audio for transcription, documents for tools).
-  const ATT_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.oga': 'audio/ogg', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.pdf': 'application/pdf' };
+  const ATT_MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.bmp': 'image/bmp', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.opus': 'audio/ogg', '.oga': 'audio/ogg', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.weba': 'audio/webm', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.pdf': 'application/pdf' };
   async function attachmentsToText(list) {
     const out = [];
     const dir = path.join(dataDir, 'attachments', new Date().toISOString().slice(0, 10));
@@ -387,7 +396,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       if (b.whatsapp && b.whatsapp.cloud && b.whatsapp.cloud.enabled && !(b.whatsapp.cloud.appSecret || store.settings.whatsapp.cloud.appSecret)) {
         return send(res, 400, { error: 'WhatsApp Cloud needs the App Secret (Meta app → Settings → Basic) so the app can check that messages really come from Meta.' });
       }
-      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'museSandbox', 'museTrustWorkspace', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel', 'finishAllTasks', 'verifyBeforeFinish', 'maxTotalSteps']) if (k in b) patch[k] = b[k];
+      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'museSandbox', 'museTrustWorkspace', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel', 'finishAllTasks', 'verifyBeforeFinish', 'maxTotalSteps', 'apiWire', 'contextTokens']) if (k in b) patch[k] = b[k];
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey.trim();
       if (b.clearApiKey) patch.apiKey = '';
       if (b.workspace) {

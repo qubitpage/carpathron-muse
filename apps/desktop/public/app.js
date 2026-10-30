@@ -59,6 +59,23 @@
     r.readAsDataURL(file);
   });
 
+  // Any audio the browser can play (MP3, M4A, WebM/Opus from the mic…) -> 16 kHz mono 16-bit WAV for transcription.
+  async function audioToWav(blob, name) {
+    const ac = new (window.OfflineAudioContext || window.webkitOfflineAudioContext)(1, 1, 44100);
+    const decoded = await ac.decodeAudioData(await blob.arrayBuffer());
+    const rate = 16000, len = Math.max(1, Math.ceil(decoded.duration * rate));
+    const ctx = new OfflineAudioContext(1, len, rate);
+    const src = ctx.createBufferSource(); src.buffer = decoded; src.connect(ctx.destination); src.start();
+    const pcm = (await ctx.startRendering()).getChannelData(0);
+    const buf = new ArrayBuffer(44 + pcm.length * 2), v = new DataView(buf);
+    const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, 'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); w(8, 'WAVE'); w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, pcm.length * 2, true);
+    for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 32767, true);
+    return new File([buf], String(name || 'audio').replace(/\.[^.]+$/, '') + '.wav', { type: 'audio/wav' });
+  }
+  const isAudioFile = (f) => /^audio\//.test(f.type || '') || /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac|weba|amr|wma)$/i.test(f.name || '');
+
   // ------------------------------------------------------------ websocket
   function connectWs() {
     const ws = new WebSocket(`wss://${location.host}/ws`);
@@ -680,8 +697,11 @@
     $('#btnSend').disabled = true;
     try {
       const conv = await ensureConv();
-      const attachments = S.attachments;
-      const body = { text: text || '(see attached files)', attachments: await Promise.all(attachments.map(async (f) => ({ name: f.name, dataBase64: await readFileB64(f) }))) };
+      const attachments = await Promise.all(S.attachments.map(async (f) => {
+        if (!isAudioFile(f) || /^audio\/(wav|x-wav|ogg)$/.test(f.type || '')) return f;
+        try { return await audioToWav(f, f.name); } catch { return f; } // the server converts what the browser cannot
+      }));
+      const body = { text, attachments: await Promise.all(attachments.map(async (f) => ({ name: f.name, dataBase64: await readFileB64(f) }))) };
       input.value = ''; autoGrow(); S.attachments = []; renderAttachments(); $('#slash').hidden = true;
       if (!S.convs.some((c) => c.id === conv.id)) { S.convs.unshift({ id: conv.id, title: conv.title, updatedAt: Date.now() }); renderChatList(); }
       if (S.running.has(conv.id)) {
@@ -707,6 +727,36 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#btnStop').hidden && document.activeElement === input) $('#btnStop').click(); });
   $('#btnNewChat').onclick = () => newChat();
   $('#btnAttach').onclick = () => $('#fileInput').click();
+  // 🎤 voice messages: record, convert to WAV, send (Muse Voice Transcribe turns them into the message).
+  const mic = { rec: null, chunks: [], stream: null, timer: null, started: 0 };
+  $('#btnMic').onclick = async () => {
+    const btn = $('#btnMic');
+    if (mic.rec) { mic.rec.stop(); return; }
+    try {
+      mic.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch (e) { toast(`Microphone not available: ${e.message}`, true); return; }
+    mic.chunks = [];
+    mic.rec = new MediaRecorder(mic.stream);
+    mic.rec.ondataavailable = (e) => { if (e.data.size) mic.chunks.push(e.data); };
+    mic.rec.onstop = async () => {
+      clearInterval(mic.timer);
+      mic.stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(mic.chunks, { type: mic.rec.mimeType || 'audio/webm' });
+      mic.rec = null; btn.classList.remove('recording'); btn.textContent = '🎤';
+      if (Date.now() - mic.started < 600) { toast('Hold on a bit longer — nothing recorded'); return; }
+      try {
+        const d = new Date();
+        const wav = await audioToWav(blob, `voice-${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}${String(d.getSeconds()).padStart(2, '0')}`);
+        S.attachments.push(wav); renderAttachments();
+        $('#composer').requestSubmit();
+      } catch (e) { toast(`Could not read the recording: ${e.message}`, true); }
+    };
+    mic.started = Date.now();
+    mic.rec.start(250);
+    btn.classList.add('recording');
+    mic.timer = setInterval(() => { const s = Math.floor((Date.now() - mic.started) / 1000); btn.textContent = `⏺ ${s}s`; if (s >= 300) mic.rec && mic.rec.stop(); }, 250);
+    btn.textContent = '⏺ 0s';
+  };
   $('#fileInput').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
   function addFiles(files) {
     for (const f of files) {
@@ -964,6 +1014,10 @@
     effSel.value = s.effort || '';
     const webSel = h('select', {}, h('option', { value: 'auto' }, 'Meta search grounding (API key), then DuckDuckGo'), h('option', { value: 'duckduckgo' }, 'DuckDuckGo only'));
     webSel.value = s.webSearch || 'auto';
+    const wireSel = h('select', {}, h('option', { value: 'auto' }, 'Automatic — Responses API (shows reasoning summaries), Chat Completions if refused'), h('option', { value: 'responses' }, 'Responses API only (/v1/responses)'), h('option', { value: 'chat' }, 'Chat Completions only (/v1/chat/completions)'));
+    wireSel.value = s.apiWire || 'auto';
+    const ctxSel = h('select', {}, ...[[0, 'Automatic — 70 % of the model context (~730k tokens for Muse)'], [128000, '128k tokens (cheapest)'], [300000, '300k tokens'], [500000, '500k tokens'], [900000, '900k tokens (almost the full 1M window)']].map(([v, l]) => h('option', { value: String(v) }, l)));
+    ctxSel.value = String(Number(s.contextTokens) || 0);
     const cliIn = h('input', { value: s.arduinoCli || '', placeholder: S.boot.features && S.boot.features.arduinoCli ? `Found: ${S.boot.features.arduinoCli}` : 'Not found — the agent can download it (arduino_setup)' });
     const bridgeOn = h('input', { type: 'checkbox' }); bridgeOn.checked = s.museBridge !== false;
     const sbSel = h('select', {}, h('option', { value: 'auto' }, 'Automatic — use it when it works, otherwise run without it'), h('option', { value: 'on' }, 'Always sandbox (commands fail if it is not available)'), h('option', { value: 'off' }, 'Off — Muse Code runs commands directly (like the API engine)'));
@@ -978,6 +1032,8 @@
       h('p', { class: 'muted small' }, `Built-in tools: files and full PowerShell, background jobs, SSH servers, documents (PDF / Word / Excel / PowerPoint), designed PDFs and page screenshots${S.boot.features && !S.boot.features.render ? ' (needs the desktop app)' : ''}, web search and deep research, Arduino / ESP32 firmware (compile, flash, serial), Muse Image, SAM 3.1, voice transcription, robot. The model menu shows what each Muse model can do.`),
       field('Default reasoning effort (Muse Spark / Wonder)', effSel),
       field('Web search', webSel),
+      field('Meta API format (API key engine)', wireSel),
+      field('Conversation memory per request', ctxSel, 'Muse models read up to 1,048,576 tokens. Long jobs keep their full history until this limit; more history costs more tokens per step.'),
       field('arduino-cli path (optional)', cliIn),
       h('label', { class: 'inline toggle' }, bridgeOn, ' Give Muse Code (Meta account engine) the app tools: SSH, PDF, research, Arduino, robot, Muse Image, SAM'),
       field('Muse Code Windows sandbox for commands', sbSel, 'Approvals (Ask / Auto / Full / Plan) apply in every option.'),
@@ -986,7 +1042,7 @@
         h('button', { class: 'btn', style: 'align-self:flex-end', onclick: async () => { profOut.textContent = 'Loading…'; const r = await api('/api/muse/profiles'); const cur = profSel.value; profSel.innerHTML = ''; profSel.append(h('option', { value: '' }, 'Muse Code default')); for (const p of r.profiles || []) profSel.append(h('option', { value: p.id, disabled: p.available === false }, `${p.label}${p.description ? ' — ' + p.description : ''}`)); profSel.value = cur; profOut.textContent = r.profiles && r.profiles.length ? `${r.profiles.length} profiles` : (r.error || 'This Muse Code version lists no profiles'); } }, 'Load profiles')),
       profOut,
       h('button', { class: 'btn primary', onclick: async () => {
-        S.settings = await api('/api/settings', { body: { effort: effSel.value, webSearch: webSel.value, arduinoCli: cliIn.value.trim(), museBridge: bridgeOn.checked, musePermissionProfile: profSel.value, museSandbox: sbSel.value, museTrustWorkspace: trustOn.checked } });
+        S.settings = await api('/api/settings', { body: { effort: effSel.value, webSearch: webSel.value, apiWire: wireSel.value, contextTokens: Number(ctxSel.value) || 0, arduinoCli: cliIn.value.trim(), museBridge: bridgeOn.checked, musePermissionProfile: profSel.value, museSandbox: sbSel.value, museTrustWorkspace: trustOn.checked } });
         toast('Saved');
       } }, 'Save')));
 

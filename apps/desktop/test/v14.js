@@ -318,7 +318,7 @@ function tinyPdf(pages) {
     const c2 = await conv();
     await api(`/api/convs/${c2.id}`, { model: 'sam-3.1' }, 'PATCH');
     full = await sendMsg(c2, 'cup', { attachments: [{ name: 'p.jpg', dataBase64: fs.readFileSync(path.join(__dirname, 'sample.jpg')).toString('base64') }] });
-    assert.ok(full.messages.some((m) => m.role === 'assistant' && /1 match/.test(m.text)), JSON.stringify(full.messages.slice(-2)));
+    assert.ok(full.messages.some((m) => m.role === 'assistant' && /SAM 3\.1 found:\*\* cup ×1/.test(m.text)), JSON.stringify(full.messages.slice(-2)));
   });
 
   await step('image attachment goes to a vision model as an image (not as text)', async () => {
@@ -333,7 +333,98 @@ function tinyPdf(pages) {
     const c = await conv();
     await api(`/api/convs/${c.id}`, { effort: 'high' }, 'PATCH');
     await sendMsg(c, 'hello effort');
-    assert.strictEqual(fake.calls().pop().reasoning_effort, 'high');
+    const last = fake.calls().pop();
+    assert.strictEqual(last._wire, 'responses', 'the Responses API is used by default');
+    assert.deepStrictEqual(last.reasoning, { effort: 'high', summary: 'auto' });
+    const full = await api(`/api/convs/${c.id}`);
+    assert.ok(full.messages.some((m) => m.role === 'thinking' && /Thinking about the request/.test(m.text || '')), 'reasoning summary shown');
+  });
+
+  await step('Meta API: falls back to Chat Completions when /v1/responses is refused, and tool calls work in both', async () => {
+    fake.opts.noResponses = true;
+    srv.agent.api.responsesBroken = false;
+    try {
+      const c = await conv();
+      await api(`/api/convs/${c.id}`, { mode: 'full' }, 'PATCH');
+      const full = await sendMsg(c, 'run echo please');
+      assert.ok(/agent-ran/.test(toolMsg(full).output || ''), JSON.stringify(full.messages.slice(-3)));
+      assert.ok(srv.agent.api.responsesBroken, 'remembered for the session');
+      const last = fake.calls().pop();
+      assert.ok(!last._wire && last.reasoning_effort === undefined, 'chat path used');
+    } finally { fake.opts.noResponses = false; srv.agent.api.responsesBroken = false; }
+    const c2 = await conv();
+    await api(`/api/convs/${c2.id}`, { mode: 'full' }, 'PATCH');
+    const full2 = await sendMsg(c2, 'run echo please');
+    assert.ok(/agent-ran/.test(toolMsg(full2).output || ''), 'tool call through Responses');
+    assert.strictEqual(fake.calls().pop()._wire, 'responses');
+  });
+
+  await step('photos, voice and SAM: image-only message, audio is transcribed, SAM answers questions and outlines objects', async () => {
+    const jpg = fs.readFileSync(path.join(__dirname, 'sample.jpg')).toString('base64');
+    // a photo with no text: the model gets a default question and the picture
+    const c = await conv();
+    await api(`/api/convs/${c.id}/send`, { text: '', attachments: [{ name: 'robot.jpg', dataBase64: jpg }] });
+    await waitIdle(c.id);
+    let last = fake.calls().pop();
+    const u = last.messages[last.messages.length - 1];
+    assert.ok(Array.isArray(u.content) && u.content.some((p) => p.type === 'image_url') && /What is in this picture/.test(u.content[0].text), JSON.stringify(u).slice(0, 300));
+    // a voice message (16-bit WAV) with no text: transcribed, and the transcript is the request
+    const n = 16000, w = Buffer.alloc(44 + n * 2);
+    w.write('RIFF', 0); w.writeUInt32LE(36 + n * 2, 4); w.write('WAVE', 8); w.write('fmt ', 12); w.writeUInt32LE(16, 16); w.writeUInt16LE(1, 20); w.writeUInt16LE(1, 22); w.writeUInt32LE(16000, 24); w.writeUInt32LE(32000, 28); w.writeUInt16LE(2, 32); w.writeUInt16LE(16, 34); w.write('data', 36); w.writeUInt32LE(n * 2, 40);
+    const c2 = await conv();
+    await api(`/api/convs/${c2.id}/send`, { text: '', attachments: [{ name: 'voice-1201.wav', dataBase64: w.toString('base64') }] });
+    await waitIdle(c2.id);
+    const full2 = await api(`/api/convs/${c2.id}`);
+    assert.ok(full2.messages.some((m) => m.role === 'info' && /voice-1201\.wav: “Look left”/.test(m.text || '')), JSON.stringify(full2.messages.map((m) => m.text)));
+    last = fake.calls().pop();
+    assert.ok(/^Look left/.test(String(last.messages[last.messages.length - 1].content)), 'transcript sent to the model');
+    // SAM with a question: vision answers + names objects, SAM outlines them
+    const c3 = await conv({ model: 'sam-3.1' });
+    await api(`/api/convs/${c3.id}`, { model: 'sam-3.1' }, 'PATCH');
+    await api(`/api/convs/${c3.id}/send`, { text: 'what is this', attachments: [{ name: 'carpathron.jpg', dataBase64: jpg }] });
+    await waitIdle(c3.id);
+    let m3 = (await api(`/api/convs/${c3.id}`)).messages.filter((m) => m.role === 'assistant').pop();
+    assert.ok(/small white robot/.test(m3.text) && /SAM 3\.1 found:\*\* robot ×1, table ×1/.test(m3.text), m3.text);
+    // SAM with a name it cannot find: a vision answer instead of "0 matches"
+    await api(`/api/convs/${c3.id}/send`, { text: 'unicorn', attachments: [{ name: 'carpathron.jpg', dataBase64: jpg }] });
+    await waitIdle(c3.id);
+    m3 = (await api(`/api/convs/${c3.id}`)).messages.filter((m) => m.role === 'assistant').pop();
+    assert.ok(/no unicorn here/.test(m3.text) && /found nothing for: unicorn/.test(m3.text), m3.text);
+  });
+
+  await step('WhatsApp: a photo and an audio file sent to the bot reach the agent', async () => {
+    const sent = [];
+    const saved = { cloudSend: srv.wa.cloudSend, cloudDownload: srv.wa.cloudDownload, cfg: srv.wa.cfg };
+    srv.wa.cloudSend = async (to, t) => { sent.push(t); };
+    srv.wa.cfg = () => ({ ...saved.cfg.call(srv.wa), allowed: ['+40 712 345 678'], cloud: { ...saved.cfg.call(srv.wa).cloud, enabled: true } });
+    const jpg = fs.readFileSync(path.join(__dirname, 'sample.jpg'));
+    srv.wa.cloudDownload = async (id) => jpg;
+    try {
+      await srv.wa.cloudReceive({ entry: [{ changes: [{ value: { messages: [{ from: '40712345678', type: 'image', image: { id: 'm1', mime_type: 'image/jpeg', caption: 'what is this?' } }] } }] }] });
+      for (let i = 0; i < 100 && !sent.some((t) => /I can see the photo/.test(t)); i++) await sleep(50);
+      assert.ok(sent.some((t) => /Got the photo/.test(t)) && sent.some((t) => /I can see the photo \(data:image\/jpeg;base64/.test(t)), JSON.stringify(sent));
+    } finally { Object.assign(srv.wa, saved); }
+  });
+
+  await step('long conversations: full history is kept up to the context budget, then old turns are dropped safely', async () => {
+    const { compactHistory, toResponsesInput } = require('../backend/engines/api');
+    const big = 'x'.repeat(50000);
+    const mk = (n) => {
+      const l = [{ role: 'system', content: 'sys' }];
+      for (let i = 0; i < n; i++) l.push({ role: 'user', content: `q${i}` }, { role: 'assistant', content: '', tool_calls: [{ id: `c${i}`, type: 'function', function: { name: 'read_file', arguments: '{}' } }] }, { role: 'tool', tool_call_id: `c${i}`, content: big }, { role: 'assistant', content: `a${i}` });
+      return l;
+    };
+    const keep = mk(20); compactHistory(keep, 700000);
+    assert.strictEqual(keep.filter((m) => m.content === big).length, 20, '1 MB history stays complete under a 700k-token budget');
+    const cut = mk(60); compactHistory(cut, 100000);
+    assert.ok(JSON.stringify(cut).length <= 100000 * 3.5, 'fits the budget');
+    assert.strictEqual(cut[0].role, 'system');
+    assert.ok(cut.some((m) => m.content === 'q59') && cut.some((m) => m.content === 'a59'), 'latest turn kept');
+    const ids = new Set(cut.filter((m) => m.tool_calls).flatMap((m) => m.tool_calls.map((c) => c.id)));
+    assert.ok(cut.filter((m) => m.role === 'tool').every((m) => ids.has(m.tool_call_id)), 'no orphan tool results');
+    const r = toResponsesInput(cut);
+    assert.strictEqual(r.instructions, 'sys');
+    assert.ok(r.input.some((i) => i.type === 'function_call_output') && r.input.some((i) => i.type === 'function_call'));
   });
 
   await step('background jobs: start, read output, finished state', async () => {
@@ -411,6 +502,14 @@ function tinyPdf(pages) {
     assert.ok((list.convs || list).find((x) => x.id === r.convId).remote, 'chat list shows remote');
     const r2 = await api(`/api/servers/${server.id}/shell`, { convId: r.convId });
     assert.strictEqual(r2.convId, r.convId, 'reopened in the same chat');
+    // a line typed at a password prompt is never saved in the chat or sent to the model
+    await api(`/api/shells/${r2.id}`, { input: "printf 'Password for me@example.com: '; read -s P; echo; echo got-${#P}", waitMs: 1500 });
+    const y = await api(`/api/shells/${r2.id}`, { input: 'hunter2-very-secret', waitMs: 1500 });
+    assert.ok(/got-19/.test(y.output), y.output);
+    const c2 = await api(`/api/convs/${r.convId}`);
+    assert.ok(!JSON.stringify(c2).includes('hunter2-very-secret'), 'password stored in the chat');
+    assert.ok(c2.messages.some((m) => /typed at a password prompt — not saved/.test(m.text || '')));
+    assert.ok(!JSON.stringify(srv.store.get(r.convId).llm || []).includes('hunter2-very-secret'), 'password in model context');
     await api(`/api/shells/${r2.id}`, null, 'DELETE');
     // a normal chat started on a server keeps it
     const n = await api('/api/convs', { remote: { serverId: server.id, path: '/tmp' } });

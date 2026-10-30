@@ -339,3 +339,6 @@ body[data-view="chat"] .mobile-menu { display: none !important; }
 .fold summary .thumb { height: 34px; width: auto; border-radius: 4px; margin-left: auto; border: 1px solid var(--line); cursor: zoom-in; flex: none; }
 .zoom-ov { position: fixed; inset: 0; background: #000c; display: flex; align-items: center; justify-content: center; z-index: 1000; cursor: zoom-out; }
 .zoom-ov img { max-width: 95vw; max-height: 92vh; border-radius: 8px; box-shadow: 0 8px 40px #000; }
+
+#btnMic.recording { color: #fff; background: #d93025; border-radius: 8px; padding: 0 8px; min-width: 56px; animation: micpulse 1.2s infinite; }
+@keyframes micpulse { 50% { opacity: .7; } }

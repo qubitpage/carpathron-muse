@@ -14,7 +14,7 @@ This guide starts from zero (installing the app) and then explains every menu, b
 
 ## 1. Quick start (10 minutes)
 
-1. **Install the app** — run `Install.bat` (or `Muse-Carpathron-Setup.exe`) and click **Yes** on the Windows prompt (section 2).
+1. **Install the app** from the **Microsoft Store** (search *Carpathron Robotics & Coding*) and open it from the Start menu (section 2).
 2. **Connect Meta** — *Settings → Sign in to Meta*. Either paste a **Meta API key** and press *Save & test*, or install
    **Muse Code** and sign in with your **Meta account** (section 3).
 3. **New chat** (top left) → type what you want, for example *"What can you do on this PC?"*.
@@ -32,30 +32,29 @@ This guide starts from zero (installing the app) and then explains every menu, b
 **Requirements:** Windows 10 or 11 (64-bit), internet access, a Meta account or a Meta Model API key.
 
 **Install**
-1. Download the latest release: <https://github.com/qubitpage/carpathron-muse/releases/latest>
-   (`Muse-Carpathron-Setup.exe`). If you received a folder with `Install.bat` and `.part` files, keep them together
-   and double-click **Install.bat** — it joins the parts, checks they are not damaged (SHA-256) and starts the installer.
-2. Click **Yes** on the Windows (UAC) prompt. The app installs for all users, adds Start-menu and desktop shortcuts and a
-   firewall rule that lets only devices **on your own network** reach it (phone, Quest).
-3. The app opens. It also lives in the system tray (bottom right) — closing the window keeps it running for WhatsApp
-   and the robot; use *Quit* in the tray menu to exit completely.
+1. Open the **Microsoft Store**, search **Carpathron Robotics & Coding** (or open
+   <https://apps.microsoft.com/detail/9PMSQ8C3P6M3>) and click **Get / Install**.
+2. Open it from the Start menu. The first time, Windows may ask whether the app can use your network: allow
+   **private networks** if you want to use a phone or the Quest headset with it.
+3. The app also lives in the system tray (bottom right) — closing the window keeps it running for WhatsApp and the
+   robot; use *Quit* in the tray menu to exit completely.
 
-**Update:** install the new version over the old one. **Your chats, settings, saved servers, keys, memory and
-skills are kept** — they are not in the installer.
+**Update:** the Microsoft Store updates the app automatically. **Your chats, settings, saved servers, keys, memory and
+skills are kept.**
 
 **Where your data is**
 
 | What | Where |
 |---|---|
 | Workspace, photos, room maps, research reports | `%USERPROFILE%\MuseCarpathron` |
-| Chats, settings, servers, keys, memory, skills, log | `%APPDATA%\Muse Carpathron\data` |
-| Log file (for troubleshooting) | `%APPDATA%\Muse Carpathron\muse-carpathron.log` |
+| Chats, settings, servers, keys, memory, skills, log | the app's private folder, managed by Windows (`%LOCALAPPDATA%\Packages\Qubitpage.CarpathronRoboticsCoding_…\LocalCache\Roaming\Muse Carpathron\data`) |
+| Log file (for troubleshooting) | same folder, `muse-carpathron.log` |
 
 Passwords, API keys, SSH keys and the GitHub token are **encrypted with your Windows account** (DPAPI). They never
-appear in the installer, in the repository, in the browser or on the phone.
+appear in the app package, in the browser or on the phone.
 
-**Uninstall:** Windows *Settings → Apps → Carpathron Robotics & Coding → Uninstall*. Your data folders stay; delete them by hand
-if you want a clean start.
+**Uninstall:** Windows *Settings → Apps → Carpathron Robotics & Coding → Uninstall* (or right-click it in the Start menu).
+Windows removes the app's private data with it; your workspace folder (`%USERPROFILE%\MuseCarpathron`) stays.
 
 ---
 
@@ -217,6 +216,22 @@ Carpathron Robotics & Coding adds rules and checks so the agent doesn't invent t
 - **Testing before delivery** — apps and websites are built, run and checked (also visually) before Muse says they work.
 - **Clean work** — files go into a sensible project structure, temporary files into a per-chat **scratch folder**
   (deleted with the chat), no secrets in code, no stray files on servers.
+
+---
+
+### 5.9 Photos, voice and audio
+
+- **Photos:** attach a picture (📎 or drag it in) — with or without a question. Muse Spark / Wonder look at it and
+  answer. With the **SAM 3.1** model selected, a question like *"what is this?"* is answered and the objects
+  (e.g. *robot*, *cup*) are outlined in the picture; a name (*"robot"*) is outlined directly.
+- **Talk:** press **🎤**, speak, press it again — the recording is transcribed with Muse Voice Transcribe and runs
+  like a typed message (works in the PC app, a phone browser and the Quest browser).
+- **Audio files:** MP3, M4A, WAV, OGG, WebM, FLAC… attached to a message are transcribed and used as the request.
+- **WhatsApp:** send a photo (with or without a caption), a voice note or an audio file — same results as in the app.
+- **Meta API format** (*Settings → Tools & models*): the Responses API is used by default (shows reasoning
+  summaries); if Meta refuses a request the app switches to Chat Completions automatically.
+- **Conversation memory:** Muse models read up to 1,048,576 tokens. Long jobs keep their full history until about
+  730k tokens (adjustable); older parts are shortened only after that.
 
 ---
 

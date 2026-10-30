@@ -11,6 +11,8 @@ const DEFAULT_SETTINGS = {
   museBin: '',
   apiKey: '',
   apiBase: 'https://api.meta.ai/v1',
+  apiWire: 'auto', // auto (Responses API, falls back to Chat Completions) | responses | chat
+  contextTokens: 0, // 0 = automatic (70 % of the model's context window, ~730k tokens for Muse)
   model: 'muse-spark-1.3',
   museModel: '',
   mode: 'ask', // ask | auto | full | plan

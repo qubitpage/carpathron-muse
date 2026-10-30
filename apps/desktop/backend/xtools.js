@@ -62,7 +62,7 @@ function parseRanges(spec, max) {
   return out.size ? out : null;
 }
 
-async function readDocument(file, { pages, maxChars = 60000 } = {}) {
+async function readDocument(file, { pages, maxChars = 100000 } = {}) {
   const ext = path.extname(file).toLowerCase();
   const st = await fsp.stat(file);
   if (st.isDirectory()) throw new Error(`${file} is a folder`);
@@ -322,9 +322,9 @@ async function execX(name, args, ctx) {
         const rp = await remote.resolve(ctx.remoteServer, args.path, ctx.remotePath);
         const tmp = path.join(os.tmpdir(), `mc-doc-${Date.now()}${path.posix.extname(rp)}`);
         await remote.download(ctx.remoteServer, rp, tmp);
-        try { return await readDocument(tmp, { pages: args.pages, maxChars: Number(args.max_chars) || 60000 }); } finally { fsp.unlink(tmp).catch(() => {}); }
+        try { return await readDocument(tmp, { pages: args.pages, maxChars: Number(args.max_chars) || 100000 }); } finally { fsp.unlink(tmp).catch(() => {}); }
       }
-      return readDocument(resolveLocal(ws, args.path), { pages: args.pages, maxChars: Number(args.max_chars) || 60000 });
+      return readDocument(resolveLocal(ws, args.path), { pages: args.pages, maxChars: Number(args.max_chars) || 100000 });
     }
     case 'view_image': {
       const f = resolveLocal(ws, args.path);

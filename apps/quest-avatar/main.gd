@@ -426,10 +426,13 @@ func _shots() -> void:
 		var key: String = "shot" + str(marks[m])
 		if t >= m and not test.has(key):
 			test[key] = true
-			if marks[m] == "4":
-				cam.position = Vector3(1.3, 2.0, 0.6); cam.look_at(Vector3(0, 1.4, -2.2))
-			else:
-				cam.position = Vector3(0, 1.45, 0.05); cam.rotation = Vector3.ZERO
+			# the robot's view fills the whole 16:9 frame (store rule VRC.Quest.Asset.5: no empty borders)
+			demo.vp.size = Vector2i(2560, 1920)
+			var c3 := cam as Camera3D
+			c3.fov = 60.0
+			var half_w := 1.6 * 0.97   # a little inside the screen edge
+			var d := half_w / (tan(deg_to_rad(c3.fov / 2.0)) * 16.0 / 9.0)
+			cam.position = Vector3(0, 1.65, -2.2 + d); cam.rotation = Vector3.ZERO
 			await RenderingServer.frame_post_draw
 			await RenderingServer.frame_post_draw
 			get_viewport().get_texture().get_image().save_png(shots_dir + "/shot" + marks[m] + ".png")

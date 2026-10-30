@@ -14,12 +14,13 @@ User documentation: [`public/guide.md`](public/guide.md) (also inside the app un
 | `backend/tools.js` | Files, commands, web fetch, robot, sub-agents (local or routed to a server) |
 | `backend/xtools.js` | SSH, documents, PDF, screenshots, web search, research, jobs, Arduino, Muse Image, SAM, voice |
 | `backend/remote.js` | SSH servers (ssh2): connections, SFTP, shells, keys, host-key checks |
+| `backend/shield.js` | Carpathron Shield: project scan before publishing (secrets, .env, keys, source maps, Firebase/Supabase rules), server and website scans, fixes with backup and lockout protection, monitoring, publish gate |
 | `backend/github.js` | GitHub plugin: token / browser sign-in, repos, publish, releases, issues, PRs |
 | `backend/bridge.js` | MCP stdio server that gives Muse Code the app's tools |
 | `backend/models.js` | Model capability registry and Muse Image / SAM / Voice calls |
 | `backend/secrets.js` | Encryption of passwords, keys and tokens (Windows DPAPI, AES fallback) |
 | `backend/store.js` | Chats, settings, index (JSON files in the app data folder) |
-| `public/` | The UI (plain HTML/CSS/JS) and the guide |
+| `public/` | The UI (plain HTML/CSS/JS; `shield.js` = the Shield page) and the guide |
 | `build/` | Build helpers (Muse Code SDK patch, installer resources) |
 | `test/` | Backend tests (fake SSH and GitHub servers included) |
 

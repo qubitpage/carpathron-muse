@@ -121,7 +121,8 @@
       case 'camera:photo': window.MCRobot && window.MCRobot.onPhoto && window.MCRobot.onPhoto(d); break;
       case 'robot:status': case 'robot:motors': case 'robot:scan': case 'robot:map': window.MCRobot && window.MCRobot.onEvent(ev, d); break;
       case 'avatar:link': avatarLinkPrompt(d); break;
-      case 'remote:status': S.boot.servers = d; if (S.view === 'chat') renderHead(); if (S.view === 'remote') renderServerList(); break;
+      case 'remote:status': S.boot.servers = d; if (S.view === 'chat') renderHead(); if (S.view === 'remote') renderServerList(); window.MCShield && window.MCShield.onEvent(ev, d); break;
+      case 'shield:event': case 'shield:scan': case 'shield:status': window.MCShield && window.MCShield.onEvent(ev, d); break;
       default: break;
     }
   }
@@ -175,6 +176,7 @@
     if (view === 'guide') renderGuide();
     $('#btnGuide').classList.toggle('on', view === 'guide');
     if (view === 'plugins') renderPlugins();
+    if (view === 'shield') window.MCShield && window.MCShield.show();
     renderChatList();
   }
   $$('#nav button').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
@@ -421,6 +423,8 @@
   // ---- modal
   function modal(...kids) { const box = $('#modalBox'); box.innerHTML = ''; box.append(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false)); $('#modal').hidden = false; }
   function closeModal() { $('#modal').hidden = true; }
+  // helpers shared with the page scripts (shield.js)
+  window.MCui = { api, h, $, $$, toast, md, fmtDate, isDesktop, S, modal: (...k) => modal(...k), closeModal: () => closeModal(), newChat: (...a) => newChat(...a), patchConv: (p) => patchConv(p), show: (v) => show(v), view: () => S.view };
   // Text / choice dialogs (window.prompt does not work inside the desktop app).
   function askText(title, value = '', { multiline = false, placeholder = '', hint = '' } = {}) {
     return new Promise((resolve) => {

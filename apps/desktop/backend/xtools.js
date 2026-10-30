@@ -19,7 +19,7 @@ const XTOOLS = [
   { name: 'ssh_servers', risk: 'read', description: 'List the saved remote servers (VPS / dedicated) you can work on over SSH, with their OS and whether they are connected.', parameters: obj({}) },
   { name: 'ssh_exec', risk: 'exec', description: 'Run a command on a saved remote server over SSH (bash on Linux, PowerShell on Windows servers) and return the output. The connection stays open between calls. Use for installing packages, git, builds, docker, systemctl, logs…', parameters: obj({ server: { type: 'string', description: 'server name (from ssh_servers)' }, command: { type: 'string' }, cwd: { type: 'string', description: 'folder on the server' }, timeout_seconds: { type: 'integer', description: 'default 120, max 3600' } }, ['server', 'command']) },
   { name: 'ssh_shell', risk: 'exec', description: 'Interactive terminal on a remote server that stays open (for programs that ask questions, REPLs, sudo prompts, top, tail -f, editors). action=start returns a shell_id; action=send types input (add {ctrl-c}, {enter}, {tab} if needed) and returns new output; action=read waits for more output; action=close ends it.', parameters: obj({ server: { type: 'string' }, action: { type: 'string', enum: ['start', 'send', 'read', 'close', 'list'] }, shell_id: { type: 'string' }, input: { type: 'string' }, wait_ms: { type: 'integer', description: 'how long to wait for output (default 1500, max 120000)' } }, ['action']) },
-  { name: 'ssh_upload', risk: 'write', description: 'Copy a file or folder from this PC to a remote server (SFTP). Folders are copied recursively without node_modules/.git.', parameters: obj({ server: { type: 'string' }, local_path: { type: 'string' }, remote_path: { type: 'string' } }, ['server', 'local_path', 'remote_path']) },
+  { name: 'ssh_upload', risk: 'write', description: 'Copy a file or folder from this PC to a remote server (SFTP). Folders are copied recursively without node_modules/.git. Carpathron Shield scans what you upload first and blocks it when it finds critical problems (e.g. secret keys in files browsers can download, .env in a web root).', parameters: obj({ server: { type: 'string' }, local_path: { type: 'string' }, remote_path: { type: 'string' }, allow_risky: { type: 'boolean', description: 'upload even though Shield found critical problems — ONLY after the user explicitly accepted the risk' } }, ['server', 'local_path', 'remote_path']) },
   { name: 'ssh_download', risk: 'write', description: 'Copy a file from a remote server to this PC (SFTP).', parameters: obj({ server: { type: 'string' }, remote_path: { type: 'string' }, local_path: { type: 'string' } }, ['server', 'remote_path', 'local_path']) },
   { name: 'ssh_key', risk: 'write', description: 'SSH keys: action=list shows keys (app keys and ~/.ssh); action=generate creates a new ed25519 key (stored encrypted); action=install adds a key to a server\'s authorized_keys and switches that server to key login.', parameters: obj({ action: { type: 'string', enum: ['list', 'generate', 'install'] }, name: { type: 'string', description: 'key name (generate) or key name/id (install)' }, server: { type: 'string' }, remove_password: { type: 'boolean' } }, ['action']) },
   { name: 'ssh_save_server', risk: 'write', description: 'Save a remote server (only when the user gives you the details). Credentials are stored encrypted on this PC.', parameters: obj({ name: { type: 'string' }, host: { type: 'string' }, port: { type: 'integer' }, username: { type: 'string' }, password: { type: 'string' }, private_key_path: { type: 'string' }, default_path: { type: 'string' } }, ['host', 'username']) },
@@ -294,7 +294,17 @@ async function execX(name, args, ctx) {
     }
     case 'ssh_upload': {
       const srv = remote.need(args.server || ctx.remoteServer);
-      return remote.upload(srv.id, resolveLocal(ws, args.local_path), await remote.resolve(srv.id, args.remote_path, srv.defaultPath));
+      const local = resolveLocal(ws, args.local_path);
+      const target = await remote.resolve(srv.id, args.remote_path, srv.defaultPath);
+      let note = '';
+      if (ctx.shield) {
+        ctx.status && ctx.status('Shield: checking what will be uploaded…');
+        const g = await ctx.shield.gate(local, { purpose: 'server', remotePath: target });
+        if (g.blocked && !args.allow_risky) throw new Error(g.message);
+        const w = g.result.counts.warning;
+        note = g.blocked ? `\n⚠ Uploaded despite ${g.result.counts.critical} critical Shield finding(s) (allowed by the user).` : `\nShield: ${w ? `${w} warning${w === 1 ? '' : 's'} (shield_scan target project for details)` : 'no problems found'}.`;
+      }
+      return (await remote.upload(srv.id, local, target)) + note;
     }
     case 'ssh_download': {
       const srv = remote.need(args.server || ctx.remoteServer);

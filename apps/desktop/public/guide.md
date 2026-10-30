@@ -276,7 +276,7 @@ You never call tools yourself — ask in plain words and the agent picks them. T
 `dev_environment` · `dev_install` · `open_ide` · `micropython` · `pico_flash` · `sd_card_image`
 
 **Security, tasks and other models**
-`security_check` (servers and websites, section 7.5) · `task_update` (the task list) · `ask_model` (second opinion from another Muse model)
+`shield_scan` · `shield_fix` · `shield_monitor` (Carpathron Shield, section 7.6) · `security_check` (quick text check, section 7.5) · `task_update` (the task list) · `ask_model` (second opinion from another Muse model)
 
 **With Muse Code:** these same tools reach Muse Code through the built-in **Carpathron bridge** (an MCP server the
 app starts for each chat). In Muse Code they appear as `mcp__carpathron__…`. Keep *Settings → Tools & models → Give Muse Code the app tools* ticked.
@@ -351,6 +351,58 @@ Ask *"/security-audit my-vps and example.com"* or *"check the security of the se
 Results are marked **✗ critical**, **⚠ warning**, **✓ fine**, with the fix for each. Muse runs it by itself after
 deploying or changing anything public, fixes what it can (keeping your SSH access working), and checks again.
 Only use it on servers and domains you own or manage.
+
+### 7.6 Carpathron Shield — the 🛡 Shield page
+
+Shield protects the apps you build and the servers you publish them to. Open **🛡 Shield** in the sidebar, or ask
+*"/secure-publish my shop to my-vps"* and the agent does the whole flow for you.
+
+**1. Before publishing — scan the project.** Pick the folder and where it is going:
+
+| Choice | What counts as public |
+|---|---|
+| **Before GitHub** | everything git would publish (your `.gitignore` is respected) |
+| **Before server upload** | build folders (`dist`, `build`, `public`…) — and the whole folder when the destination is a web root like `/var/www` |
+| **Review** | build folders and top-level HTML |
+
+It finds API keys and passwords in code (OpenAI, Anthropic, Stripe, AWS, GitHub, Meta/WhatsApp, database URLs,
+Supabase `service_role` keys…), `.env` files, private keys and keystores, database files, public source maps, open
+Firebase rules, Supabase tables without row-level security, and debug mode. Key values are never shown in full.
+
+**Publishing is guarded:** `ssh_upload` and `github_publish` scan first and **stop when Shield finds a critical
+problem** (for example a secret key in a file browsers can download). The agent fixes the code and publishes again;
+it only overrides the block if you explicitly accept the risk.
+
+**2. After publishing — scan the server and the website.**
+- **Server (Linux, over SSH):** everything from 7.5, plus **post-quantum SSH** (does the key exchange use ML-KEM /
+  sntrup761?), password-guessing attempts in the last 24 h, `.env` files readable by every user, and whether nginx
+  blocks hidden files.
+- **Website:** everything from 7.5, plus secret keys inside the JavaScript the site sends to visitors and public
+  source maps. With **Deep check** it also tests whether your **Supabase tables** or **Firebase database** can be read
+  by anyone, using the public key from your own site — at most one row per table, nothing is kept, nothing is written.
+  Tick *I own or manage this site* first.
+
+Each scan gets a **score (0–100) and a grade (A–F)**. Every problem has a suggested fix and a **🤖 Fix with AI** button
+that opens a chat with the problem already described (on the right server or folder) — you read it and press Enter.
+
+**3. One-click fixes (⚡ Fix).** For common server problems Shield has built-in fixes: fail2ban, automatic security
+updates, pending updates, firewall (SSH, 80 and 443 stay open — you choose any other ports to keep), SSH root login
+with keys only, SSH password login off, private `.env` files. Before anything runs you see the exact commands. Then:
+- changed files are **backed up** to `/var/backups/carpathron-shield/` on the server, and most fixes can be
+  **undone** from *Fix history*;
+- **lockout protection:** after a firewall or SSH change the app logs in again over a new connection. If it cannot,
+  the server **undoes the change by itself within 2.5 minutes** — a fix can never lock you out;
+- SSH fixes are refused while the server still logs in with a password (install a key first: Remote → 🔑 Install key).
+
+Fixes need root or passwordless `sudo` on the server.
+
+**4. Live monitoring.** Press **▶ Start** next to a server (every 1–60 minutes). While the app is open it checks
+over SSH — nothing is installed on the server — and raises alerts for: new public ports (databases are critical),
+bursts of failed SSH logins, new SSH logins, a full disk, high load, the server going down and coming back, and
+`/.env` or `/.git` becoming readable on the sites you list. Alerts appear on the Shield page, as a badge on the
+sidebar and as Windows notifications. *Reset baseline* accepts the current open ports as normal.
+
+Shield server scans, fixes and monitoring support Linux servers; Windows servers get the website checks.
 
 ## 8. Plugins — GitHub
 

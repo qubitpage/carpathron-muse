@@ -24,6 +24,7 @@ const { Camera } = require('./camera');
 const { Secrets } = require('./secrets');
 const { Remote } = require('./remote');
 const { GitHub } = require('./github');
+const { Shield } = require('./shield');
 const { Jobs, findArduinoCli } = require('./xtools');
 const models = require('./models');
 const render = require('./render');
@@ -63,6 +64,7 @@ const BUILTIN_SKILLS = [
   { name: 'nvidia-jetson', description: 'NVIDIA work: GPU/CUDA on this PC, or a Jetson board over SSH (JetPack, CUDA, TensorRT, cameras, AI models)', body: 'NVIDIA workflow:\n1. dev_environment: GPU and driver (nvidia-smi), CUDA Toolkit (nvcc), Nsight, Jetson on USB (recovery mode) or on the network.\n2. On this PC: install the CUDA Toolkit with dev_install cuda if needed, build and run a small CUDA/PyTorch check (torch.cuda.is_available()), profile with Nsight (open_ide nsight-systems).\n3. Jetson over SSH (add it with ssh_save_server): cat /etc/nv_tegra_release and dpkg -l nvidia-jetpack for the JetPack version; sudo nvpmodel -q / jetson_clocks for power modes; jtop (pip install jetson-stats) for load; CUDA samples / deviceQuery; TensorRT (trtexec) and DeepStream for AI pipelines; cameras with gst-launch-1.0 nvarguscamerasrc; Docker with the NVIDIA runtime (l4t containers).\n4. Flashing a Jetson needs NVIDIA SDK Manager on Ubuntu (a Linux PC or WSL2): explain the steps (recovery mode jumper/button, USB-C to the host, SDK Manager) — or flash an SD-card image for Orin Nano dev kits with sd_card_image.\n5. Always measure and test on the device before saying it works.' },
   { name: 'test-app', description: 'Test an app or website like a user: run it, click through it, find defects, fix them and test again', body: 'App testing loop:\n1. Build and start the app (run_command / job_start for servers; open the page with browser_view open, or the desktop app with computer_act open_app).\n2. Make a task list (task_update) of the main user flows and checks (start, navigation, forms, errors, mobile width 390 for websites).\n3. Go through each flow visually: screenshot, act (browser_act / computer_act), screenshot again. Note every defect: crashes, console errors, wrong text, broken layout, slow steps.\n4. Fix the defects in the code, rebuild, and test the same flow again until it passes.\n5. Run the automated tests if the project has them. Report what was tested, what was fixed, and anything still open — with evidence (screenshots, outputs).' },
   { name: 'security-audit', description: 'Check and harden a public server or website (ports, firewall, SSH, updates, TLS, headers, exposed files)', body: 'Security audit:\n1. security_check with the server and/or the domain.\n2. Explain the findings in plain words, most critical first.\n3. With the user\'s OK, fix them over SSH step by step (keep your own SSH access working: allow OpenSSH in the firewall BEFORE enabling it; test a second SSH login before disabling passwords).\n4. Run security_check again and show the before/after.' },
+  { name: 'secure-publish', description: 'Publish an app safely with Carpathron Shield: scan before upload, deploy, then scan, fix and monitor the server and site', body: 'Secure publish with Carpathron Shield:\n1. shield_scan target project on the folder you will publish (purpose server for an SSH upload, github for GitHub; remote_path = the destination). Fix every critical finding in the code first: move secrets to environment variables on the server, add .env* to .gitignore, build without source maps, turn on row-level security. Never use allow_risky unless the user explicitly accepts the risk.\n2. Publish (ssh_upload / github_publish) and configure the web server.\n3. shield_scan target server, then target site with the public url (deep true when the app uses Supabase or Firebase).\n4. Explain the findings in plain words, most critical first. With the user\'s OK apply built-in fixes with shield_fix (preview first); make other changes with ssh_exec carefully.\n5. Scan again and show before/after scores, then offer shield_monitor start with the site url.' },
   { name: 'server-setup', description: 'Set up or fix a VPS / dedicated server over SSH', body: 'On the chosen server (ssh_servers to list):\n1. Inspect first: OS, disk, memory, running services (ssh_exec: uname -a; df -h; free -m; systemctl --failed; ss -tlnp).\n2. Say what you will change, then do it step by step: updates, firewall (keep SSH open!), users, nginx/caddy, certificates, docker, databases, app deployment with systemd or docker compose.\n3. Use ssh_shell for interactive programs. Verify each step (curl the site, check logs).\n4. Summarise what was changed and how to undo it.' },
 ];
 function seedSkills(skills) {
@@ -171,6 +173,9 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   const agent = new Agent({ store, robot, mcp, emit, log: logFn, memory, projects, skills, camera, remote, jobs, dataDir, github });
   const mapper = new Mapper({ robot, camera, api: agent.api, memory, getSettings: () => store.settings, emit, log: logFn });
   agent.mapper = mapper;
+  const shield = new Shield({ store, remote, log: logFn, emit, dataDir });
+  agent.shield = shield;
+  shield.resume();
   wa = new WhatsApp({ store, agent, emit, log: logFn, dataDir });
   mcp.sync(store.settings.mcpServers).then(() => emit('mcp:status', mcp.status())).catch(() => {});
   wa.applySettings().catch(() => {});
@@ -524,6 +529,32 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         if (m === 'DELETE') { termConvs.delete(mm[1]); return send(res, 200, { ok: remote.shellClose(mm[1]) }); }
       } catch (e) { return send(res, 200, { error: e.message }); }
     }
+    // Carpathron Shield: scans, fixes, monitoring
+    if (p === '/api/shield' && m === 'GET') return send(res, 200, shield.status());
+    if (p === '/api/shield/last' && m === 'GET') return send(res, 200, shield.last[url.searchParams.get('key') || ''] || null);
+    if (p === '/api/shield/scan' && m === 'POST') {
+      const b = await readJson(req);
+      try {
+        if (b.target === 'project') return send(res, 200, await shield.scanProject(String(b.path || store.settings.workspace || ''), { purpose: ['github', 'server', 'review'].includes(b.purpose) ? b.purpose : 'review', remotePath: b.remotePath || '' }));
+        if (b.target === 'server') return send(res, 200, await shield.scanServer(String(b.server || '')));
+        if (b.target === 'site') return send(res, 200, await shield.scanSite(String(b.url || ''), { deep: !!b.deep }));
+        return send(res, 400, { error: 'target must be project, server or site' });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    if (p === '/api/shield/fix/preview' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await shield.preview(String(b.server || ''), String(b.fix || ''), { allowPorts: b.allowPorts })); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/shield/fix' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await shield.applyFix(String(b.server || ''), String(b.fix || ''), { allowPorts: b.allowPorts })); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/shield/undo' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await shield.undo(String(b.id || ''))); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/shield/monitor' && m === 'POST') {
+      const b = await readJson(req);
+      try {
+        if (b.action === 'start') return send(res, 200, shield.monitorStart(String(b.server || ''), { intervalMin: b.intervalMin, urls: b.urls }));
+        if (b.action === 'stop') return send(res, 200, shield.monitorStop(String(b.server || '')));
+        if (b.action === 'reset') { shield.resetBaseline(String(b.server || '')); return send(res, 200, { ok: true }); }
+        if (b.action === 'now') { const sv = remote.need(String(b.server || '')); await shield.tick(sv.id); return send(res, 200, shield.monitorStatus(sv.id)); }
+        return send(res, 400, { error: 'action must be start, stop, reset or now' });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    if (p === '/api/shield/events' && m === 'DELETE') { shield.events = []; shield.writeJson('events.json', []); return send(res, 200, { ok: true }); }
     // GitHub plugin
     if (p === '/api/github' && m === 'GET') return send(res, 200, github.publicInfo());
     if (p === '/api/github/connect' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await github.connect(String(b.token || '').trim(), b)); } catch (e) { return send(res, 400, { error: e.message }); } }
@@ -868,13 +899,14 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   return {
     port,
     token: token(),
-    store, agent, robot, mcp, wa, memory, projects, skills, camera, remote, jobs, github,
+    store, agent, robot, mcp, wa, memory, projects, skills, camera, remote, jobs, github, shield,
     async close() {
       for (const c of clients) try { c.close(); } catch {}
       wss.close();
       await new Promise((r) => front.close(r));
       server.close(); redirect.close();
       robot.close();
+      shield.stopAll();
       remote.closeAll();
       jobs.stopAll();
       await mcp.closeAll();

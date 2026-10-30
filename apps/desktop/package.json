@@ -14,7 +14,7 @@
   "scripts": {
     "start": "electron .",
     "server": "node backend/standalone.js",
-    "test": "node test/run-all.js && node test/v14.js && node test/security.js",
+    "test": "node test/run-all.js && node test/v14.js && node test/security.js && node test/shield.js",
     "dist": "node build/patch-sdk.js && electron-builder --win nsis --x64",
     "postinstall": "node build/patch-sdk.js",
     "test:electron": "xvfb-run -a electron --no-sandbox test/electron-browser.js /tmp && xvfb-run -a electron --no-sandbox test/electron-audio.js test/audio",

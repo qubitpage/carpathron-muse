@@ -401,6 +401,9 @@ function describeCall(name, args) {
     case 'pico_flash': return `Flash Pico with ${a.uf2}`;
     case 'sd_card_image': return a.action === 'write' ? `ERASE disk ${a.disk} and write ${a.image}` : 'List removable drives';
     case 'security_check': return `Security check ${[a.server, a.url].filter(Boolean).join(' + ')}`;
+    case 'shield_scan': return `Shield scan ${a.target}: ${a.path || a.server || a.url || 'workspace'}${a.deep ? ' (deep)' : ''}`;
+    case 'shield_fix': return `${a.preview ? 'Preview' : 'Apply'} Shield fix "${a.fix}" on ${a.server}${(a.allow_ports || []).length ? ` (keep ports ${a.allow_ports.join(', ')})` : ''}`;
+    case 'shield_monitor': return `Shield monitor ${a.action}${a.server ? ' ' + a.server : ''}`;
     case 'ask_model': return `Ask ${a.model}`;
     case 'computer_view': return a.action === 'screenshot' ? 'Look at the screen' : `Screen: ${a.action}`;
     case 'computer_act': return { click: `Click at ${a.x},${a.y}`, double_click: `Double-click at ${a.x},${a.y}`, right_click: `Right-click at ${a.x},${a.y}`, middle_click: `Middle-click at ${a.x},${a.y}`, move: `Move mouse to ${a.x},${a.y}`, drag: `Drag ${a.x},${a.y} → ${a.x2},${a.y2}`, scroll: `Scroll ${a.direction || 'down'}`, type: `Type "${String(a.text || '').slice(0, 60)}"`, key: `Press ${a.keys || a.text}`, focus_window: `Switch to window "${a.window}"`, open_app: `Open ${a.app}`, wait: `Wait ${a.seconds || 1}s` }[a.action] || `Computer: ${a.action}`;

@@ -342,3 +342,44 @@ body[data-view="chat"] .mobile-menu { display: none !important; }
 
 #btnMic.recording { color: #fff; background: #d93025; border-radius: 8px; padding: 0 8px; min-width: 56px; animation: micpulse 1.2s infinite; }
 @keyframes micpulse { 50% { opacity: .7; } }
+
+/* ------------------------------------------------ Carpathron Shield */
+.nav-badge { margin-left: auto; min-width: 18px; padding: 0 6px; border-radius: 99px; background: var(--danger); color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+.nav-badge[hidden] { display: none; }
+.shield-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin: 14px 0; }
+.shield-cards .card { display: flex; flex-direction: column; }
+.shield-cards .card p { margin: 0 0 4px; }
+.shield-cards .card .row:last-child { margin-top: auto; padding-top: 6px; }
+.shield-cards .toggle { margin: 4px 0; }
+.shield-wait { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.shield-result { margin-top: 4px; }
+.shield-head { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.shield-head .grow { flex: 1; min-width: 0; }
+.shield-head h3 { word-break: break-all; }
+.shield-grade { width: 64px; height: 64px; flex: none; border-radius: 50%; border: 3px solid var(--line-2); display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.05; }
+.shield-grade b { font-size: 24px; }
+.shield-grade span { font-size: 11px; color: var(--muted); }
+.g-A { border-color: var(--accent-2); color: var(--accent-2); }
+.g-B { border-color: #8fd36b; color: #8fd36b; }
+.g-C { border-color: var(--warn); color: var(--warn); }
+.g-D { border-color: #ff8a4c; color: #ff8a4c; }
+.g-F { border-color: var(--danger); color: var(--danger); }
+.shield-findings { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.shield-finding { display: flex; gap: 10px; align-items: flex-start; background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--line-2); border-radius: 10px; padding: 9px 12px; }
+.shield-finding .grow { flex: 1; min-width: 0; }
+.shield-finding .mono { font-family: var(--mono); color: var(--muted); word-break: break-all; }
+.shield-finding .fix-text { margin-top: 3px; color: var(--text); opacity: .85; }
+.sev-icon { width: 18px; flex: none; text-align: center; font-weight: 700; }
+.sev-critical { border-left-color: var(--danger); } .sev-critical .sev-icon { color: var(--danger); }
+.sev-warning { border-left-color: var(--warn); } .sev-warning .sev-icon { color: var(--warn); }
+.sev-ok .sev-icon { color: var(--accent-2); }
+.list.activity .item.sev-critical { border-left: 3px solid var(--danger); }
+.list.activity .item.sev-warning { border-left: 3px solid var(--warn); }
+.shield-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.shield-clean { margin-top: 14px; color: var(--accent-2); font-weight: 600; }
+.shield-cmds { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow: auto; }
+.shield-warnbox { border-color: #5b4a1e; margin: 10px 0; padding: 10px 12px; }
+.shield-mini { margin-left: 8px; font-size: 11px; padding: 1px 7px; border: 1px solid; border-radius: 99px; }
+.shield-mon .row select { flex: none; min-width: 120px; }
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line-2); border-top-color: var(--accent); border-radius: 50%; animation: shield-spin .8s linear infinite; vertical-align: -2px; }
+@keyframes shield-spin { to { transform: rotate(360deg); } }

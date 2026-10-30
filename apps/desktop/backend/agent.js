@@ -10,6 +10,7 @@ const { XTOOLS, execX } = require('./xtools');
 const { GH_TOOLS, execGitHub } = require('./github');
 const { COMPUTER_TOOLS, COMPUTER_NAMES, execComputer, hideBanner } = require('./computer');
 const { DEV_TOOLS, DEV_NAMES, execDev } = require('./devtools');
+const { SHIELD_TOOLS, SHIELD_NAMES, execShield } = require('./shield');
 const GHNAMES = new Set(GH_TOOLS.map((t) => t.name));
 const models = require('./models');
 const { effectiveRisk } = require('./guard');
@@ -56,13 +57,13 @@ function systemPrompt(settings, conv, ctx = {}) {
     'Work step by step: inspect before you change things, prefer small precise edits (edit_file) over rewriting whole files, and verify your work (run it, read it back).',
     'Tool calls may need the user\'s approval; if one is denied, do not retry the same action — adapt or ask.',
     'Capabilities: full shell access (run_command, background jobs with job_start), remote servers over SSH (ssh_servers, ssh_exec, interactive ssh_shell, ssh_upload/ssh_download), documents (read_document for PDF/Word/Excel/PowerPoint, create_pdf with designed HTML+CSS, view_image), web (web_search, web_fetch, deep_research for cited reports), design (build HTML/CSS sites and PDFs, then check them visually with screenshot_page at desktop 1366 px and phone 390 px and fix what looks wrong; generate_image for illustrations/logos), firmware (arduino_setup, arduino_boards, arduino_compile, arduino_upload, serial_monitor, arduino_cli, open_arduino_ide — ESP32 FQBN esp32:esp32:esp32, ESP32-CAM esp32:esp32:esp32cam), vision (segment_image with SAM 3.1), speech (transcribe_audio). For multi-step engineering work: plan, do it step by step, build/run/test after each change, read errors and fix them until it works.',
-    'Hardware beyond Arduino: dev_environment (what is installed and connected: IDEs, SDKs, NVIDIA GPU/CUDA, boards on USB and on the network), dev_install, open_ide (Arduino, VS Code, Thonny, Raspberry Pi Imager, Nsight, SDK Manager), micropython (Pico/ESP32 MicroPython over USB with mpremote), pico_flash (.uf2 to a Pico in BOOTSEL), sd_card_image (Raspberry Pi SD cards — erases the drive, confirm first). Raspberry Pi and Jetson boards are worked on over SSH like servers. Security: security_check for servers and websites. Other models: ask_model gets a second opinion from another Muse model (e.g. muse-wonder-1.0 for hard reasoning or reviews).',
+    'Hardware beyond Arduino: dev_environment (what is installed and connected: IDEs, SDKs, NVIDIA GPU/CUDA, boards on USB and on the network), dev_install, open_ide (Arduino, VS Code, Thonny, Raspberry Pi Imager, Nsight, SDK Manager), micropython (Pico/ESP32 MicroPython over USB with mpremote), pico_flash (.uf2 to a Pico in BOOTSEL), sd_card_image (Raspberry Pi SD cards — erases the drive, confirm first). Raspberry Pi and Jetson boards are worked on over SSH like servers. Security: Carpathron Shield — shield_scan (project before publishing, server, website), shield_fix (built-in fixes with backups and lockout protection), shield_monitor (live monitoring); security_check is the quick text version. Other models: ask_model gets a second opinion from another Muse model (e.g. muse-wonder-1.0 for hard reasoning or reviews).',
     'Computer use: computer_view (screenshot / list_windows) and computer_act (click, type, key, scroll, drag, focus_window, open_app) control this Windows PC like a person — use them for desktop apps without an API (IDEs, installers, settings dialogs) and to test the apps you build; browser_view / browser_act drive the visible Muse Browser (open, elements, click by index, type, key, text) for websites and web apps. Always take a screenshot first, act, then check the new screenshot. Prefer direct tools (files, commands, APIs) when they can do the job — they are faster and more exact. Never type passwords, card or bank details, never solve CAPTCHAs, and ask before sending, deleting, buying or confirming anything irreversible.',
     'GitHub (when connected in Plugins): github_account, github_repos, github_create_repo, github_publish (commit + push a folder, creates the repo), github_clone, github_release (create a release and upload installers/APKs), github_issues, github_pulls, github_api. Never force-push unless the user asks.',
     'You can drive the Baby Carpathron robot car with robot_drive / robot_stop. Its camera is fixed to the car like a robot head: to look left/right/behind use robot_look (the car turns its body, photographs, turns back); robot_turn turns by degrees; robot_scan_room makes a room map. Voice notes from WhatsApp arrive as transcribed text.',
     'Answer in the user\'s language. Use Markdown. Be concise when reporting.',
     '## Honesty (no hallucinations)\n- Never invent facts, file contents, command output, prices, versions, URLs, API behaviour or test results. If you did not see it in a tool result or the conversation, you do not know it: check with a tool (read_file, run_command, web_search, web_fetch) or say plainly that you are not sure.\n- Do not claim something works, was created, deployed or fixed unless a tool result in this conversation proves it. Say what you verified and what you assume.\n- For current facts (prices, versions, news, people, rules) search the web and cite the sources. If sources disagree, say so.\n- If a request is ambiguous or impossible, say so instead of guessing.',
-    '## How to work\n- For any job with more than one step keep the task list up to date with task_update (pass the full list each time: pending / in_progress / done / blocked). Mark a task done only after checking it.\n- New messages can arrive while you work. Unless a message explicitly says to stop or cancel, keep every earlier task, add the new request to the task list and finish ALL tasks before your final answer.\n- Test before delivery: build it, run the tests, start the app and check it (screenshot_page, browser, computer); fix what fails and test again. Never hand over untested work as done.\n- If you get stuck (the same error twice), do not repeat the same call: read the error carefully, check logs and docs, web_search the exact error message, try another approach or tool. Mark a task blocked only when you truly need the user, and say exactly what is needed.\n- Work clean and professionally: keep files in the project folder in a sensible structure, put temporary files in the scratch folder and delete them when done, remove debug leftovers, never hard-code secrets (use .env + .gitignore), and leave servers tidy (no stray files in web roots).\n- Security: after setting up or changing anything reachable from the internet (servers, websites, APIs, domains) run security_check on it and fix what it reports.',
+    '## How to work\n- For any job with more than one step keep the task list up to date with task_update (pass the full list each time: pending / in_progress / done / blocked). Mark a task done only after checking it.\n- New messages can arrive while you work. Unless a message explicitly says to stop or cancel, keep every earlier task, add the new request to the task list and finish ALL tasks before your final answer.\n- Test before delivery: build it, run the tests, start the app and check it (screenshot_page, browser, computer); fix what fails and test again. Never hand over untested work as done.\n- If you get stuck (the same error twice), do not repeat the same call: read the error carefully, check logs and docs, web_search the exact error message, try another approach or tool. Mark a task blocked only when you truly need the user, and say exactly what is needed.\n- Work clean and professionally: keep files in the project folder in a sensible structure, put temporary files in the scratch folder and delete them when done, remove debug leftovers, never hard-code secrets (use .env + .gitignore), and leave servers tidy (no stray files in web roots).\n- Security: before publishing (ssh_upload, github_publish) run shield_scan on the project; publishing is blocked when it finds critical problems such as keys in browser code. After setting up or changing anything reachable from the internet run shield_scan on the server and the site, fix what it reports (shield_fix for built-in fixes, with the user\'s OK), and offer shield_monitor.',
   ];
   if (!sub) {
     lines.push('For big jobs that split into independent parts you may use the delegate tool to run sub-agents in parallel.');
@@ -100,7 +101,7 @@ const MUSE_RULES = [
   '- Keep the task list current with the app tool task_update (mcp__carpathron__task_update): full list each time, statuses pending / in_progress / done / blocked.',
   '- Messages that arrive while you work add to the task list unless they say stop. Finish all tasks before the final answer.',
   '- Test before delivery (build, run, check visually with screenshot_page / browser / computer). When stuck, change approach, search the exact error, do not repeat failing calls.',
-  '- Work clean: tidy project structure, temporary files removed, no secrets in code. Run security_check after changing anything public.',
+  '- Work clean: tidy project structure, temporary files removed, no secrets in code. Run shield_scan after changing anything public.',
 ].join('\n');
 const openTasks = (conv) => (conv.tasks || []).filter((t) => t.status === 'pending' || t.status === 'in_progress');
 const KNOWLEDGE_SEARCH = { name: 'knowledge_search', risk: 'read', description: 'Search this project\'s uploaded knowledge files (RAG) and return the most relevant passages with file names.', parameters: { type: 'object', properties: { query: { type: 'string' }, max_results: { type: 'integer' } }, required: ['query'] } };
@@ -555,7 +556,7 @@ class Agent {
 
   // ---------------------------------------------------------------- API-key engine
   toolSpecs(conv, { sub = false } = {}) {
-    const specs = [...BUILTIN, ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...KNOWLEDGE_TOOLS, ...this.mcp.toolSpecs()];
+    const specs = [...BUILTIN, ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...SHIELD_TOOLS, ...KNOWLEDGE_TOOLS, ...this.mcp.toolSpecs()];
     if (!sub) specs.push(TASK_TOOL);
     if (conv.projectId) specs.push(KNOWLEDGE_SEARCH);
     if (!sub) specs.push(DELEGATE);
@@ -739,6 +740,7 @@ class Agent {
         if (XNAMES.has(call.name)) return execX(call.name, args, ctx);
         if (COMPUTER_NAMES.has(call.name)) return execComputer(call.name, args, ctx);
         if (DEV_NAMES.has(call.name)) return execDev(call.name, args, ctx);
+        if (SHIELD_NAMES.has(call.name)) return execShield(call.name, args, ctx);
         if (GHNAMES.has(call.name)) return execGitHub(call.name, args, ctx);
         return execBuiltin(call.name, args, ctx);
       })();
@@ -785,7 +787,7 @@ class Agent {
     return {
       workspace: conv.workspace, robot: this.robot, camera: this.camera, mapper: this.mapper, signal: rt.abort.signal,
       remote: this.remote, remoteServer: rs ? rs.id : null, remotePath: rs ? (conv.remote.path || rs.defaultPath || '') : null,
-      media: this.media, api: this.api, jobs: this.jobs, settings: s, dataDir: this.dataDir, model: conv.model || s.model, github: this.github,
+      media: this.media, api: this.api, jobs: this.jobs, settings: s, dataDir: this.dataDir, model: conv.model || s.model, github: this.github, shield: this.shield,
       computerState: this.screenState(conv.id), requestStop: () => this.stop(conv.id),
       ...extra,
     };
@@ -908,7 +910,7 @@ class Agent {
       env: { ELECTRON_RUN_AS_NODE: '1', MC_URL: `https://127.0.0.1:${b.port}`, MC_TOKEN: b.token, MC_CONV: conv.id, MC_CA: b.ca },
     };
   }
-  bridgeList() { return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...KNOWLEDGE_TOOLS, TASK_TOOL]; }
+  bridgeList() { return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...SHIELD_TOOLS, ...KNOWLEDGE_TOOLS, TASK_TOOL]; }
   bridgeSpecs() { return new Map(this.bridgeList().map((t) => [t.name, t])); }
   bridgeTools() {
     return this.bridgeList().map(({ name, description, parameters }) => ({ name, description, parameters }));
@@ -933,7 +935,7 @@ class Agent {
       let output = k;
       if (output === null) {
         const ctx = this.toolCtx(conv, rt, { onPhoto, status: (t) => this.status(conv, t) });
-        output = XNAMES.has(name) ? await execX(name, args, ctx) : GHNAMES.has(name) ? await execGitHub(name, args, ctx) : COMPUTER_NAMES.has(name) ? await execComputer(name, args, ctx) : DEV_NAMES.has(name) ? await execDev(name, args, ctx) : await execBuiltin(name, args, ctx);
+        output = XNAMES.has(name) ? await execX(name, args, ctx) : GHNAMES.has(name) ? await execGitHub(name, args, ctx) : COMPUTER_NAMES.has(name) ? await execComputer(name, args, ctx) : DEV_NAMES.has(name) ? await execDev(name, args, ctx) : SHIELD_NAMES.has(name) ? await execShield(name, args, ctx) : await execBuiltin(name, args, ctx);
       }
       return { output: clip(output), images: images.slice(-3) };
     } catch (e) { return { output: `Error: ${e.message || e}`, isError: true, images }; }

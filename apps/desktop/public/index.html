@@ -20,6 +20,7 @@
       <nav class="nav" id="nav">
         <button data-view="projects"><i>▦</i> Projects</button>
         <button data-view="remote"><i>🌐</i> Remote</button>
+        <button data-view="shield"><i>🛡</i> Shield <b class="nav-badge" id="shieldNavBadge" hidden></b></button>
         <button data-view="plugins"><i>🧩</i> Plugins</button>
         <button data-view="memory"><i>◎</i> Memory</button>
         <button data-view="skills"><i>/</i> Skills</button>
@@ -103,6 +104,21 @@
           <div class="row"><button class="btn" id="btnImportKey">Import key</button><button class="btn primary" id="btnGenKey">＋ Generate key</button></div></div>
         <p class="muted small">Keys made here are stored encrypted in the app. Use <b>Install on server</b> to add a key to a server's <code>authorized_keys</code> and switch that server to key login (safer than passwords). Keys from <code>%USERPROFILE%\.ssh</code> are listed too.</p>
         <div class="list" id="keyList"></div>
+      </section>
+
+      <!-- SHIELD -->
+      <section class="view page" id="view-shield" hidden>
+        <div class="page-head"><h1>🛡 Carpathron Shield</h1></div>
+        <p class="muted">Security for what you build and where you publish it: secrets in code before publishing, server hardening, website checks and live monitoring. Fixes are backed up, and firewall/SSH fixes undo themselves if the app cannot log in again. Only scan projects, servers and sites you own or manage.</p>
+        <div class="shield-scan" id="shieldScan"></div>
+        <div id="shieldResult"></div>
+        <div class="page-head" style="margin-top:22px"><h2>Live monitoring</h2></div>
+        <p class="muted small">Checks run from this PC over SSH while the app is open: new open ports, password-guessing bursts, new logins, full disk, high load, server down, and <code>/.env</code> or <code>/.git</code> exposed on your sites. Nothing is installed on the server.</p>
+        <div class="list" id="shieldServers"></div>
+        <div class="page-head" style="margin-top:22px"><h2>Alerts</h2><button class="btn tiny" id="shieldClear">Clear</button></div>
+        <div class="list activity" id="shieldEvents"></div>
+        <div class="page-head" style="margin-top:22px"><h2>Fix history</h2></div>
+        <div class="list" id="shieldHistory"></div>
       </section>
 
       <!-- PLUGINS -->
@@ -231,5 +247,6 @@
   <script src="app.js"></script>
   <script src="xr-robot.js"></script>
   <script src="robot.js"></script>
+  <script src="shield.js"></script>
 </body>
 </html>

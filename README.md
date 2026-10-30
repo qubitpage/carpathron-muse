@@ -22,13 +22,13 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 
 <p align="center">
   <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Carpathron-Robotics-Coding-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Carpathron--Robotics--Coding--Setup.exe_v1.7.0_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
-  <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.5.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.5.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.6.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
 | 🧠 **Carpathron Robotics & Coding** – Windows 10 / 11 / Server 2016+ (v1.7.0) | [**Carpathron-Robotics-Coding-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Carpathron-Robotics-Coding-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. Updating from Muse Carpathron keeps all chats, settings and servers. Microsoft Store version: coming soon. |
-| 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.5) | [**CarpathronAvatar-1.1.5.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.5.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. The Meta Horizon Store version is in review. |
+| 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.6) | [**CarpathronAvatar-1.1.6.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. The Meta Horizon Store version is in review. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 
 All files of this version: **[Release v1.7.0](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.7.0)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
@@ -157,7 +157,7 @@ All files of this version: **[Release v1.7.0](https://github.com/qubitpage/carpa
 1. **Car:** assemble the kit, flash [`firmware/carpathron_car`](firmware/carpathron_car) with Arduino IDE (esp32 core **2.0.12**), put it on your Wi-Fi ([CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md)).
 2. **PC:** install Carpathron Robotics & Coding ([Carpathron-Robotics-Coding-Setup.exe](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Carpathron-Robotics-Coding-Setup.exe), or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
 3. **Phone:** Settings → WhatsApp → scan the QR. Send `/help` or a voice note.
-4. **Quest 3S:** sideload [`CarpathronAvatar-1.1.5.apk`](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.5.apk) (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
+4. **Quest 3S:** sideload [`CarpathronAvatar-1.1.6.apk`](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk) (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
 
 The full walk-through is in the **[A-to-Z guide](docs/GUIDE.md)**.
 

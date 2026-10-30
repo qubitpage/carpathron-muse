@@ -201,7 +201,7 @@ class DesktopHelper {
   constructor(log) { this.log = log || (() => {}); this.proc = null; this.ready = null; this.waiters = new Map(); this.seq = 0; this.buf = ''; }
   start() {
     if (this.ready) return this.ready;
-    if (!IS_WIN && !process.env.MC_DESKTOP_HELPER) return Promise.reject(new Error('Desktop control works on Windows (the Carpathron Robotics & Coding desktop app).'));
+    if (!IS_WIN && !process.env.MC_DESKTOP_HELPER) return Promise.reject(new Error('Desktop control works on Windows (the Muse Carpathron desktop app).'));
     const cmd = process.env.MC_DESKTOP_HELPER || 'powershell.exe';
     // -EncodedCommand (UTF-16LE base64): no quoting problems with the script on the Windows command line
     const args = process.env.MC_DESKTOP_HELPER ? [] : ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(PS_HOST, 'utf16le').toString('base64')];
@@ -290,7 +290,7 @@ class MuseBrowser {
   constructor() { this.win = null; this.scale = 1; }
   async ensure(width) {
     const e = electron();
-    if (!e) throw new Error('The Muse Browser needs the Carpathron Robotics & Coding desktop app.');
+    if (!e) throw new Error('The Muse Browser needs the Muse Carpathron desktop app.');
     if (!this.win || this.win.isDestroyed()) {
       this.win = new e.BrowserWindow({ width: width || 1280, height: 860, title: 'Muse Browser', show: false, autoHideMenuBar: true, webPreferences: { partition: 'persist:muse-browser', sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
       // Popups open in the same window (web addresses only). A page may not navigate itself to file:// or other

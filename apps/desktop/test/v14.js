@@ -90,7 +90,7 @@ function tinyPdf(pages) {
   const sendMsg = async (c, text, extra = {}) => { await api(`/api/convs/${c.id}/send`, { text, ...extra }); await waitIdle(c.id); return api(`/api/convs/${c.id}`); };
   const toolMsg = (full) => full.messages.find((m) => m.role === 'tool');
 
-  console.log('Carpathron Robotics & Coding 1.4 tests');
+  console.log('Muse Carpathron 1.4 tests');
 
   await step('built-in skills are added once (design-website, design-pdf, research, firmware, server-setup, carpathron-build)', async () => {
     const sk = (await api('/api/skills')).map((x) => x.name);

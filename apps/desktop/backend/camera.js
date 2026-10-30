@@ -1,6 +1,6 @@
 // Robot camera: takes a JPEG photo from
 //  1) a snapshot URL (ESP32-CAM: http://<ip>/capture, or any IP-camera / phone camera app snapshot URL), or
-//  2) the PC webcam, captured by the open Carpathron Robotics & Coding window.
+//  2) the PC webcam, captured by the open Muse Carpathron window.
 // Photos are saved in <workspace>/photos.
 'use strict';
 const fs = require('fs');
@@ -34,7 +34,7 @@ class Camera {
       if (buffer.length < 200 || buffer[0] !== 0xff || buffer[1] !== 0xd8) throw new Error(`Camera at ${url} did not return a JPEG photo. For ESP32-CAM use http://<car-ip>/capture`);
       source = 'robot camera';
     } else {
-      if (!this.hasWindow()) throw new Error('No camera: set the robot camera URL in Robot settings, or open Carpathron Robotics & Coding on a phone and tick "Use this device\'s camera".');
+      if (!this.hasWindow()) throw new Error('No camera: set the robot camera URL in Robot settings, or open Muse Carpathron on a phone and tick "Use this device\'s camera".');
       const c = this.pickClient ? this.pickClient() : null;
       buffer = await this.fromWindow();
       source = c && c.offersCamera ? 'phone camera' : 'PC webcam';
@@ -62,7 +62,7 @@ class Camera {
     if (!p) return false;
     this.pending.delete(id);
     clearTimeout(p.timer);
-    if (error) p.reject(new Error(/not found|NotFound/i.test(error) ? 'No webcam found on this PC. Use a phone as the robot camera (open Carpathron Robotics & Coding on the phone → Robot → "Use this device\'s camera"), or set an ESP32-CAM URL.' : `Camera: ${error}`));
+    if (error) p.reject(new Error(/not found|NotFound/i.test(error) ? 'No webcam found on this PC. Use a phone as the robot camera (open Muse Carpathron on the phone → Robot → "Use this device\'s camera"), or set an ESP32-CAM URL.' : `Camera: ${error}`));
     else p.resolve(Buffer.from(String(dataBase64 || ''), 'base64'));
     return true;
   }

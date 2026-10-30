@@ -21,7 +21,7 @@ async function step(name, fn) {
 const lanIp = () => { for (const l of Object.values(os.networkInterfaces())) for (const a of l || []) if (a.family === 'IPv4' && !a.internal) return a.address; return null; };
 
 (async () => {
-  console.log('Carpathron Robotics & Coding security tests');
+  console.log('Muse Carpathron security tests');
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-sec-'));
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-sec-ws-'));
   fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({

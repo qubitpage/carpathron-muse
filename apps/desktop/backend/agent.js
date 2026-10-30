@@ -47,7 +47,7 @@ function systemPrompt(settings, conv, ctx = {}) {
   const lines = [
     sub
       ? 'You are a sub-agent of Carpathron. Complete only the task you were given, using tools as needed, then reply with a concise final report of what you did and found.'
-      : 'You are Carpathron (the Carpathron Robotics & Coding app), an agentic assistant running on the user\'s computer, powered by Meta Muse models. You work like a local bridge: you see the user\'s files through tools, decide what to do, and your tool calls are executed on the user\'s PC.',
+      : 'You are Carpathron (the Muse Carpathron app), an agentic assistant running on the user\'s computer, powered by Meta Muse models. You work like a local bridge: you see the user\'s files through tools, decide what to do, and your tool calls are executed on the user\'s PC.',
     `Operating system: ${os.type()} ${os.release()} (${process.platform}). Shell for run_command: ${process.platform === 'win32' ? 'Windows PowerShell' : 'bash'}.`,
     ctx.remote
       ? `WORKING ON REMOTE SERVER "${ctx.remote.name}" (${ctx.remote.username}@${ctx.remote.host}, ${ctx.remote.os || 'linux'}) over SSH. list_dir, read_file, write_file, edit_file, search and run_command run ON THAT SERVER, in ${ctx.remote.path} (relative paths are there). Use ssh_upload / ssh_download to move files between this PC (${conv.workspace}) and the server. Be careful with destructive commands on servers (rm -rf, firewall, reboots): say what you will do first.`
@@ -770,7 +770,7 @@ class Agent {
     rt.errKeys = rt.errKeys || {};
     const same = rt.errKeys[key] = (rt.errKeys[key] || 0) + 1;
     if (same >= 2 || rt.errStreak >= 3) {
-      return `${out}\n\n[Carpathron Robotics & Coding: this has failed ${same >= 2 ? `${same} times with the same call` : `${rt.errStreak} times in a row`}. Do not repeat the same call. Read the error closely, check logs, config and docs, web_search the exact error message, then try a different approach or tool. If it is truly blocked, mark the task blocked with what you need from the user.]`;
+      return `${out}\n\n[Muse Carpathron: this has failed ${same >= 2 ? `${same} times with the same call` : `${rt.errStreak} times in a row`}. Do not repeat the same call. Read the error closely, check logs, config and docs, web_search the exact error message, then try a different approach or tool. If it is truly blocked, mark the task blocked with what you need from the user.]`;
     }
     return out;
   }
@@ -972,9 +972,9 @@ class Agent {
     const past = this.searchChats(query, conv.id, 2).filter((h) => h.score > 3);
     if (past.length) parts.push(`<related earlier chats>\n${past.map((h) => `"${h.conv}" (${h.date}):\n${clip(h.text, 900)}`).join('\n---\n')}\n</related earlier chats>`);
     if (this.settings().systemPrompt && firstTurn) parts.push(`<user instructions>\n${this.settings().systemPrompt}\n</user instructions>`);
-    if (firstTurn) parts.push(`<working rules from Carpathron Robotics & Coding>\n${MUSE_RULES}\n</working rules>`);
+    if (firstTurn) parts.push(`<working rules from Muse Carpathron>\n${MUSE_RULES}\n</working rules>`);
     if ((conv.tasks || []).length) parts.push(`<task list>\n${conv.tasks.map((t, i) => `${i + 1}. [${t.status}] ${t.title}${t.note ? ` — ${t.note}` : ''}`).join('\n')}\n</task list>`);
-    return parts.length ? `${parts.join('\n\n')}\n\n(Context above comes from the Carpathron Robotics & Coding app. Use it if relevant.)\n\n` : '';
+    return parts.length ? `${parts.join('\n\n')}\n\n(Context above comes from the Muse Carpathron app. Use it if relevant.)\n\n` : '';
   }
 
   async runMuse(conv, text, rt, displayText = text) { // eslint-disable-line no-param-reassign

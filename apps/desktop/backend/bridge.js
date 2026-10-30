@@ -1,5 +1,5 @@
 // MCP bridge: Muse Code (the "Meta account" engine) starts this small stdio MCP server, and every tool call is
-// forwarded to the running Carpathron Robotics & Coding app. So Muse Code gets the same extra tools as the API engine:
+// forwarded to the running Muse Carpathron app. So Muse Code gets the same extra tools as the API engine:
 // SSH servers, documents and PDFs, screenshots, web search and research, Arduino, Muse Image, SAM 3.1, robot.
 'use strict';
 const fs = require('fs');
@@ -28,7 +28,7 @@ function call(method, p, body, timeoutMs = 3600000) {
       res.on('end', () => {
         const txt = Buffer.concat(chunks).toString('utf8');
         try { const j = JSON.parse(txt); if (res.statusCode >= 400) reject(new Error(j.error || `HTTP ${res.statusCode}`)); else resolve(j); }
-        catch { reject(new Error(`Bad answer from Carpathron Robotics & Coding (${res.statusCode})`)); }
+        catch { reject(new Error(`Bad answer from Muse Carpathron (${res.statusCode})`)); }
       });
     });
     req.on('timeout', () => req.destroy(new Error('timed out')));

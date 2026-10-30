@@ -21,8 +21,8 @@ exports.default = async function afterPack(ctx) {
   vi.setFileVersion(v[0], v[1], v[2], 0, 1033);
   vi.setProductVersion(v[0], v[1], v[2], 0, 1033);
   vi.setStringValues({ lang: 1033, codepage: 1200 }, {
-    FileDescription: 'Carpathron Robotics & Coding',
-    ProductName: 'Carpathron Robotics & Coding',
+    FileDescription: 'Muse Carpathron',
+    ProductName: 'Muse Carpathron',
     CompanyName: 'Qubitpage LIMITED',
     OriginalFilename: `${pkg.productFilename}.exe`,
     InternalName: pkg.productFilename,

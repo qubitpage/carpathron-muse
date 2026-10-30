@@ -1,4 +1,4 @@
-// Carpathron Robotics & Coding — front end (desktop window, Quest browser, phone browser)
+// Muse Carpathron — front end (desktop window, Quest browser, phone browser)
 'use strict';
 (() => {
   const $ = (s, el = document) => el.querySelector(s);
@@ -882,7 +882,7 @@
   }
   $('#memForm').onsubmit = async (e) => { e.preventDefault(); const t = $('#memInput').value.trim(); if (!t) return; await api('/api/memory', { body: { text: t } }); $('#memInput').value = ''; renderMemory(); };
   $('#autoMemory').onchange = async (e) => { S.settings = await api('/api/settings', { body: { autoMemory: e.target.checked } }); toast(e.target.checked ? 'Automatic memory on' : 'Automatic memory off'); };
-  $('#btnMemClear').onclick = async () => { if (confirm('Delete everything Carpathron Robotics & Coding remembers about you?')) { await api('/api/memory', { method: 'DELETE' }); renderMemory(); } };
+  $('#btnMemClear').onclick = async () => { if (confirm('Delete everything Muse Carpathron remembers about you?')) { await api('/api/memory', { method: 'DELETE' }); renderMemory(); } };
 
   // ------------------------------------------------------------ skills
   function renderSkills() {
@@ -1082,7 +1082,7 @@
     const testTo = h('input', { placeholder: 'Test: send to number' });
     body.append(h('div', { class: 'card', id: 'waCard' },
       h('h3', {}, 'WhatsApp remote control'),
-      h('p', { class: 'muted small' }, 'Control Carpathron Robotics & Coding from your phone. Only your own "Message yourself" chat and the numbers below can give commands. Send /help on WhatsApp for commands; approvals are answered with yes / no. Keep the app running (it stays in the tray when you close the window).'),
+      h('p', { class: 'muted small' }, 'Control Muse Carpathron from your phone. Only your own "Message yourself" chat and the numbers below can give commands. Send /help on WhatsApp for commands; approvals are answered with yes / no. Keep the app running (it stays in the tray when you close the window).'),
       field('Allowed phone numbers (with country code)', allowed),
       h('b', {}, 'A · Personal WhatsApp (QR code, like WhatsApp Web)'),
       h('p', { class: 'small', style: 'color:var(--warn)' }, 'Unofficial connection (Baileys). WhatsApp may restrict numbers that automate messages — use a spare number if possible.'),
@@ -1154,9 +1154,36 @@
     }
     await renderAccess();
 
+    // --- updates (installer version: from qubitpage.com; Microsoft Store version: by the Store)
+    const upd = window.desktop && window.desktop.update;
+    if (upd) {
+      const card = h('div', { class: 'card' }, h('h3', {}, 'Updates'));
+      const autoOn = h('input', { type: 'checkbox' });
+      autoOn.checked = s.autoUpdate !== false;
+      autoOn.onchange = async () => { S.settings = await api('/api/settings', { body: { autoUpdate: autoOn.checked } }); toast(autoOn.checked ? 'Automatic updates on' : 'Automatic updates off'); };
+      const line = h('p', { class: 'small' });
+      const btn = h('button', { class: 'btn small' }, 'Check now');
+      const inst = h('button', { class: 'btn small primary', style: 'display:none' }, 'Restart and update');
+      const draw = (st) => {
+        if (!st) return;
+        if (!st.enabled) { line.textContent = st.reason || 'Updates are not available in this version.'; btn.style.display = 'none'; autoOn.disabled = true; return; }
+        const txt = { idle: 'Not checked yet.', checking: 'Checking qubitpage.com for updates…', current: `You have the latest version (${S.boot.version}).`,
+          downloading: `Downloading version ${st.version}… ${st.progress || 0} %`, ready: `Version ${st.version} is ready. It installs when you restart (or the next time you close the app).`,
+          error: `Could not check for updates: ${st.error}` }[st.status] || st.status;
+        line.textContent = txt;
+        inst.style.display = st.status === 'ready' ? '' : 'none';
+      };
+      btn.onclick = async () => draw(await upd.check());
+      inst.onclick = () => upd.install();
+      upd.onChange(draw);
+      draw(await upd.state());
+      card.append(h('label', { class: 'inline toggle' }, autoOn, ' Download and install updates automatically (from qubitpage.com)'), line, h('div', { class: 'row' }, btn, inst));
+      body.append(card);
+    }
+
     // --- about
     body.append(h('div', { class: 'card' }, h('h3', {}, 'About'),
-      h('p', { class: 'small muted' }, `Carpathron Robotics & Coding ${S.boot.version} · ${S.boot.platform} · Data stays on this PC except what is sent to Meta's model for each message (see Activity).`)));
+      h('p', { class: 'small muted' }, `Muse Carpathron ${S.boot.version} · ${S.boot.platform} · Data stays on this PC except what is sent to Meta's model for each message (see Activity).`)));
   }
   // ------------------------------------------------------------ Remote page
   async function renderRemote() {
@@ -1431,16 +1458,35 @@
       wa.cloud.tunnelUrl ? h('span', { class: 'access-url' }, `${wa.cloud.tunnelUrl}${wa.cloud.webhookPath}`) : h('span', { class: 'small muted' }, 'Webhook path: /whatsapp/webhook')));
   }
 
+  // ------------------------------------------------------------ update banner (desktop window only)
+  function updateBanner() {
+    const upd = window.desktop && window.desktop.update;
+    if (!upd) return;
+    let bar = null;
+    const draw = (st) => {
+      if (!st || st.status !== 'ready') { if (bar) { bar.remove(); bar = null; } return; }
+      if (bar) return;
+      bar = h('div', { class: 'update-bar' },
+        h('span', {}, `⬆️ Version ${st.version} is ready.`),
+        h('button', { class: 'btn small primary', onclick: () => upd.install() }, 'Restart and update'),
+        h('button', { class: 'btn small', onclick: () => { bar.remove(); bar = null; toast('It installs the next time you close the app.'); } }, 'Later'));
+      document.body.append(bar);
+    };
+    upd.onChange(draw);
+    upd.state().then(draw).catch(() => {});
+  }
+
   // ------------------------------------------------------------ boot
   async function boot() {
     try { S.boot = await api('/api/bootstrap'); }
     catch (e) {
       document.body.innerHTML = '';
-      document.body.append(h('div', { style: 'padding:40px;max-width:560px;margin:auto' }, h('h2', {}, 'Carpathron Robotics & Coding'), h('p', {}, e.message)));
+      document.body.append(h('div', { style: 'padding:40px;max-width:560px;margin:auto' }, h('h2', {}, 'Muse Carpathron'), h('p', {}, e.message)));
       return;
     }
     S.settings = S.boot.settings; S.convs = S.boot.convs; S.projects = S.boot.projects; S.skills = S.boot.skills;
     connectWs();
+    updateBanner();
     renderFoot();
     newChat();
     const e = S.boot.engines;

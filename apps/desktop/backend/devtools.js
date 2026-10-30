@@ -326,7 +326,7 @@ async function askModel(args, ctx) {
   const kind = models.capsFor(model).kind;
   if (kind && kind !== 'chat') throw new Error(`${model} is not a text model (${kind}). Use ${kind === 'image' ? 'generate_image' : kind === 'segment' ? 'segment_image' : 'transcribe_audio'} instead.`);
   ctx.status && ctx.status(`Asking ${model}…`);
-  const res = await ctx.api.complete({ model, effort: args.effort, messages: [{ role: 'system', content: 'You are consulted by another AI agent (Carpathron Robotics & Coding). Answer precisely. Say clearly when you are not sure; never invent facts.' }, { role: 'user', content: String(args.prompt || '') }], tools: [], signal: ctx.signal, onText: () => {} });
+  const res = await ctx.api.complete({ model, effort: args.effort, messages: [{ role: 'system', content: 'You are consulted by another AI agent (Muse Carpathron). Answer precisely. Say clearly when you are not sure; never invent facts.' }, { role: 'user', content: String(args.prompt || '') }], tools: [], signal: ctx.signal, onText: () => {} });
   return `${model} answered:\n\n${res.content || '(empty answer)'}`;
 }
 

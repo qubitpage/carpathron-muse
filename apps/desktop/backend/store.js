@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   apiKey: '',
   apiBase: 'https://api.meta.ai/v1',
   apiWire: 'auto', // auto (Responses API, falls back to Chat Completions) | responses | chat
+  autoUpdate: true, // installer builds: download updates from qubitpage.com and install them when the app closes
   contextTokens: 0, // 0 = automatic (70 % of the model's context window, ~730k tokens for Muse)
   model: 'muse-spark-1.3',
   museModel: '',

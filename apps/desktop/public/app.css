@@ -342,3 +342,6 @@ body[data-view="chat"] .mobile-menu { display: none !important; }
 
 #btnMic.recording { color: #fff; background: #d93025; border-radius: 8px; padding: 0 8px; min-width: 56px; animation: micpulse 1.2s infinite; }
 @keyframes micpulse { 50% { opacity: .7; } }
+
+.update-bar { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 60; display: flex; gap: 10px; align-items: center;
+  background: var(--panel-2); border: 1px solid var(--accent, #f5822a); padding: 8px 12px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }

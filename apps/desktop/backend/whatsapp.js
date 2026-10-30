@@ -1,4 +1,4 @@
-// Control Carpathron Robotics & Coding from a phone over WhatsApp.
+// Control Muse Carpathron from a phone over WhatsApp.
 //  - Personal WhatsApp: pair like WhatsApp Web with a QR code (unofficial, Baileys). Use "Message yourself" or an allowed number.
 //  - WhatsApp Business Cloud API (official, Meta): webhook + Graph API sending. Needs a public URL (Cloudflare tunnel helper included).
 // Only the owner's own chat and numbers in the allow-list can control the app.
@@ -10,7 +10,7 @@ const { spawn } = require('child_process');
 const voice = require('./voice');
 
 const HELP = [
-  '*Carpathron Robotics & Coding* — commands:',
+  '*Muse Carpathron* — commands:',
   '/new — start a new chat',
   '/stop — stop the current task',
   '/mode ask|auto|full|plan — approval mode',
@@ -256,7 +256,7 @@ class WhatsApp {
     const sock = makeWASocket({
       auth: state,
       ...(version ? { version } : {}),
-      browser: Browsers.windows('Carpathron Robotics & Coding'),
+      browser: Browsers.windows('Muse Carpathron'),
       logger: pino({ level: 'warn' }, { write: (line) => {
         this._libLogs = (this._libLogs || 0) + 1;
         if (this._libLogs > 60) return;
@@ -377,7 +377,7 @@ class WhatsApp {
     if (!sock || this.personal.status !== 'connected') throw new Error('Personal WhatsApp is not connected.');
     const me = String(sock.user?.id || '').split(':')[0].split('@')[0];
     const jid = `${me}@s.whatsapp.net`;
-    const sent = await sock.sendMessage(jid, { text: `${BOT_MARK}Carpathron Robotics & Coding is connected ✅\nReply in this chat with /help` });
+    const sent = await sock.sendMessage(jid, { text: `${BOT_MARK}Muse Carpathron is connected ✅\nReply in this chat with /help` });
     if (sent?.key?.id) this.sentIds.add(sent.key.id);
     this.log(`WhatsApp: test message sent to your own chat (${me.slice(0, 4)}…)`);
     return true;

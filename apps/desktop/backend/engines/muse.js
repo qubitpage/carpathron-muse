@@ -154,7 +154,7 @@ class MuseEngine {
         try {
           // sessionMcp: lets sessions receive the app's tools (MCP bridge). userInputDialogs: false — this app cannot
           // show Muse's question dialogs, so Muse must not wait on one (it would hang the turn).
-          return await hs.initialize({ clientInfo: { name: 'muse_carpathron', title: 'Carpathron Robotics & Coding', version: '1.5.0' }, capabilities: { requestedCapabilities: ['sessionMcp'], userInputDialogs: false } });
+          return await hs.initialize({ clientInfo: { name: 'muse_carpathron', title: 'Muse Carpathron', version: '1.5.0' }, capabilities: { requestedCapabilities: ['sessionMcp'], userInputDialogs: false } });
         } catch (e) {
           await hs.close().catch(() => {});
           throw new Error(`Could not start Muse Code (${bin}): ${e.message}${stderr.length ? '\n' + stderr.join('').slice(-800) : ''}`);
@@ -262,7 +262,7 @@ class MuseEngine {
   // Windows tried to run the title words — "Windows cannot find 'sandbox'".)
   static openConsole(name, lines, cwd) {
     const file = path.join(os.tmpdir(), `muse-carpathron-${name}.ps1`);
-    fs.writeFileSync(file, '\ufeff' + [`$Host.UI.RawUI.WindowTitle = 'Carpathron Robotics & Coding - ${name}'`, ...lines].join('\r\n'), 'utf8');
+    fs.writeFileSync(file, '\ufeff' + [`$Host.UI.RawUI.WindowTitle = 'Muse Carpathron - ${name}'`, ...lines].join('\r\n'), 'utf8');
     const child = spawn('powershell.exe', ['-NoLogo', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', file], { cwd, detached: true, windowsHide: false, stdio: 'ignore' });
     child.on('error', () => {});
     child.unref();
@@ -299,7 +299,7 @@ class MuseEngine {
       "Write-Host 'Check:' -ForegroundColor Cyan",
       '& $m sandbox windows check',
       "Write-Host ''",
-      "Write-Host 'Done. Go back to Carpathron Robotics & Coding and press Settings -> Test (it restarts Muse Code). If commands still fail, the app runs Muse Code without the sandbox automatically.' -ForegroundColor Green",
+      "Write-Host 'Done. Go back to Muse Carpathron and press Settings -> Test (it restarts Muse Code). If commands still fail, the app runs Muse Code without the sandbox automatically.' -ForegroundColor Green",
     ], cwd);
   }
 
@@ -311,7 +311,7 @@ class MuseEngine {
       "Write-Host 'Installing Meta Muse Code (official installer from dev.meta.ai)...' -ForegroundColor Green",
       'irm https://dev.meta.ai/install.ps1 | iex',
       "Write-Host ''",
-      "Write-Host 'Done. Go back to Carpathron Robotics & Coding and press Re-check.' -ForegroundColor Green",
+      "Write-Host 'Done. Go back to Muse Carpathron and press Re-check.' -ForegroundColor Green",
     ], cwd);
   }
 

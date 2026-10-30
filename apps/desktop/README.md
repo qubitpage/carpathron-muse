@@ -40,3 +40,22 @@ app and saved encrypted in `%APPDATA%\Muse Carpathron\data` on the user's PC.
 ## License
 
 See [`LICENSE`](../../LICENSE) in the repository root.
+
+## Two editions, one code base
+
+| Edition | Name | Where it ships | Update channel |
+|---|---|---|---|
+| Hackathon / open source | **Muse Carpathron** | installer (`Muse-Carpathron-Setup-<version>.exe`, GitHub releases) | `muse` |
+| Commercial | **Carpathron Robotics & Coding** | Microsoft Store (MSIX) and installer | `store` (installer only) |
+
+The commercial edition is the main source; `node build/edition.js muse <copy>` turns a copy of it into this edition
+(names, installer, guide install section, update channel). Every feature is written once and reaches both.
+
+## Automatic updates
+
+Installer builds update themselves with `electron-updater` (`updater.js`): they read
+`https://qubitpage.com/downloads/carpathron/<channel>.yml` every 6 hours, download the new installer in the
+background and install it on restart (*Settings → Updates*, banner *Restart and update*). qubitpage.com answers from the
+assets of the latest GitHub release of this repository, so a release = upload `muse.yml`, `store.yml`, both installers
+and their `.blockmap` files. The Microsoft Store (MSIX) version is updated by the Store, never by the app.
+Test: `npm run test:electron` (includes `test/updater-feed.js`: feed → redirect → download → SHA-512 check).

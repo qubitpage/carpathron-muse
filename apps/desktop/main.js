@@ -1,9 +1,10 @@
-// Carpathron Robotics & Coding — Windows desktop app (Electron shell around the local backend).
+// Muse Carpathron — Windows desktop app (Electron shell around the local backend).
 'use strict';
 const path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow, shell, Menu, ipcMain, dialog, Tray, nativeImage, session } = require('electron');
 const { startServer } = require('./backend/server');
+const updates = require('./updater');
 
 let win = null;
 let tray = null;
@@ -49,6 +50,7 @@ else {
   ipcMain.handle('open-path', (_e, p) => shell.openPath(String(p)));
   ipcMain.handle('open-external', (_e, u) => { if (/^https?:\/\//.test(String(u))) shell.openExternal(String(u)); });
   ipcMain.handle('app-version', () => app.getVersion());
+  updates.setup({ ipcMain, log, autoEnabled: () => !srv || srv.store.settings.autoUpdate !== false });
   ipcMain.handle('focus-window', () => { const w = BrowserWindow.getAllWindows()[0]; if (w) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); } });
 
   async function createWindow() {
@@ -57,9 +59,9 @@ else {
     } catch (e) {
       log(`startup failed: ${e.stack || e.message}`);
       const busy = e.code === 'EADDRINUSE';
-      dialog.showErrorBox('Carpathron Robotics & Coding', busy
-        ? 'Port 8443 is already used by another program (maybe the old Carpathron Control Center). Close it and start Carpathron Robotics & Coding again.'
-        : `Carpathron Robotics & Coding could not start:\n${e.message}\n\nLog: ${logFile()}`);
+      dialog.showErrorBox('Muse Carpathron', busy
+        ? 'Port 8443 is already used by another program (maybe the old Carpathron Control Center). Close it and start Muse Carpathron again.'
+        : `Muse Carpathron could not start:\n${e.message}\n\nLog: ${logFile()}`);
       app.quit();
       return;
     }
@@ -79,7 +81,7 @@ else {
     Menu.setApplicationMenu(null);
     win = new BrowserWindow({
       width: 1360, height: 880, minWidth: 960, minHeight: 620,
-      title: 'Carpathron Robotics & Coding',
+      title: 'Muse Carpathron',
       backgroundColor: '#0d0f12',
       icon: path.join(__dirname, 'public', 'icon.png'),
       show: false,
@@ -100,9 +102,9 @@ else {
     });
     try {
       tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'public', 'tray.png')).resize({ width: 16, height: 16 }));
-      tray.setToolTip('Carpathron Robotics & Coding');
+      tray.setToolTip('Muse Carpathron');
       tray.setContextMenu(Menu.buildFromTemplate([
-        { label: 'Open Carpathron Robotics & Coding', click: () => { win.show(); win.focus(); } },
+        { label: 'Open Muse Carpathron', click: () => { win.show(); win.focus(); } },
         { type: 'separator' },
         { label: 'Quit', click: () => { quitting = true; app.quit(); } },
       ]));

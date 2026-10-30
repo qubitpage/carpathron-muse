@@ -31,7 +31,7 @@ function markdownToHtml(md, title = 'Document') {
 
 async function withWindow(width, height, fn) {
   const e = electron();
-  if (!e) throw new Error('This tool needs the Carpathron Robotics & Coding desktop app (it uses the built-in Chromium).');
+  if (!e) throw new Error('This tool needs the Muse Carpathron desktop app (it uses the built-in Chromium).');
   // Own in-memory session: no access to the app's login cookie or its local-certificate trust.
   const win = new e.BrowserWindow({ show: false, width, height, webPreferences: { partition: 'render-tools', sandbox: true, contextIsolation: true, nodeIntegration: false, offscreen: false, backgroundThrottling: false } });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

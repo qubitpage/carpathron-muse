@@ -1,20 +1,20 @@
-# Carpathron Robotics & Coding — the complete guide
+# Muse Carpathron — the complete guide
 
-Carpathron Robotics & Coding is a Windows app that turns **Meta Muse** models into a working assistant on your PC: it chats,
+Muse Carpathron is a Windows app that turns **Meta Muse** models into a working assistant on your PC: it chats,
 writes and runs code, works on your **remote servers over SSH**, publishes to **GitHub**, writes and flashes
 **Arduino / ESP32 firmware**, reads and designs **PDFs and websites**, does **web research**, and drives the
 **Carpathron robot** from the PC, WhatsApp, a phone or a Meta Quest headset.
 
 This guide starts from zero (installing the app) and then explains every menu, button and tool.
 
-> **New name (1.7.0):** the app was called *Muse Carpathron* before. Updating keeps all your chats, settings,
-> servers and keys (they stay in the same folders). It is made by **Qubitpage LIMITED** (qubitpage.com).
+> **Muse Carpathron** is the open-source edition of this app (Meta AI hackathon). The same app is on the Microsoft
+> Store as *Carpathron Robotics & Coding*. It is made by **Qubitpage LIMITED** (qubitpage.com).
 
 ---
 
 ## 1. Quick start (10 minutes)
 
-1. **Install the app** from the **Microsoft Store** (search *Carpathron Robotics & Coding*) and open it from the Start menu (section 2).
+1. **Install the app**: download **Muse-Carpathron-Setup-<version>.exe** from <https://github.com/qubitpage/carpathron-muse/releases/latest> and double-click it (section 2).
 2. **Connect Meta** — *Settings → Sign in to Meta*. Either paste a **Meta API key** and press *Save & test*, or install
    **Muse Code** and sign in with your **Meta account** (section 3).
 3. **New chat** (top left) → type what you want, for example *"What can you do on this PC?"*.
@@ -32,14 +32,16 @@ This guide starts from zero (installing the app) and then explains every menu, b
 **Requirements:** Windows 10 or 11 (64-bit), internet access, a Meta account or a Meta Model API key.
 
 **Install**
-1. Open the **Microsoft Store**, search **Carpathron Robotics & Coding** (or open
-   <https://apps.microsoft.com/detail/9PMSQ8C3P6M3>) and click **Get / Install**.
+1. Download **Muse-Carpathron-Setup-<version>.exe** from <https://github.com/qubitpage/carpathron-muse/releases/latest> and
+   double-click it. If SmartScreen appears: *More info → Run anyway*.
 2. Open it from the Start menu. The first time, Windows may ask whether the app can use your network: allow
    **private networks** if you want to use a phone or the Quest headset with it.
 3. The app also lives in the system tray (bottom right) — closing the window keeps it running for WhatsApp and the
    robot; use *Quit* in the tray menu to exit completely.
 
-**Update:** the Microsoft Store updates the app automatically. **Your chats, settings, saved servers, keys, memory and
+**Update:** the app updates itself. It checks **qubitpage.com** for new versions, downloads them in the background and
+installs them when you restart it (a banner shows *Restart and update*), or the next time you close it. You can switch
+this off or check by hand in *Settings → Updates*. **Your chats, settings, saved servers, keys, memory and
 skills are kept.**
 
 **Where your data is**
@@ -47,14 +49,14 @@ skills are kept.**
 | What | Where |
 |---|---|
 | Workspace, photos, room maps, research reports | `%USERPROFILE%\MuseCarpathron` |
-| Chats, settings, servers, keys, memory, skills, log | the app's private folder, managed by Windows (`%LOCALAPPDATA%\Packages\Qubitpage.CarpathronRoboticsCoding_…\LocalCache\Roaming\Muse Carpathron\data`) |
+| Chats, settings, servers, keys, memory, skills, log | `%APPDATA%\Muse Carpathron\data` |
 | Log file (for troubleshooting) | same folder, `muse-carpathron.log` |
 
 Passwords, API keys, SSH keys and the GitHub token are **encrypted with your Windows account** (DPAPI). They never
 appear in the app package, in the browser or on the phone.
 
-**Uninstall:** Windows *Settings → Apps → Carpathron Robotics & Coding → Uninstall* (or right-click it in the Start menu).
-Windows removes the app's private data with it; your workspace folder (`%USERPROFILE%\MuseCarpathron`) stays.
+**Uninstall:** Windows *Settings → Apps → Muse Carpathron → Uninstall* (or right-click it in the Start menu).
+Your chats and settings (`%APPDATA%\Muse Carpathron`) and your workspace folder (`%USERPROFILE%\MuseCarpathron`) stay.
 
 ---
 
@@ -203,7 +205,7 @@ For any job with several steps Muse keeps a **task list**, shown above the messa
 
 ### 5.8 Reliability — no made-up answers
 
-Carpathron Robotics & Coding adds rules and checks so the agent doesn't invent things:
+Muse Carpathron adds rules and checks so the agent doesn't invent things:
 
 - **Honesty rules:** no invented facts, file contents, command output, prices or test results; current facts come from
   web search with sources; it says when it is not sure.
@@ -622,7 +624,7 @@ network access) can only be changed on the PC. The Quest app always asks for app
 | Muse keeps working after I asked something small | Your message joined the running work (⚡ Now). Switch to ⏳ Queue, or say "stop" |
 | It stopped with tasks still open | A task is ⛔ blocked (read its note), or it made no progress — answer the question in the note and say "continue" |
 | Computer use: clicks land in the wrong place | Use 100 % / 125 % display scaling on the main monitor; Muse takes a new screenshot first — ask it to "take a screenshot and try again" |
-| Computer use: nothing happens in an admin window | Windows blocks input into programs running as administrator unless Carpathron Robotics & Coding also runs as administrator |
+| Computer use: nothing happens in an admin window | Windows blocks input into programs running as administrator unless Muse Carpathron also runs as administrator |
 | Muse Browser asks to sign in | It has its own sign-ins: sign in yourself in that window once — Muse never types passwords |
 | Something else | Activity page, and the log at `%APPDATA%\Muse Carpathron\muse-carpathron.log` |
 

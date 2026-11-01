@@ -175,6 +175,15 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     emit('conv:update', store.index[c.id]);
   };
   const agent = new Agent({ store, robot, mcp, emit, log: logFn, memory, projects, skills, camera, remote, jobs, dataDir, github });
+  const carsettings = require('./carsettings');
+  const boards = require('./boards');
+  let calibrating = false;
+  let practice = null; // the practice car (simulator), started from Robot → Setup
+  const carHistory = { // robot passport: what changed on the car and what the health checks found
+    f: path.join(dataDir, 'car-history.json'),
+    read() { try { return JSON.parse(fs.readFileSync(this.f, 'utf8')); } catch { return []; } },
+    add(e) { const l = this.read(); l.push({ at: new Date().toISOString(), ...e }); try { fs.writeFileSync(this.f, JSON.stringify(l.slice(-300), null, 1)); } catch {} },
+  };
   const mapper = new Mapper({ robot, camera, api: agent.api, memory, getSettings: () => store.settings, emit, log: logFn });
   agent.mapper = mapper;
   const shield = new Shield({ store, remote, log: logFn, emit, dataDir });
@@ -788,16 +797,20 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       } catch (e) { return send(res, 200, { error: e.message }); }
     }
     // Car firmware: status / update over USB (Settings → Devices & robots → Update car firmware)
+    if (p === '/api/robot/firmware' && m === 'GET') return send(res, 200, { builds: require('./firmware').listBuilds(dataDir).map((x) => ({ version: x.version, at: x.at, size: x.size })) });
     if (p === '/api/robot/firmware' && m === 'POST') {
       const b = await readJson(req);
-      if (agent.firmwareBusy && b.action === 'update') return send(res, 200, { error: 'A firmware update is already running.' });
-      if (b.action === 'update') agent.firmwareBusy = true;
+      const action = ['status', 'check', 'build', 'update', 'wifi', 'undo'].includes(b.action) ? b.action : 'status';
+      const busy = action !== 'status' && action !== 'check';
+      if (agent.firmwareBusy && busy) return send(res, 200, { error: 'A firmware job is already running.' });
+      if (busy) agent.firmwareBusy = true;
       try {
         const ctx = { settings: store.settings, workspace: store.settings.workspace, dataDir, robot, status: (t) => emit('robot:firmware', { text: t }) };
-        const text = await execX('robot_firmware', { action: b.action === 'update' ? 'update' : 'status', port: b.port }, ctx);
-        return send(res, 200, { ok: !/UPDATE FAILED/.test(text), text });
+        const text = await execX('robot_firmware', { action, port: b.port }, ctx);
+        if (busy) carHistory.add({ kind: 'firmware', action, ok: !/FAILED\]/.test(text), version: (text.match(/firmware ([\d.]+)/g) || []).pop() || '' });
+        return send(res, 200, { ok: !/FAILED\]/.test(text), text });
       } catch (e) { return send(res, 200, { error: e.message }); }
-      finally { if (b.action === 'update') agent.firmwareBusy = false; }
+      finally { if (busy) agent.firmwareBusy = false; }
     }
     // Sensor mode on the car (firmware 2.1): auto (I2C laser + gyro) | ir (IR obstacle modules) | off — the car restarts
     if (p === '/api/robot/sensor-mode' && m === 'POST') {
@@ -811,6 +824,67 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         setTimeout(() => robot.connect(), 5000);
         return send(res, 200, { ok: true, mode, restarting: true });
       } catch (e) { return send(res, 200, { error: `The car did not accept it (${e.message}). It needs firmware 2.1 — update it first.` }); }
+    }
+    // Car Settings + Health check (firmware 2.2): explained settings, checked before they are sent; the car's self-test
+    if (p.startsWith('/api/robot/car/')) {
+      const ip = String((store.settings.robot || {}).carIp || '').trim();
+      const what = p.slice('/api/robot/car/'.length);
+      if (what === 'schema') return send(res, 200, { groups: carsettings.GROUPS, board: boards.BOARDS.esp32cam });
+      if (what === 'history') return send(res, 200, carHistory.read());
+      if (what === 'practice' && m === 'POST') { // start / stop the practice car (simulator)
+        const b = await readJson(req);
+        if (b.stop) { if (practice) { practice.close(); practice = null; } return send(res, 200, { ok: true, running: false }); }
+        if (!practice) practice = await require('./simcar').start({ faults: b.faults || {} });
+        else if (b.faults) practice.setFaults(b.faults);
+        if (b.use !== false) { store.updateSettings({ robot: { ...store.settings.robot, carIp: practice.host } }); robot.connect(); emit('settings:update', store.publicSettings()); }
+        logFn(`Practice car running at ${practice.host}`);
+        return send(res, 200, { ok: true, running: true, host: practice.host, faults: practice.state.faults });
+      }
+      if (what === 'practice') return send(res, 200, { running: !!practice, host: practice ? practice.host : '', pose: practice ? practice.pose() : null, trail: practice ? practice.state.trail : [], room: practice ? practice.room : null, faults: practice ? practice.state.faults : {} });
+      if (!ip) return send(res, 200, { error: 'Set the car address first (Robot → Setup → Find my car), or start the practice car.' });
+      try {
+        if (what === 'settings' && m === 'GET') return send(res, 200, await carsettings.getSettings(ip));
+        if (what === 'check' && m === 'POST') { const b = await readJson(req); return send(res, 200, carsettings.checkAll(b.values || {}, b.changes || {})); }
+        if (what === 'settings' && m === 'POST') {
+          const b = await readJson(req), changes = b.changes || {};
+          const cur = await carsettings.getSettings(ip);
+          const values = { ...cur.values, ...cur.strings };
+          const chk = carsettings.checkAll(values, changes);
+          if (!chk.ok) return send(res, 200, { ok: false, errors: chk.errors, warnings: chk.warnings });
+          let out = null;
+          const nums = Object.fromEntries(Object.entries(changes).filter(([k]) => !carsettings.STRING_KEYS.has(k)));
+          if (Object.keys(nums).length) out = await carsettings.setMany(ip, nums);
+          for (const [k, v] of Object.entries(changes)) if (carsettings.STRING_KEYS.has(k)) out = await carsettings.setSetting(ip, k, v);
+          carHistory.add({ kind: 'settings', changes: Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, k === 'apPass' ? '••••' : v])), before: Object.fromEntries(Object.keys(changes).map((k) => [k, k === 'apPass' ? '••••' : values[k]])) });
+          logFn(`Car settings changed: ${Object.keys(changes).join(', ')}`);
+          return send(res, 200, { ok: true, warnings: chk.warnings, settings: out, needsRestart: !!(out && out.restartPending) });
+        }
+        if (what === 'restart' && m === 'POST') { const r = await carsettings.restart(ip); setTimeout(() => robot.connect(), 6000); return send(res, 200, r); }
+        if (what === 'reset' && m === 'POST') { const r = await carsettings.factoryReset(ip); carHistory.add({ kind: 'reset' }); setTimeout(() => robot.connect(), 6000); return send(res, 200, r); }
+        if (what === 'calibrate' && m === 'GET') return send(res, 200, { steps: require('./calibrate').STEPS });
+        if (what === 'calibrate' && m === 'POST') {
+          const b = await readJson(req);
+          if (calibrating) return send(res, 200, { error: 'A calibration step is already running.' });
+          calibrating = true;
+          try {
+            robot.stop('calibration');
+            const { Calibrator } = require('./calibrate');
+            const cal = new Calibrator(ip, { appRobot: () => store.settings.robot || {}, setAppRobot: (x) => { store.updateSettings({ robot: { ...store.settings.robot, ...x } }); emit('settings:update', store.publicSettings()); }, log: logFn });
+            const r = await cal.run(String(b.step || ''), b.input || {});
+            if (!r.waiting) carHistory.add({ kind: 'calibration', step: r.step, ok: r.ok, applied: r.applied || {}, before: r.before || {}, text: r.text });
+            return send(res, 200, r);
+          } finally { calibrating = false; }
+        }
+        if (what === 'diag' && m === 'POST') {
+          const b = await readJson(req);
+          if (b.motors) robot.stop('health check');
+          const d = await carsettings.runDiag(ip, { motors: !!b.motors });
+          const h = carsettings.health(d);
+          carHistory.add({ kind: 'health', summary: h.summary, problems: h.items.filter((x) => x.status === 'bad' || x.status === 'warn').map((x) => x.title) });
+          return send(res, 200, { ...h, raw: d });
+        }
+      } catch (e) { return send(res, 200, { error: e.message }); }
+      return send(res, 404, { error: 'not found' });
     }
     if (p === '/api/robot/calibrate-turn' && m === 'POST') {
       try {
@@ -1066,6 +1140,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       await new Promise((r) => front.close(r));
       server.close(); redirect.close();
       robot.close();
+      if (practice) practice.close();
       shield.stopAll();
       remote.closeAll();
       jobs.stopAll();

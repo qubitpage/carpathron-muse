@@ -425,3 +425,66 @@ body[data-view="chat"] .mobile-menu { display: none !important; }
 .studio-problems button.fix { color: var(--accent); font-weight: 600; }
 .studio-out { margin: 0; height: 200px; overflow: auto; background: #0b0d10; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 12px/1.45 var(--mono); white-space: pre-wrap; color: #cfd6df; }
 .studio .row textarea { flex: 1; min-height: 44px; }
+
+/* ---- Robot → Car settings / Health (robotlab.js) */
+.practice-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 4px; }
+.practice-strip label.inline { display: flex; gap: 6px; align-items: center; }
+.carset { display: grid; grid-template-columns: 190px 1fr; gap: 14px; margin-top: 12px; align-items: start; }
+.carset-nav { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; }
+.carset-nav button { text-align: left; background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 9px; padding: 9px 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font: inherit; }
+.carset-nav button.on { border-color: var(--accent); background: var(--panel-2); }
+.carset-nav .count { background: var(--accent); color: #fff; border-radius: 99px; font-size: 11px; padding: 0 7px; }
+.carset-nav .count.bad { background: var(--danger); }
+.carset-pane { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.setting { display: grid; grid-template-columns: 1fr minmax(200px, 300px); gap: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.setting.changed { border-color: var(--accent); }
+.setting.error { border-color: var(--danger); }
+.setting-l { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.setting-r { display: flex; flex-direction: column; gap: 6px; align-items: stretch; justify-content: center; }
+.setting .restart { color: var(--warn); font-weight: 400; }
+.setting .num-row { display: flex; align-items: center; gap: 8px; }
+.setting .num-row input[type=range] { flex: 1; min-width: 0; }
+.setting .num-row input.num { width: 84px; }
+.setting .switch { display: flex; gap: 8px; align-items: center; color: var(--text); }
+.setting .btn.ghost { align-self: flex-end; }
+.bad-t { color: var(--danger); } .warn-t { color: var(--warn); }
+.carset-bar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding: 10px 14px; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px; }
+.carset-bar .grow { flex: 1; }
+.board-card { margin-top: 6px; }
+.board-svg { width: 100%; max-width: 520px; display: block; margin: 0 auto; }
+.board-svg .pcb { fill: #12324a; stroke: #2b5d82; }
+.board-svg .chip { fill: #0b1520; stroke: #34485c; }
+.board-svg .chip-t { fill: var(--muted); font-size: 10px; }
+.board-svg .pin circle { fill: #c9a24a; stroke: #6b5520; stroke-width: 1.5; cursor: pointer; }
+.board-svg text { font-family: var(--font); letter-spacing: 0; }
+.board-svg .pin .lbl { fill: var(--text); font-size: 11px; }
+.board-svg .pin .use { fill: var(--accent-2); font-size: 11.5px; font-weight: 600; }
+.board-svg .pin.used circle { fill: var(--accent-2); stroke: #1d6a48; }
+.board-svg .pin.clash circle { fill: var(--danger); stroke: #fff; }
+.board-svg .pin.clash .use { fill: var(--danger); }
+.board-svg .pin.boot circle { stroke: var(--warn); stroke-width: 3; }
+.board-svg .pin.res circle { fill: #555b66; stroke: #3b4049; }
+.board-svg .pin.pw circle { fill: #b04848; stroke: #5a2222; }
+.board-svg .pin:focus circle, .board-svg .pin:hover circle { stroke: #fff; }
+.health-list { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.health-sum { padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); }
+.health-sum.ok { border-color: #1d4a36; } .health-sum.warn { border-color: #5b4a1e; } .health-sum.bad { border-color: #5a2630; }
+.health-item { display: flex; gap: 10px; align-items: flex-start; background: var(--panel); border: 1px solid var(--line); border-left-width: 4px; border-radius: 10px; padding: 10px 12px; }
+.health-item.ok { border-left-color: var(--accent-2); } .health-item.warn { border-left-color: var(--warn); } .health-item.bad { border-left-color: var(--danger); } .health-item.info { border-left-color: var(--accent); }
+.health-item .h-ico { font-size: 18px; line-height: 1.2; }
+.health-item .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+@media (max-width: 760px) { .carset { grid-template-columns: 1fr; } .carset-nav { flex-direction: row; flex-wrap: wrap; position: static; } .setting { grid-template-columns: 1fr; } }
+.btn.ghost { background: transparent; border-color: var(--line); color: var(--muted); }
+
+.fw-step { display: flex; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.fw-step .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fw-n { width: 26px; height: 26px; border-radius: 50%; background: var(--panel-2); border: 1px solid var(--line-2); display: grid; place-items: center; font-weight: 700; font-size: 13px; flex: none; }
+.fw-step .btn { flex: none; min-width: 170px; }
+@media (max-width: 760px) { .fw-step { flex-wrap: wrap; } .fw-step > .btn, .fw-step .cal-btns { width: 100%; } }
+
+.cal-card .fw-step { align-items: flex-start; }
+.cal-card .cal-btns { display: flex; flex-direction: column; gap: 6px; flex: none; min-width: 130px; }
+.cal-card .cal-res:empty { display: none; }
+.cal-card .cal-res { margin-top: 4px; }
+.cal-card .pill { font-size: 11px; padding: 1px 8px; margin-left: 4px; font-weight: 400; }
+.cal-card input.num { width: 90px; }

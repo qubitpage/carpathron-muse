@@ -9,3 +9,4 @@ apps/quest-avatar/build/
 *.aar
 *.jar
 .env
+firmware/*/ota_key.h

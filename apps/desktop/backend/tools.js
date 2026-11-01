@@ -93,6 +93,21 @@ const BUILTIN = [
     parameters: { type: 'object', properties: { target: { type: 'string', description: 'what to go to, in simple words, e.g. "door", "red chair", "black bag"' }, stop_at_m: { type: 'number', description: 'stop this far from it in metres (default 0.45)' } }, required: ['target'] },
   },
   {
+    name: 'robot_settings', risk: 'robot',
+    description: 'Read or change the Baby Carpathron car settings (firmware 2.2+): motor pins, wheels reversed (invL / invR), sides swapped (swap), lowest moving power (minDuty), top speed (maxPct), straight trim (trim, -25..25, + = more power left), stop distance (stopMm), failsafe (failMs), gyro turn speed (turnSpd), camera (frame 0-4, sQual, pQual, vflip, hmirror, bright, contr, satur, wb, ae), I2C pins (sda, scl), laser time/offset (tofBud, tofOff), gyro scale (gScale), headlight limit (ledMax), name. action "get" lists every setting with its value, range and meaning. action "set" with changes {key: value}: checked first (free pins, no pin used twice, ranges); pins and the hotspot start working after action "restart".',
+    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['get', 'set', 'restart'] }, changes: { type: 'object', description: 'for set, e.g. {"invL":1,"maxPct":60}' } }, required: ['action'] },
+  },
+  {
+    name: 'robot_diagnose', risk: 'robot',
+    description: 'Health check of the Baby Carpathron car: it tests its camera, memory, Wi-Fi signal, I2C sensors, laser and gyro and (with wheels true) moves each side of wheels for a moment to see if it turns the right way. Returns healthy / suspicious / not working for every part with the likely cause and the fix (often a robot_settings change). Use it first when the car misbehaves.',
+    parameters: { type: 'object', properties: { wheels: { type: 'boolean', description: 'also test the wheels (the car moves a little)' } } },
+  },
+  {
+    name: 'board_pins', risk: 'read',
+    description: 'Pin facts for a board: what every pin can do (PWM, ADC, I2C, input-only, boot pin, used by camera / flash / PSRAM), and a check of a planned wiring. Boards: esp32cam, esp32devkit, xiaoesp32s3, uno, mega2560, pico. Use it before suggesting where to connect a part.',
+    parameters: { type: 'object', properties: { board: { type: 'string' }, wiring: { type: 'object', description: 'optional planned wiring {name: gpio}, e.g. {"servo": 13, "sda": 14}' } }, required: ['board'] },
+  },
+  {
     name: 'robot_photo', risk: 'read',
     description: 'Take a photo with the robot camera (or the PC webcam if the robot has no camera). The photo is saved, shown to the user (also sent back on WhatsApp) and you can see it.',
     parameters: { type: 'object', properties: { note: { type: 'string', description: 'optional reason, e.g. "look ahead"' } } },
@@ -356,6 +371,45 @@ async function execBuiltin(name, args, ctx) {
     }
     case 'robot_status':
       return JSON.stringify(ctx.robot.status());
+    case 'robot_settings': {
+      const C = require('./carsettings');
+      const ip = ctx.robot.ip || ctx.robot.getIp();
+      if (!ip) throw new Error('No car connected (Robot → Find my car, or start the practice car on Robot → Car settings).');
+      if (args.action === 'restart') { await C.restart(ip); return 'The car restarts (about 5 s); new pins and hotspot settings are used after that.'; }
+      const cur = await C.getSettings(ip);
+      if (args.action === 'set') {
+        const changes = args.changes || {};
+        const chk = C.checkAll({ ...cur.values, ...cur.strings }, changes);
+        if (!chk.ok) return `Not changed. ${Object.entries(chk.errors).map(([k, e]) => `${k}: ${e.join(' ')}`).join(' ')}`;
+        const nums = Object.fromEntries(Object.entries(changes).filter(([k]) => !C.STRING_KEYS.has(k)));
+        let r = Object.keys(nums).length ? await C.setMany(ip, nums) : cur;
+        for (const [k, v] of Object.entries(changes)) if (C.STRING_KEYS.has(k)) r = await C.setSetting(ip, k, v);
+        const warn = Object.entries(chk.warnings).map(([k, w]) => `${k}: ${w.join(' ')}`).join(' ');
+        return `Saved on the car: ${Object.entries(changes).map(([k, v]) => `${k}=${k === 'apPass' ? '••••' : v}`).join(', ')}.${r.restartPending ? ' Some changes need a restart (robot_settings action restart).' : ' Already in use.'}${warn ? ` Warnings: ${warn}` : ''}`;
+      }
+      const lines = C.GROUPS.map((g) => `## ${g.title}\n` + g.fields.filter((f) => f.kind !== 'password').map((f) => `${f.key} = ${f.key in cur.values ? cur.values[f.key] : cur.strings[f.key]}${f.min !== undefined ? ` (${f.min}..${f.max}, default ${f.def})` : ''}${f.restart ? ' [restart]' : ''} — ${f.label}`).join('\n'));
+      return `Car firmware ${cur.fw}${cur.restartPending ? ' (restart pending)' : ''}\n${lines.join('\n')}`;
+    }
+    case 'robot_diagnose': {
+      const C = require('./carsettings');
+      const ip = ctx.robot.ip || ctx.robot.getIp();
+      if (!ip) throw new Error('No car connected.');
+      if (args.wheels) ctx.robot.stop('health check');
+      const h = C.health(await C.runDiag(ip, { motors: !!args.wheels }));
+      return `Overall: ${h.summary}\n` + h.items.map((x) => `[${x.status}] ${x.title}${x.detail ? ` — ${x.detail}` : ''}${x.fix ? ` → ${x.fix}` : ''}`).join('\n');
+    }
+    case 'board_pins': {
+      const B = require('./boards');
+      const b = B.BOARDS[String(args.board || '').toLowerCase().replace(/[^a-z0-9]/g, '')] || Object.values(B.BOARDS).find((x) => x.name.toLowerCase().includes(String(args.board || '').toLowerCase()));
+      if (!b) return `Unknown board. Known: ${Object.keys(B.BOARDS).join(', ')}`;
+      const out = [`${b.name} (${b.chip}, ${b.logic} logic, max ${b.maxPinMa} mA per pin). ${b.summary}`, ...(b.limits || []).map((l) => `- ${l}`), 'Pins:'];
+      for (const p of b.pins) if (p.gpio != null) out.push(`GPIO ${p.gpio} ${p.label}: ${p.caps.join(',')}${p.level ? ` [${p.level === 'error' ? 'do not use' : 'careful'}]` : ''}${p.note ? ` — ${p.note}` : ''}`);
+      if (args.wiring && typeof args.wiring === 'object') {
+        const res = B.checkPins(b, Object.fromEntries(Object.entries(args.wiring).map(([k, v]) => [k, Number(v)])));
+        out.push('Wiring check:', ...(res.length ? res.map((r) => `${r.level}: ${r.name} on GPIO ${r.gpio}: ${r.message}`) : ['all fine']));
+      }
+      return out.join('\n');
+    }
     case 'robot_stop':
       ctx.robot.stop('agent');
       return 'Robot stopped.';
@@ -389,8 +443,10 @@ function describeCall(name, args) {
     case 'robot_photo': return 'Take a photo';
     case 'robot_look': return `Look ${a.direction} (the car turns${a.return_to_start === false ? '' : ' and comes back'})`;
     case 'robot_turn': return `Turn the car ${a.degrees}°`;
+    case 'robot_settings': return a.action === 'set' ? `Change car settings: ${Object.entries(a.changes || {}).map(([k, v]) => `${k}=${k === 'apPass' ? '••••' : v}`).join(', ')}` : a.action === 'restart' ? 'Restart the car' : 'Read the car settings';
+    case 'robot_diagnose': return a.wheels ? 'Health check of the car (the wheels move a little)' : 'Health check of the car';
     case 'robot_goto': return `Go to ${a.target} (the car looks around and drives there)`;
-    case 'robot_firmware': return a.action === 'update' ? `Update the car firmware over USB${a.port ? ` (${a.port})` : ''}` : 'Check the car firmware version';
+    case 'robot_firmware': return ({ update: `Put the firmware on the car over USB${a.port ? ` (${a.port})` : ''}`, wifi: 'Send the firmware to the car over Wi-Fi', build: 'Build the car firmware (nothing is sent)', undo: 'Put the previous firmware back on the car' })[a.action] || 'Check the car firmware';
     case 'robot_scan_room': return `Scan the room (${a.steps || 8} directions, car turns a full circle)`;
     case 'robot_drive': return `Drive robot: ${driveSteps(a).map((s) => (s.type === 'drive' ? `L${s.left}/R${s.right} ${s.ms}ms` : s.type)).join(', ')}`;
     case 'read_file': return `Read ${a.path}`;

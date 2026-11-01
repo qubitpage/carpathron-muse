@@ -27,6 +27,12 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **1.9.7:** robot tools upgrade, part 1. Car firmware **2.2**: every setting of the car can be changed from the app
+> (🛠 **Car settings**, explained like a modern BIOS, checked before they are saved), the car **tests itself** (🩺 **Health**:
+> camera, memory, Wi-Fi, sensors, each side of wheels — with the likely cause and a one-click fix), firmware **over Wi-Fi**
+> with **undo**, a **practice car** (simulator) to try everything without hardware, the **robot passport** (what changed and
+> what the checks found), a 🎯 **calibration wizard** (gyro, motor dead zone, straight driving, real speed, laser, turns,
+> camera), and the AI tools robot_settings, robot_diagnose and board_pins (sections 3.4.2 – 3.4.5).
 >
 > **Muse Carpathron** is the open-source edition of this app (Meta AI hackathon). The same app is on the Microsoft
 > Store as *Carpathron Robotics & Coding*. It is made by **Qubitpage LIMITED** (qubitpage.com).
@@ -182,10 +188,14 @@ robot tools. Llama 3.1 8B cannot see, so a **vision model** looks at every photo
    **50 cm** in front of the car → **📏 Calibrate distance**. You can take over any time on the
    Robot page, from the phone or with the Quest (Avatar mode).
 
-### 3.4.2 The Robot page: Control · Setup · Devices · Firmware studio
+### 3.4.2 The Robot page: Control · Setup · Car settings · Health · Devices · Firmware studio
 
 - **🎮 Control** — drive (pad, W A S D), live video, look around, room map, Quest.
-- **⚙ Setup** — car address, calibration (drive, turn, distance), firmware version / update, sensor mode and live sensor values.
+- **⚙ Setup** — car address, calibration (drive, turn, distance), **⬆ Car firmware** (check, build, flash over USB or
+  Wi-Fi, undo — section 3.4.3), sensor mode and live sensor values.
+- **🛠 Car settings** — every setting of the car in groups (Motors, Driving and safety, Camera, Sensors, Light, Name and
+  hotspot), each with a plain explanation, its range and default (section 3.4.4).
+- **🩺 Health** — the car tests itself and Muse explains the result (section 3.4.5).
 - **🔌 Devices** — what is connected, found by itself: boards on USB by their chip (ESP32 / ESP32-CAM with CH340 or CP210x,
   Arduino Uno / Nano / Mega / R4, Raspberry Pi Pico — also in BOOTSEL or MicroPython —, STM32, Teensy, Jetson on USB) and
   robots on the network (the car, saved SSH servers that are Raspberry Pi / Jetson boards, raspberrypi.local, jetson.local,
@@ -199,12 +209,24 @@ robot tools. Llama 3.1 8B cannot see, so a **vision model** looks at every photo
 
 ### 3.4.3 Car firmware and sensors
 
-**Update the car firmware** — connect the car to the PC with its USB-C cable and press *Settings → Devices & robots →
-Robots → ⬆ Update car firmware (USB)*, or just ask in a chat: *"update the car firmware"*. The app ships the firmware: it
-copies it to `<workspace>\firmware\carpathron_car` (an edited copy is kept as a backup), finds the car's USB port (CH340),
-installs the ESP32 tools the first time, compiles for the AI Thinker ESP32-CAM, uploads and checks the car is back on
-Wi-Fi with the new version. *Firmware version* shows what the car runs. To change the firmware, edit the workspace copy
-(or ask the agent to) and flash it with arduino_upload.
+**What firmware is** — the program inside the car's chip. *Building* (compiling) turns the code into a file for the chip;
+*flashing* writes that file into the car. Robot → ⚙ Setup → **⬆ Car firmware** has five steps:
+
+1. **🔎 Check** — which firmware the car has, which one the app brings, whether Wi-Fi updates are ready, and the builds
+   kept on this PC.
+2. **🔨 Build** (optional) — only compiles, to see that the code is fine. Nothing is sent to the car.
+3. **🔌 Flash over USB** — connect the car with its USB-C *data* cable. The app copies the firmware to
+   `<workspace>\firmware\carpathron_car` (an edited copy is kept as a backup), finds the car's USB port (CH340), installs
+   the ESP32 tools the first time, compiles for the AI Thinker ESP32-CAM and uploads. Needed **once**: it also gives the car
+   room for a second firmware, so later updates can go over Wi-Fi. If it hangs on "Connecting…", hold the board's BOOT
+   button (or connect IO0 to GND) until the upload starts. Your Wi-Fi and car settings stay.
+4. **📶 Flash over Wi-Fi** — no cable: the firmware goes through your Wi-Fi. The car checks the file before switching to it.
+   Only this PC can do it (a random key made on this PC is built into the car — flash once over USB from another PC to
+   move it there).
+5. **↩ Undo** — the car keeps the firmware it had before the last update and goes back to it.
+
+Or ask in a chat: *"update the car firmware"*, *"flash it over Wi-Fi"*, *"undo the last firmware update"*. To change the
+firmware, edit the workspace copy (or ask the agent to) and flash it with arduino_upload or the Firmware studio.
 
 **Kit IR modules (no shopping)** — two "Avoid" IR obstacle modules from a sensor kit: VCC → 3V3, GND → GND, OUT → **RXD**
 (front-left) and **TXD** (front-right). Then Robot → Setup → *Sensor mode: IR obstacle modules* (the car restarts): it
@@ -227,6 +249,54 @@ Mount the distance sensor in the middle of the front, facing forward, 3–5 cm a
 in the middle of the chassis. The car finds them when it starts (keep it still for a second — the gyro measures its
 zero). While they are connected the USB Serial Monitor is off (same pins); uploads still work (if one fails, unplug the
 SDA wire during the upload).
+
+### 3.4.4 Car settings (firmware 2.2)
+
+Robot → **🛠 Car settings** shows everything the car can be set to, in groups, like a modern BIOS screen: a plain
+explanation under each setting, its range, a **↺ default** button, and a drawing of the ESP32-CAM with the wires where they
+go (click a pin to see what it can do). Changes are checked **before** they are saved: a pin the camera or the memory
+needs, a pin used twice and values out of range are refused with the reason; boot pins (GPIO 2, 12, 15) get a warning.
+The car checks every value again itself, so a wrong value can never be stored. Settings marked **↻** (pins, motor PWM
+frequency, laser measuring time, hotspot) start working after **Restart the car now**; the others work at once.
+Pins can be swapped in one save (for example right and left speed pins). **Factory settings** puts everything back to the
+kit values (your Wi-Fi stays).
+
+| Group | What you can set |
+|---|---|
+| Motors | the six L298N pins, *wheels turn the wrong way* (left / right), *left and right are swapped*, lowest power that moves the wheels, top speed limit, straight-driving trim, PWM frequency |
+| Driving and safety | stop distance in front (laser), stop when the connection is lost after …, gyro turn speed |
+| Camera | picture size, live video and photo quality, flip / mirror, brightness, contrast, colour, white balance, exposure |
+| Sensors | I2C pins, laser measuring time and offset, gyro scale |
+| Light | headlight brightness limit |
+| Name and hotspot | the robot's name, the hotspot name and password |
+
+**Practice car** — no car at hand? Press **🧪 Use the practice car**: a simulated Baby Carpathron (same firmware 2.2
+commands) drives in a virtual room with walls and boxes, with a camera, laser and gyro. Everything works on it — driving,
+settings, the health check. *Practise a fault* breaks it on purpose (camera not found, a dead motor, reversed or swapped
+motor wires, a noisy laser, a drifting gyro, weak Wi-Fi, no PSRAM) so you can learn to find and fix problems.
+
+### 3.4.5 Health check and robot passport
+
+Robot → **🩺 Health → Check the car**: the car tests its camera (frames per second, sensor type, start-up error code),
+memory (PSRAM), Wi-Fi signal, why it last restarted, the I2C bus (which parts answer), the laser (20 readings: steady or
+jumping) and the gyro (chip id, drift at rest, noise). **Check + test the wheels** also moves each side of wheels for a
+moment (give it 30 cm of space or lift it): with the gyro it sees whether each side moved and turned the right way, and
+with the laser whether the sides are swapped or both reversed. Every part gets ✅ healthy, ⚠️ check this, ⛔ not working
+or ℹ️ note, with the likely cause and what to do; where a setting fixes it, **🔧 Apply this fix** does it.
+**🤖 Troubleshoot with Muse** hands the result to the agent. The **📒 Robot passport** lists every change of settings and
+firmware and every check, newest first.
+
+**🎯 Calibration** (same tab) — seven steps, each measures one thing with the car's own sensors and saves the right setting:
+1 *Gyro zero* (restarts the car standing still if the gyro drifts), 2 *Lowest power that moves the wheels* (more and more
+power on each side until the gyro sees the car move), 3 *Drive straight* (drives about 40 cm forward and back up to 4 times
+and corrects the trim), 4 *Real speed* (with the laser, for "go to"), 5 *Laser distance* (a box at a distance you measured →
+laser offset), 6 *Exact turns* (turns 360°, you say how far off it ended → gyro scale), 7 *Camera picture* (brightness,
+contrast and colour until the picture is clear). Steps marked *moves* drive the car: give it space. Every result goes in the
+robot passport and can be changed back in Car settings.
+
+The agent has the same: *"check the car"* (robot_diagnose), *"make the car slower"* / *"the left wheels go backward"*
+(robot_settings, checked like the screen does) and *"where can I connect a servo on the ESP32-CAM?"* (board_pins: what every
+pin of the ESP32-CAM, ESP32 DevKit, XIAO ESP32S3, Uno, Mega and Pico can do, and a check of a planned wiring).
 
 ### 3.5 Faster agent: only the tools a chat needs
 

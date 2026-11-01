@@ -42,7 +42,7 @@ const XTOOLS = [
   { name: 'arduino_upload', risk: 'exec', description: 'Compile and flash (upload) a sketch to a board on a serial port (e.g. COM5). Hardware action: the board resets.', parameters: obj({ sketch_path: { type: 'string' }, fqbn: { type: 'string' }, port: { type: 'string' } }, ['sketch_path', 'fqbn', 'port']) },
   { name: 'serial_monitor', risk: 'exec', description: 'Read the serial output of a board for some seconds (and optionally send a line first). Use to see boot logs, IP addresses, debug prints.', parameters: obj({ port: { type: 'string' }, baud: { type: 'integer', description: 'default 115200' }, seconds: { type: 'integer', description: 'default 8, max 120' }, send: { type: 'string' } }, ['port']) },
   { name: 'arduino_cli', risk: 'exec', description: 'Run any arduino-cli command (arguments only, e.g. "lib search FastLED", "core list", "board details -b esp32:esp32:esp32").', parameters: obj({ args: { type: 'string' } }, ['args']) },
-  { name: 'robot_firmware', risk: 'exec', description: 'Baby Carpathron car firmware. action "status": the firmware version bundled with this app, the copy in the workspace and the version the car reports. action "update": put the bundled firmware on the car over USB by itself — copies the sketch to <workspace>/firmware/carpathron_car (keeps a backup), finds the car\'s USB port (CH340), installs the ESP32 core if needed, compiles for the AI Thinker ESP32-CAM, uploads and checks the car comes back on Wi-Fi with the new version. Use it whenever the user asks to update / flash / reinstall the car firmware. To change the firmware, edit the sketch in the workspace copy, then use arduino_upload on it (fqbn esp32:esp32:esp32cam).', parameters: obj({ action: { type: 'string', enum: ['status', 'update'] }, port: { type: 'string', description: 'serial port, e.g. COM4 (found automatically when empty)' }, sketch_path: { type: 'string', description: 'optional: flash this sketch folder instead of the bundled one' } }, ['action']) },
+  { name: 'robot_firmware', risk: 'exec', description: 'Baby Carpathron car firmware, in plain steps. action "status" (or "check"): versions (bundled with the app, workspace copy, on the car), whether the car takes Wi-Fi updates, the builds kept on this PC. "build": compile the firmware into a file (nothing is sent). "update": put it on the car over USB (copies the sketch to <workspace>/firmware/carpathron_car keeping a backup, finds the car\'s USB port, installs the ESP32 core if needed, compiles with Wi-Fi-update space, uploads, checks the car comes back). "wifi": build and send it to the car over Wi-Fi (works after one USB update from this PC). "undo": go back to the firmware the car had before the last update. To flash a changed copy, pass sketch_path.', parameters: obj({ action: { type: 'string', enum: ['status', 'check', 'build', 'update', 'wifi', 'undo'] }, port: { type: 'string', description: 'serial port, e.g. COM4 (found automatically when empty)' }, sketch_path: { type: 'string', description: 'optional: use this sketch folder instead of the bundled one' } }, ['action']) },
   { name: 'open_arduino_ide', risk: 'exec', description: 'Open the Arduino IDE on this PC, optionally with a sketch, so the user can see or edit it.', parameters: obj({ path: { type: 'string' } }) },
   // ---------- Meta media models
   { name: 'generate_image', risk: 'write', description: 'Create an image with Muse Image (logos, product renders, illustrations, website hero images, UI mockups) or edit existing images (give edit_images). Saves PNG/JPG/WEBP to output_path and shows it.', parameters: obj({ prompt: { type: 'string' }, output_path: { type: 'string' }, size: { type: 'string', description: 'aspect, e.g. 1024x1024, 1792x1024, 1024x1792' }, edit_images: { type: 'array', items: { type: 'string' } } }, ['prompt', 'output_path']) },
@@ -511,31 +511,62 @@ function needCli(ctx) {
 async function robotFirmware(args, ctx) {
   const fw = require('./firmware');
   const status = ctx.status || (() => {});
+  const carIp = () => String((ctx.settings.robot || {}).carIp || '').trim();
   const carVersion = async () => {
-    const ip = String((ctx.settings.robot || {}).carIp || '').trim();
+    const ip = carIp();
     if (!ip) return { online: false, note: 'no car address set' };
     try { const r = await fetch(`http://${ip}/status`, { signal: AbortSignal.timeout(2500) }); const j = await r.json(); return { online: true, version: j.fw || 'older than 2.0 (no version in /status)', sensors: j.sensors || null, ip }; }
     catch (e) { return { online: false, note: `not reachable at ${ip}`, ip }; }
   };
+  const waitBack = async (want) => {
+    status('Waiting for the car to restart and join Wi-Fi…');
+    let c = { online: false };
+    for (let i = 0; i < 24 && !(c.online && (!want || c.version === want)); i++) { await new Promise((r) => setTimeout(r, 1500)); c = await carVersion(); }
+    if (ctx.robot && ctx.robot.connect) try { ctx.robot.connect(); } catch {}
+    return c.online ? `Car online at ${c.ip}, firmware ${c.version}${c.sensors ? ` — distance sensor: ${c.sensors.tof ? 'found' : 'not connected'}, gyro: ${c.sensors.imu ? 'found' : 'not connected'}` : ''}` : `The car did not answer on Wi-Fi yet (${c.note}). If it stays offline: Robot page → Find my car.`;
+  };
   const bundled = fw.bundledDir();
   const bundledVersion = bundled ? fw.versionOf(fs.readFileSync(path.join(bundled, `${fw.SKETCH}.ino`), 'utf8')) : null;
-  if (args.action !== 'update') {
+  const action = args.action || 'status';
+  const key = fw.otaKey(ctx.dataDir);
+  if (action === 'status' || action === 'check') {
     const c = await carVersion();
     const inst = fw.installDir(ctx.settings);
     const instVersion = fs.existsSync(path.join(inst, `${fw.SKETCH}.ino`)) ? fw.versionOf(fs.readFileSync(path.join(inst, `${fw.SKETCH}.ino`), 'utf8')) : null;
+    let ota = null; if (c.online) ota = await fw.otaInfo(c.ip).catch(() => null);
+    const builds = fw.listBuilds(ctx.dataDir);
     return [`Bundled with the app: ${bundledVersion || 'none'}${bundled ? ` (${bundled})` : ''}`, `Workspace copy: ${instVersion ? `${instVersion} (${inst})` : 'none yet'}`,
       `Car: ${c.online ? `online at ${c.ip}, firmware ${c.version}${c.sensors ? `, sensors: distance ${c.sensors.tof ? 'yes' : 'no'}, gyro ${c.sensors.imu ? 'yes' : 'no'}` : ''}` : c.note}`,
-      c.online && c.version && bundledVersion && fw.cmpVersion(bundledVersion, c.version) > 0 ? `→ An update is available (${c.version} → ${bundledVersion}): robot_firmware action "update" with the car on USB.` : ''].filter(Boolean).join('\n');
+      ota ? (ota.ota && ota.keySet ? `Wi-Fi updates: ready (slot ${ota.running && ota.running.label}${ota.other && ota.other.valid ? `; the previous firmware is kept, built ${ota.other.built} — "undo" can go back to it` : ''})` : ota.older ? 'Wi-Fi updates: not in this firmware (update once over USB)' : `Wi-Fi updates: not yet — ${!ota.ota ? 'the car was flashed without OTA space' : 'no key'}; update once over USB from this PC`) : '',
+      `Builds on this PC: ${builds.length ? builds.slice(-4).map((b) => `${b.version} (${new Date(b.at).toLocaleString()}, ${Math.round(b.size / 1024)} KB)`).join(', ') : 'none yet'}`,
+      c.online && c.version && bundledVersion && fw.cmpVersion(bundledVersion, c.version) > 0 ? `→ An update is available (${c.version} → ${bundledVersion}).` : ''].filter(Boolean).join('\n');
+  }
+  if (action === 'undo') {
+    const c = await carVersion();
+    if (!c.online) throw new Error(`The car is not reachable (${c.note}).`);
+    const r = await fw.rollback(c.ip, key);
+    if (!r.ok) {
+      // no second slot: send the build made before the newest one
+      const builds = fw.listBuilds(ctx.dataDir);
+      if (builds.length < 2) return `Undo is not possible: ${r.error || 'no previous firmware'}. Older sketches are kept in ${path.join(ctx.workspace, 'firmware')} (backup-…) and can be uploaded with arduino_upload.\n[UNDO FAILED]`;
+      const prev = builds[builds.length - 2];
+      status(`Sending the previous build (${prev.version}) over Wi-Fi…`);
+      const s2 = await fw.sendOta(c.ip, prev.bin, key);
+      if (!s2.ok) return `Undo failed: ${s2.error}\n[UNDO FAILED]`;
+      return `Sent the previous build ${prev.version}.\n${await waitBack(null)}\n[UNDO OK]`;
+    }
+    return `The car restarts into the firmware it had before the last update.\n${await waitBack(null)}\n[UNDO OK]`;
   }
   const log = [];
-  // 1) the sketch
-  let sketch;
-  if (args.sketch_path) { sketch = resolveLocal(ctx.workspace, args.sketch_path); log.push(`Sketch: ${sketch}`); }
+  // 1) the sketch (+ this PC's Wi-Fi update key next to it)
+  let sketch, version = bundledVersion;
+  if (args.sketch_path) { sketch = resolveLocal(ctx.workspace, args.sketch_path); version = (() => { try { return fw.versionOf(fs.readFileSync(path.join(sketch, `${path.basename(sketch)}.ino`), 'utf8')); } catch { return null; } })() || 'custom'; log.push(`Sketch: ${sketch}`); }
   else {
     const p = fw.prepare(ctx.settings);
-    sketch = p.dir;
+    sketch = p.dir; version = p.version;
     log.push(`Firmware ${p.version} copied to ${p.dir}${p.backup ? ` (previous copy kept in ${p.backup})` : ''}`);
   }
+  if (fs.existsSync(path.join(sketch, `${fw.SKETCH}.ino`))) fw.writeKey(sketch, key);
   // 2) arduino-cli and the ESP32 core (2.0.12, like the kit)
   let cli = findArduinoCli(ctx.dataDir, ctx.settings.arduinoCli);
   const cores = cli ? await runProc(cli, ['core', 'list'], { timeoutMs: 60000 }) : { out: '' };
@@ -544,7 +575,31 @@ async function robotFirmware(args, ctx) {
     log.push(await arduinoSetup({ cores: ['esp32:esp32@2.0.12'] }, ctx));
     cli = needCli(ctx);
   }
-  // 3) the car's USB port
+  const outDir = fw.newBuildDir(ctx.dataDir, version);
+  const saveMeta = (extra) => { try { fs.writeFileSync(path.join(outDir, 'build.json'), JSON.stringify({ version, at: new Date().toISOString(), source: sketch, ...extra })); } catch {} };
+  const sizeOf = (out) => { const m = out.match(/Sketch uses (\d+) bytes \((\d+)%\)/) || []; return m[1] ? ` (${m[1]} bytes, ${m[2]}% of the app space)` : ''; };
+  // build only, or build + send over Wi-Fi
+  if (action === 'build' || action === 'wifi') {
+    status('Building the firmware (about a minute)…');
+    const b = await runProc(cli, ['compile', '--fqbn', fw.FQBN, '--output-dir', outDir, sketch], { timeoutMs: 900000, signal: ctx.signal });
+    if (b.code !== 0) { try { fs.rmSync(outDir, { recursive: true, force: true }); } catch {} return `${log.join('\n')}\n${clip(b.out.trim(), 20000)}\n[BUILD FAILED]`; }
+    saveMeta({});
+    const bin = path.join(outDir, `${fw.SKETCH}.ino.bin`);
+    log.push(`Built ${version}${sizeOf(b.out)}: ${bin}`);
+    if (action === 'build') return `${log.join('\n')}\n[BUILD OK]`;
+    const c = await carVersion();
+    if (!c.online) return `${log.join('\n')}\nThe car is not reachable (${c.note}).\n[UPDATE FAILED]`;
+    const info = await fw.otaInfo(c.ip).catch(() => ({ ota: false, older: true }));
+    if (!info.ota || !info.keySet) return `${log.join('\n')}\nThis car cannot take Wi-Fi updates yet: update it once over USB from this PC (that also adds the space for a second firmware).\n[UPDATE FAILED]`;
+    status(`Sending ${version} to the car over Wi-Fi…`);
+    let last = -10;
+    const r = await fw.sendOta(c.ip, bin, key, { onProgress: (p) => { if (p - last >= 10) { last = p; status(`Sending over Wi-Fi… ${p}%`); } } });
+    if (!r.ok) return `${log.join('\n')}\nThe car refused it: ${r.error}${/key/.test(r.error || '') ? ' (the car was flashed from another PC: update once over USB from this one)' : ''}\n[UPDATE FAILED]`;
+    log.push('Sent over Wi-Fi; the car checks the file and restarts.');
+    log.push(await waitBack(version === 'custom' ? null : version));
+    return `${log.join('\n')}\n[UPDATE OK]`;
+  }
+  // 3) USB: the car's port
   let port = args.port ? { address: String(args.port), chip: 'given' } : null;
   if (!port) {
     status('Looking for the car on USB…');
@@ -553,24 +608,21 @@ async function robotFirmware(args, ctx) {
     if (!port) throw new Error(`${log.join('\n')}\nThe car was not found on USB. Connect it with the USB-C cable (a data cable, not charge-only), check the CH340 driver, then try again.`);
   }
   log.push(`Car on ${port.address} (${port.chip})`);
-  // 4) compile + upload
+  // 4) compile + upload (the build is kept for "undo" and Wi-Fi updates)
   status(`Compiling and flashing the car on ${port.address} (about a minute)…`);
-  const up = await runProc(cli, ['compile', '--upload', '-p', port.address, '--fqbn', fw.FQBN, sketch], { timeoutMs: 900000, signal: ctx.signal });
-  const size = (up.out.match(/Sketch uses (\d+) bytes \((\d+)%\)/) || []);
+  const up = await runProc(cli, ['compile', '--upload', '-p', port.address, '--fqbn', fw.FQBN, '--output-dir', outDir, sketch], { timeoutMs: 900000, signal: ctx.signal });
   if (up.code !== 0) {
+    try { fs.rmSync(outDir, { recursive: true, force: true }); } catch {}
     let hint = '';
-    if (/Failed to connect|Wrong boot mode|timed out waiting for packet/i.test(up.out)) hint = '\nHint: hold the board\'s BOOT button while "Connecting…" appears, then try again.';
+    if (/Failed to connect|Wrong boot mode|timed out waiting for packet/i.test(up.out)) hint = '\nHint: hold the board\'s BOOT button (or IO0 to GND) while "Connecting…" appears, then try again.';
     if (/could not open port|Access is denied|busy/i.test(up.out)) hint = '\nHint: another program uses the port (Arduino IDE serial monitor?). Close it and try again.';
     return `${log.join('\n')}\n${clip(up.out.trim(), 20000)}\n[UPDATE FAILED]${hint}`;
   }
-  log.push(`Compiled for ${fw.FQBN}${size[1] ? ` (${size[1]} bytes, ${size[2]}% of flash)` : ''} and uploaded.`);
+  saveMeta({ usb: port.address });
+  log.push(`Compiled for the AI Thinker ESP32-CAM with Wi-Fi update space${sizeOf(up.out)} and uploaded. From now on it can be updated over Wi-Fi from this PC.`);
   if (ctx.settings.robot) ctx.settings.robot.usbPort = port.address; // Devices tab: this port is the car
   // 5) back online with the new version?
-  status('Waiting for the car to restart and join Wi-Fi…');
-  let c = { online: false };
-  for (let i = 0; i < 20 && !(c.online && c.version === (args.sketch_path ? c.version : bundledVersion)); i++) { await new Promise((r) => setTimeout(r, 1500)); c = await carVersion(); }
-  log.push(c.online ? `Car online at ${c.ip}, firmware ${c.version}${c.sensors ? ` — distance sensor: ${c.sensors.tof ? 'found' : 'not connected'}, gyro: ${c.sensors.imu ? 'found' : 'not connected'}` : ''}` : `The car did not answer on Wi-Fi yet (${c.note}). If it stays offline: Robot page → Find my car.`);
-  if (ctx.robot && ctx.robot.connect) try { ctx.robot.connect(); } catch {}
+  log.push(await waitBack(args.sketch_path ? null : bundledVersion));
   return `${log.join('\n')}\n[UPDATE OK]`;
 }
 

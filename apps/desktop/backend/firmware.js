@@ -7,7 +7,8 @@ const fs = require('fs');
 const path = require('path');
 
 const SKETCH = 'carpathron_car';
-const FQBN = 'esp32:esp32:esp32cam'; // AI Thinker ESP32-CAM (PSRAM on); the kit's ESP32-CAM board
+const FQBN = 'esp32:esp32:esp32cam:PartitionScheme=min_spiffs'; // AI Thinker ESP32-CAM (PSRAM on) with two 1.9 MB app slots, so it can be updated over Wi-Fi and undone
+const FQBN_BOARD = 'esp32:esp32:esp32cam';
 const USB_VIDS = { '0x1A86': 'CH340', '0x10C4': 'CP210x', '0x0403': 'FTDI', '0x303A': 'ESP32 USB' };
 
 // The firmware folder that came with the app (packaged) or with the source code (development).
@@ -55,4 +56,64 @@ function pickPort(listJson) {
   return usb ? { address: usb.address, chip: usb.properties && USB_VIDS[String(usb.properties.vid).toUpperCase().replace(/^0X/, '0x')] || 'USB serial' } : null;
 }
 
-module.exports = { SKETCH, FQBN, bundledDir, versionOf, installDir, prepare, pickPort, cmpVersion };
+// Wi-Fi updates: a random key made on this PC, compiled into the car (ota_key.h next to the sketch, never in git).
+// Only firmware sent with this key is accepted by the car.
+function otaKey(dataDir) {
+  const f = path.join(dataDir, 'car-ota-key');
+  try { const k = fs.readFileSync(f, 'utf8').trim(); if (/^[a-f0-9]{32}$/.test(k)) return k; } catch {}
+  const k = require('crypto').randomBytes(16).toString('hex');
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(f, k, { mode: 0o600 });
+  return k;
+}
+function writeKey(sketchDir, key) {
+  fs.writeFileSync(path.join(sketchDir, 'ota_key.h'), `// Made by Muse Carpathron: the key this PC uses to update the car over Wi-Fi. Do not share or commit.\n#define OTA_KEY "${key}"\n`);
+}
+// Built firmware files, newest last: <dataDir>/firmware-builds/<version>-<time>/carpathron_car.ino.bin
+const buildsDir = (dataDir) => path.join(dataDir, 'firmware-builds');
+function listBuilds(dataDir) {
+  const d = buildsDir(dataDir);
+  if (!fs.existsSync(d)) return [];
+  return fs.readdirSync(d).map((n) => {
+    const bin = path.join(d, n, `${SKETCH}.ino.bin`);
+    if (!fs.existsSync(bin)) return null;
+    let meta = {}; try { meta = JSON.parse(fs.readFileSync(path.join(d, n, 'build.json'), 'utf8')); } catch {}
+    return { name: n, bin, size: fs.statSync(bin).size, version: meta.version || n.split('-')[0], at: meta.at || fs.statSync(bin).mtime.toISOString(), source: meta.source || '' };
+  }).filter(Boolean).sort((a, b) => a.at.localeCompare(b.at));
+}
+function newBuildDir(dataDir, version) {
+  const d = path.join(buildsDir(dataDir), `${version || 'custom'}-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`);
+  fs.mkdirSync(d, { recursive: true });
+  // keep the last 8 builds
+  const all = listBuilds(dataDir);
+  for (const b of all.slice(0, Math.max(0, all.length - 8))) try { fs.rmSync(path.dirname(b.bin), { recursive: true, force: true }); } catch {}
+  return d;
+}
+// Send a firmware file to the car over Wi-Fi. → { ok, error }
+function sendOta(host, binPath, key, { timeoutMs = 120000, onProgress } = {}) {
+  const http = require('http');
+  return new Promise((resolve) => {
+    const [h, port] = String(host).split(':');
+    const size = fs.statSync(binPath).size;
+    const req = http.request({ host: h, port: Number(port) || 80, path: '/ota', method: 'POST', timeout: timeoutMs, headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': size, 'X-OTA-Key': key } }, (res) => {
+      let body = ''; res.on('data', (d) => { body += d; }); res.on('end', () => { let j = null; try { j = JSON.parse(body); } catch {} resolve(j || { ok: res.statusCode < 300, error: body.slice(0, 200) }); });
+    });
+    req.on('timeout', () => req.destroy(new Error('the car stopped answering during the upload')));
+    req.on('error', (e) => resolve({ ok: false, error: e.message }));
+    let sent = 0;
+    const rs = fs.createReadStream(binPath, { highWaterMark: 16384 });
+    rs.on('data', (c) => { sent += c.length; if (onProgress) onProgress(Math.round((sent * 100) / size)); });
+    rs.pipe(req);
+  });
+}
+async function otaInfo(host, timeoutMs = 3000) {
+  const r = await fetch(`http://${host}/ota`, { signal: AbortSignal.timeout(timeoutMs) });
+  if (r.status === 404) return { ota: false, older: true };
+  return r.json();
+}
+async function rollback(host, key) {
+  const r = await fetch(`http://${host}/ota?rollback=1`, { headers: { 'X-OTA-Key': key }, signal: AbortSignal.timeout(4000) }).catch((e) => ({ ok: false, json: async () => ({ ok: false, error: e.message }) }));
+  return r.json().catch(() => ({ ok: false, error: 'no answer' }));
+}
+
+module.exports = { SKETCH, FQBN, FQBN_BOARD, otaKey, writeKey, buildsDir, listBuilds, newBuildDir, sendOta, otaInfo, rollback, bundledDir, versionOf, installDir, prepare, pickPort, cmpVersion };

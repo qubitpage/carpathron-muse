@@ -17,6 +17,10 @@
        /turn?deg=..&speed=..   exact turn with the gyro (needs the MPU-6050), runs by itself, see "turning" in /status
        /safety?mm=..   stop distance in front (needs the VL53L0X; 0 = off, default 150)
        /setup       Wi-Fi setup page
+       /settings    all car settings as JSON; /settings?set=<key>&v=<number> (or &s=<text>) changes one after checking it,
+                    saved in the car (survives restarts and firmware updates); ?reset=1 back to factory, ?restart=1
+       /diag        self-test as JSON: camera, I2C devices, laser, gyro, memory, Wi-Fi, last restart reason;
+                    /diag?motors=1 also spins each side for 0.6 s and measures the turn with the gyro
   - Live video (MJPEG) on port 81:  http://<car-ip>:81/stream
   - Safety: motors stop if no /drive command arrives for 600 ms.
   - Optional sensors on the free pins RXD (GPIO 3) = SDA and TXD (GPIO 1) = SCL, powered from 3V3:
@@ -35,7 +39,7 @@
   - Then set up Wi-Fi from the phone (see above). Muse Carpathron > Robot > "Find my car" finds its IP.
 */
 
-#define FW_VERSION "2.1.0"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
+#define FW_VERSION "2.2.0"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -50,6 +54,16 @@
 #include "lwip/sockets.h"
 #include <Wire.h>
 #include "VL53L0X.h"
+#include <Update.h>
+#include "esp_ota_ops.h"
+// Wi-Fi updates (OTA): Muse Carpathron writes ota_key.h (a random key, kept on this PC) next to the sketch when it
+// builds the firmware, so only that PC can update the car over Wi-Fi. Without the file, OTA is switched off.
+#if __has_include("ota_key.h")
+#include "ota_key.h"
+#endif
+#ifndef OTA_KEY
+#define OTA_KEY ""
+#endif
 
 // ---------------------------------------------------------------- Wi-Fi
 // Optional: you may type your Wi-Fi here instead of using the /setup page.
@@ -60,27 +74,94 @@ String savedSsid, savedPass;
 volatile bool wifiChangeRequested = false;
 unsigned long staConnectedAt = 0;
 // fallback hotspot made by the car when your Wi-Fi is not reachable
-const char* AP_SSID = "Carpathron-Car";
-const char* AP_PASS = "carpathron";      // at least 8 characters
+String apSsid = "Carpathron-Car";        // changeable in /settings (apSsid, apPass)
+String apPass = "carpathron";            // at least 8 characters
+String robotName = "Baby Carpathron";
+
+// ---------------------------------------------------------------- settings (saved in the car: /settings)
+// Every value that used to be a constant in this file. Numbers only (0/1 for on/off); limits are checked here,
+// so a wrong value can never be saved. "restart" = applied at the next start (pins, PWM frequency, laser timing).
+struct Setting { const char* key; int def, lo, hi; bool restart; };
+enum { S_REN, S_RFWD, S_RBACK, S_LEN, S_LFWD, S_LBACK, S_INVL, S_INVR, S_SWAP, S_PWMHZ, S_MINDUTY, S_MAXPCT, S_TRIM,
+       S_FAILMS, S_STOPMM, S_TURNSPD, S_VFLIP, S_HMIRROR, S_FRAME, S_SQUAL, S_PQUAL, S_BRIGHT, S_CONTR, S_SATUR, S_WB, S_AE,
+       S_SDA, S_SCL, S_TOFBUD, S_TOFOFF, S_GSCALE, S_LEDMAX, S_COUNT };
+static const Setting SETTINGS[S_COUNT] = {
+  { "rEn", 12, 0, 39, true },  { "rFwd", 13, 0, 39, true }, { "rBack", 14, 0, 39, true },      // right wheels (L298N ENA, IN1, IN2)
+  { "lEn", 2, 0, 39, true },   { "lFwd", 15, 0, 39, true }, { "lBack", 33, 0, 39, true },      // left wheels (ENB, IN3, IN4)
+  { "invL", 0, 0, 1, false },  { "invR", 0, 0, 1, false },  { "swap", 0, 0, 1, false },        // wrong direction / sides swapped
+  { "pwmHz", 1000, 100, 20000, true },                                                          // motor PWM frequency
+  { "minDuty", 150, 0, 255, false },                                                            // lowest power that still moves the wheels
+  { "maxPct", 100, 20, 100, false },                                                            // top speed limit in %
+  { "trim", 0, -25, 25, false },                                                                // + = more power left (car pulls left = raise)
+  { "failMs", 2500, 300, 10000, false },                                                        // stop when no command arrives for this long
+  { "stopMm", 150, 0, 1000, false },                                                            // laser: stop this close to obstacles (0 = off)
+  { "turnSpd", 70, 50, 100, false },                                                            // gyro turn speed
+  { "vflip", 1, 0, 1, false }, { "hmirror", 1, 0, 1, false },                                   // camera picture orientation
+  { "frame", 2, 0, 4, false },                                                                  // picture size: 0 QVGA 320x240 · 1 HVGA 480x320 · 2 VGA 640x480 · 3 SVGA 800x600 · 4 XGA 1024x768
+  { "sQual", 16, 6, 40, false }, { "pQual", 10, 4, 40, false },                                 // JPEG quality: lower = sharper, bigger
+  { "bright", 0, -2, 2, false }, { "contr", 0, -2, 2, false }, { "satur", 0, -2, 2, false },
+  { "wb", 0, 0, 4, false },                                                                     // white balance: 0 auto 1 sunny 2 cloudy 3 office 4 home
+  { "ae", 0, -2, 2, false },                                                                    // exposure correction
+  { "sda", 3, 0, 39, true }, { "scl", 1, 0, 39, true },                                         // I2C pins for the laser + gyro
+  { "tofBud", 33, 20, 200, true },                                                              // laser measuring time in ms (longer = steadier)
+  { "tofOff", 0, -100, 100, false },                                                            // laser offset in mm (subtracted)
+  { "gScale", 1000, 900, 1100, false },                                                         // gyro scale in 1/1000 (1000 = as measured)
+  { "ledMax", 255, 0, 255, false },                                                             // headlight brightness limit
+};
+int cfgv[S_COUNT];    // in use now
+int savedv[S_COUNT];  // stored (pin and other restart settings take effect after a restart)
+#define CFG(i) (cfgv[i])
+bool restartPending = false;
+// GPIOs of the AI-Thinker ESP32-CAM free for motors / I2C (the camera, PSRAM and flash use the others; 4 = headlight)
+const int FREE_PINS[] = { 1, 2, 3, 12, 13, 14, 15, 33 };
+static bool isPinSetting(int i) { return i <= S_LBACK || i == S_SDA || i == S_SCL; }
+static bool freePin(int p) { for (int f : FREE_PINS) if (f == p) return true; return false; }
+// "" = fine, otherwise why the value is refused
+String checkSetting(int i, int v, const int* vals = cfgv) {
+  const Setting& d = SETTINGS[i];
+  if (v < d.lo || v > d.hi) return String(d.key) + " must be " + d.lo + ".." + d.hi;
+  if (isPinSetting(i)) {
+    if (!freePin(v)) return String("GPIO ") + v + " is not free on the ESP32-CAM (camera, memory, flash or headlight). Free: 1 2 3 12 13 14 15 33";
+    for (int j = 0; j < S_COUNT; j++) if (j != i && isPinSetting(j) && vals[j] == v) return String("GPIO ") + v + " is already used by " + SETTINGS[j].key;
+  }
+  return "";
+}
+void loadSettings() {
+  Preferences c; c.begin("cfg", true);
+  for (int i = 0; i < S_COUNT; i++) { int v = c.getInt(SETTINGS[i].key, SETTINGS[i].def); cfgv[i] = (v < SETTINGS[i].lo || v > SETTINGS[i].hi) ? SETTINGS[i].def : v; }
+  robotName = c.getString("name", robotName); apSsid = c.getString("apSsid", apSsid); apPass = c.getString("apPass", apPass);
+  c.end();
+  // a broken pin set (duplicates, camera pins) falls back to the kit wiring
+  bool bad = false;
+  for (int i = 0; i < S_COUNT && !bad; i++) if (isPinSetting(i)) { int v = cfgv[i]; cfgv[i] = -1; if (checkSetting(i, v).length()) bad = true; cfgv[i] = v; }
+  if (bad) { for (int i = 0; i < S_COUNT; i++) if (isPinSetting(i)) cfgv[i] = SETTINGS[i].def; Serial.println("[settings] pin settings were invalid: using the kit wiring"); }
+  if (apPass.length() < 8) apPass = "carpathron";
+  memcpy(savedv, cfgv, sizeof(cfgv));
+}
 
 // ---------------------------------------------------------------- motor pins (from the kit tutorial, L298N)
 // Right wheels: ENA=12 (speed), IN1=13 (forward), IN2=14 (backward)
 // Left wheels : ENB=2  (speed), IN3=15 (forward), IN4=33 (backward)
-const int R_EN = 12, R_FWD = 13, R_BACK = 14;
-const int L_EN = 2,  L_FWD = 15, L_BACK = 33;
+#define R_EN (cfgv[S_REN])
+#define R_FWD (cfgv[S_RFWD])
+#define R_BACK (cfgv[S_RBACK])
+#define L_EN (cfgv[S_LEN])
+#define L_FWD (cfgv[S_LFWD])
+#define L_BACK (cfgv[S_LBACK])
 const int LED_PIN = 4;   // white headlight on the ESP32-CAM
 
 // If a side spins the wrong way, set it to true. If left/right are swapped, set SWAP_SIDES.
-const bool INVERT_LEFT = false;
-const bool INVERT_RIGHT = false;
-const bool SWAP_SIDES = false;
+#define INVERT_LEFT (cfgv[S_INVL])
+#define INVERT_RIGHT (cfgv[S_INVR])
+#define SWAP_SIDES (cfgv[S_SWAP])
 
 // Camera picture orientation (kit FAQ: ESP32-CAM-V0.3 boards need VFLIP 0)
-const int CAM_VFLIP = 1;
-const int CAM_HMIRROR = 1;
+#define CAM_VFLIP (cfgv[S_VFLIP])
+#define CAM_HMIRROR (cfgv[S_HMIRROR])
 
 // PWM (LEDC). Channel 0 / timer 0 is used by the camera clock, so motors use 2 and 4, LED uses 7.
-const int PWM_FREQ = 1000, PWM_BITS = 8;   // 1 kHz like the kit (analogWrite): the L298N gives the motors more power at low PWM frequency
+#define PWM_FREQ (cfgv[S_PWMHZ])
+const int PWM_BITS = 8;   // 1 kHz like the kit (analogWrite): the L298N gives the motors more power at low PWM frequency
 const int CH_R = 2, CH_L = 4, CH_LED = 7;
 // PWM helpers that work with both the 2.x (kit) and 3.x ESP32 board packages
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
@@ -90,9 +171,10 @@ const int CH_R = 2, CH_L = 4, CH_LED = 7;
   #define PWM_ATTACH(pin, ch) do { ledcSetup((ch), PWM_FREQ, PWM_BITS); ledcAttachPin((pin), (ch)); } while (0)
   #define PWM_WRITE(pin, ch, duty) ledcWrite((ch), (duty))
 #endif
-const int MIN_DUTY = 150;              // below this TT motors only hum; 150..255 keeps even slow speeds strong
-const int STREAM_QUALITY = 16, PHOTO_QUALITY = 10;  // JPEG quality: lower number = sharper and bigger
-const unsigned long FAILSAFE_MS = 2500;  // like the kit: a press keeps the car moving until stop; this only catches a lost link (app closed, Wi-Fi gone)
+#define MIN_DUTY (cfgv[S_MINDUTY])             // below this TT motors only hum; 150..255 keeps even slow speeds strong
+#define STREAM_QUALITY (cfgv[S_SQUAL])
+#define PHOTO_QUALITY (cfgv[S_PQUAL])  // JPEG quality: lower number = sharper and bigger
+#define FAILSAFE_MS ((unsigned long)cfgv[S_FAILMS])  // like the kit: a press keeps the car moving until stop; this only catches a lost link (app closed, Wi-Fi gone)
 
 // AI-Thinker ESP32-CAM camera pins (same as the kit code)
 #define PWDN_GPIO_NUM     32
@@ -115,7 +197,8 @@ const unsigned long FAILSAFE_MS = 2500;  // like the kit: a press keeps the car 
 // ---------------------------------------------------------------- state
 volatile int curL = 0, curR = 0;
 // optional sensors (I2C on the serial pins)
-const int I2C_SDA = 3, I2C_SCL = 1;      // RXD, TXD on the ESP32-CAM board
+#define I2C_SDA (cfgv[S_SDA])            // default RXD (3), TXD (1) on the ESP32-CAM board
+#define I2C_SCL (cfgv[S_SCL])
 const uint8_t MPU_ADDR = 0x68;
 bool tofOk = false, imuOk = false;
 bool irOk = false;                        // sensor mode "ir": IR obstacle modules on RXD (left) / TXD (right)
@@ -123,10 +206,14 @@ volatile bool irLeft = false, irRight = false;
 String sensorMode = "auto";               // "auto" = look for I2C sensors, "ir" = IR obstacle modules, "off"
 VL53L0X tof;
 volatile int distMm = -1;                // -1 = nothing in range / no sensor
-volatile int safetyMm = 150;             // refuse to drive forward when something is closer (0 = off)
+volatile int safetyMm = 150;             // refuse to drive forward when something is closer (0 = off); starts at setting stopMm
 volatile bool blocked = false;           // the last forward command was refused / stopped by the distance sensor
 volatile float yawDeg = 0;               // heading from the gyro, + = right (clockwise seen from above)
 float gyroBias = 0;
+volatile float lastDps = 0;              // latest gyro rate (deg/s), for the self-test
+volatile bool i2cHold = false, i2cIdle = false;   // the self-test pauses the sensor task to use the I2C bus
+bool wireOn = false;
+int cameraErr = 0, cameraPid = 0;
 volatile bool turning = false;
 volatile float turnTarget = 0, turnFrom = 0;
 volatile int turnSpeed = 70;
@@ -153,7 +240,7 @@ void setSide(int enPin, int enCh, int fwdPin, int backPin, int pct) {
   PWM_WRITE(enPin, enCh, duty);
 }
 
-void setLed(int v) { PWM_WRITE(LED_PIN, CH_LED, v); }
+void setLed(int v) { PWM_WRITE(LED_PIN, CH_LED, min(v, CFG(S_LEDMAX))); }
 
 void drive(int l, int r) {
   l = constrain(l, -100, 100);
@@ -162,6 +249,8 @@ void drive(int l, int r) {
   if (l > 0 && r > 0 && ((tofOk && safetyMm > 0 && distMm > 0 && distMm < safetyMm) || (irOk && (irLeft || irRight)))) { l = 0; r = 0; blocked = true; }
   else if (l > 0 || r > 0) blocked = false;
   curL = l; curR = r;
+  if (l && r && ((l > 0) == (r > 0))) { l = l * (100 + CFG(S_TRIM)) / 100; r = r * (100 - CFG(S_TRIM)) / 100; }  // straight-driving trim
+  l = constrain(l * CFG(S_MAXPCT) / 100, -100, 100); r = constrain(r * CFG(S_MAXPCT) / 100, -100, 100);
   if (SWAP_SIDES) { int t = l; l = r; r = t; }
   if (INVERT_LEFT) l = -l;
   if (INVERT_RIGHT) r = -r;
@@ -190,23 +279,25 @@ static int16_t mpuGyroZ() {
 static bool i2cPresent(uint8_t addr) { Wire.beginTransmission(addr); return Wire.endTransmission() == 0; }
 
 // Looks for the sensors on RXD/TXD. Only when one answers do the pins stay I2C (the USB Serial Monitor then stops).
+static bool serialPins() { return I2C_SDA == 1 || I2C_SDA == 3 || I2C_SCL == 1 || I2C_SCL == 3; }
 bool initSensors() {
   { Preferences sp; sp.begin("carpathron", true); sensorMode = sp.getString("sensors", "auto"); sp.end(); }
   if (sensorMode == "off") { Serial.println("Sensors switched off (sensor mode off)."); return false; }
   if (sensorMode == "ir") {
-    Serial.println("Sensor mode ir: IR obstacle modules on RXD (front-left) and TXD (front-right). The Serial Monitor stops now.");
-    Serial.flush(); delay(50); Serial.end();
+    Serial.println("Sensor mode ir: IR obstacle modules on the I2C pins (SDA = front-left, SCL = front-right).");
+    if (serialPins()) { Serial.println("The Serial Monitor stops now (same pins)."); Serial.flush(); delay(50); Serial.end(); }
     pinMode(I2C_SDA, INPUT_PULLUP); pinMode(I2C_SCL, INPUT_PULLUP);
     irOk = true;
     return true;
   }
-  Serial.println("Looking for sensors on RXD/TXD (VL53L0X distance, MPU-6050 gyro)... the Serial Monitor pauses for a moment.");
+  Serial.printf("Looking for sensors on GPIO %d / %d (VL53L0X distance, MPU-6050 gyro)...%s\n", I2C_SDA, I2C_SCL, serialPins() ? " the Serial Monitor pauses for a moment." : "");
   Serial.flush(); delay(50);
-  Serial.end();
+  if (serialPins()) Serial.end();
   Wire.begin(I2C_SDA, I2C_SCL, 400000);
   Wire.setTimeOut(20);
   bool tofHere = i2cPresent(0x29), imuHere = i2cPresent(MPU_ADDR);
-  if (!tofHere && !imuHere) { Wire.end(); Serial.begin(115200); Serial.println("No sensors found: Serial Monitor stays on."); return false; }
+  if (!tofHere && !imuHere) { Wire.end(); if (serialPins()) Serial.begin(115200); Serial.println("No sensors found: Serial Monitor stays on."); return false; }
+  wireOn = true;
   if (imuHere) {
     mpuWrite(0x6B, 0x00);      // wake up
     mpuWrite(0x1A, 0x03);      // low-pass filter ~44 Hz
@@ -220,7 +311,7 @@ bool initSensors() {
   if (tofHere) {
     tof.setBus(&Wire);
     tof.setTimeout(100);
-    if (tof.init()) { tof.setMeasurementTimingBudget(33000); tof.startContinuous(); tofOk = true; }
+    if (tof.init()) { tof.setMeasurementTimingBudget((uint32_t)CFG(S_TOFBUD) * 1000); tof.startContinuous(); tofOk = true; }
   }
   return tofOk || imuOk;
 }
@@ -229,10 +320,13 @@ bool initSensors() {
 static void sensorTask(void*) {
   unsigned long last = micros();
   for (;;) {
+    if (i2cHold) { i2cIdle = true; vTaskDelay(pdMS_TO_TICKS(5)); last = micros(); continue; }
+    i2cIdle = false;
     unsigned long now = micros();
     float dt = (now - last) / 1e6f; last = now;
     if (imuOk) {
-      float dps = (mpuGyroZ() - gyroBias) / 65.5f;
+      float dps = (mpuGyroZ() - gyroBias) / 65.5f * CFG(S_GSCALE) / 1000.0f;
+      lastDps = dps;
       if (fabsf(dps) > 0.4f) yawDeg -= dps * dt;     // MPU-6050 Z up: positive = counter-clockwise → our + = right
     }
     if (irOk) {
@@ -242,7 +336,7 @@ static void sensorTask(void*) {
     if (tofOk && (tof.readReg(VL53L0X::RESULT_INTERRUPT_STATUS) & 0x07)) {
       uint16_t mm = tof.readReg16Bit(VL53L0X::RESULT_RANGE_STATUS + 10);
       tof.writeReg(VL53L0X::SYSTEM_INTERRUPT_CLEAR, 0x01);
-      distMm = (mm == 0 || mm >= 2000) ? -1 : mm;
+      distMm = (mm == 0 || mm >= 2000) ? -1 : max(1, (int)mm - CFG(S_TOFOFF));
       if (curL > 0 && curR > 0 && safetyMm > 0 && distMm > 0 && distMm < safetyMm) { drive(0, 0); blocked = true; }
     }
     if (turning) {
@@ -264,6 +358,7 @@ static void startTurn(float deg, int speed) {
   turnStarted = millis(); turnResult = 0; turning = true;
 }
 
+void applyCamera();
 bool initCamera() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -297,15 +392,33 @@ bool initCamera() {
   }
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
+    cameraErr = err;
     Serial.printf("Camera init failed with error 0x%x (driving still works)\n", err);
     return false;
   }
   sensor_t* s = esp_camera_sensor_get();
-  s->set_framesize(s, FRAMESIZE_VGA);   // 640x480: good for photos to the AI and smooth streaming
-  s->set_quality(s, STREAM_QUALITY);    // smaller frames for live video (weak Wi-Fi); /capture switches to sharp for photos
+  cameraPid = s->id.PID;
+  applyCamera();
+  return true;
+}
+// camera settings from /settings: picture size (VGA 640x480 by default: good for photos to the AI and smooth streaming),
+// stream quality (smaller frames for weak Wi-Fi; /capture switches to the sharper photo quality), orientation, image
+void applyCamera() {
+  sensor_t* s = esp_camera_sensor_get();
+  if (!s) return;
+  // by name: the numbers behind framesize_t differ between camera driver versions
+  static const framesize_t SIZES[] = { FRAMESIZE_QVGA, FRAMESIZE_HVGA, FRAMESIZE_VGA, FRAMESIZE_SVGA, FRAMESIZE_XGA };
+  s->set_framesize(s, SIZES[constrain(CFG(S_FRAME), 0, 4)]);
+  s->set_quality(s, STREAM_QUALITY);
   s->set_vflip(s, CAM_VFLIP);
   s->set_hmirror(s, CAM_HMIRROR);
-  return true;
+  s->set_brightness(s, CFG(S_BRIGHT));
+  s->set_contrast(s, CFG(S_CONTR));
+  s->set_saturation(s, CFG(S_SATUR));
+  s->set_whitebal(s, 1);
+  s->set_awb_gain(s, 1);
+  s->set_wb_mode(s, CFG(S_WB));
+  s->set_ae_level(s, CFG(S_AE));
 }
 
 // ---------------------------------------------------------------- web handlers
@@ -388,7 +501,7 @@ static esp_err_t led_handler(httpd_req_t* req) {
 
 static esp_err_t turn_handler(httpd_req_t* req) {
   if (!imuOk) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"no gyro (MPU-6050) found\"}");
-  int deg = constrain(queryInt(req, "deg", 0), -720, 720), sp = queryInt(req, "speed", 70);
+  int deg = constrain(queryInt(req, "deg", 0), -720, 720), sp = queryInt(req, "speed", CFG(S_TURNSPD));
   if (!deg) return send_text(req, "application/json", "{\"ok\":true,\"turning\":false}");
   startTurn(deg, sp); lastDrive = millis();
   return send_text(req, "application/json", "{\"ok\":true,\"turning\":true}");
@@ -416,12 +529,12 @@ static esp_err_t config_handler(httpd_req_t* req) {
 }
 
 static esp_err_t status_handler(httpd_req_t* req) {
-  char json[760];
+  char json[860];
   bool sta = WiFi.status() == WL_CONNECTED;
   snprintf(json, sizeof(json),
-           "{\"name\":\"Baby Carpathron\",\"fw\":\"" FW_VERSION "\",\"ip\":\"%s\",\"mode\":\"%s\",\"wifi\":\"%s\",\"wifiIp\":\"%s\",\"connecting\":%s,\"rssi\":%d,\"left\":%d,\"right\":%d,\"camera\":%s,\"psram\":%s,\"uptime\":%lu,"
+           "{\"name\":\"%s\",\"fw\":\"" FW_VERSION "\",\"restartPending\":%s,\"ip\":\"%s\",\"mode\":\"%s\",\"wifi\":\"%s\",\"wifiIp\":\"%s\",\"connecting\":%s,\"rssi\":%d,\"left\":%d,\"right\":%d,\"camera\":%s,\"psram\":%s,\"uptime\":%lu,"
            "\"sensors\":{\"mode\":\"%s\",\"ir\":%s,\"irLeft\":%s,\"irRight\":%s,\"tof\":%s,\"imu\":%s,\"dist\":%d,\"stopMm\":%d,\"blocked\":%s,\"yaw\":%.1f,\"turning\":%s,\"turnResult\":%d}}",
-           (sta ? WiFi.localIP() : WiFi.softAPIP()).toString().c_str(), apMode ? "hotspot" : "wifi", savedSsid.c_str(),
+           robotName.c_str(), restartPending ? "true" : "false", (sta ? WiFi.localIP() : WiFi.softAPIP()).toString().c_str(), apMode ? "hotspot" : "wifi", savedSsid.c_str(),
            sta ? WiFi.localIP().toString().c_str() : "", wifiChangeRequested ? "true" : "false", sta ? WiFi.RSSI() : 0, curL, curR,
            cameraOk ? "true" : "false", psramFound() ? "true" : "false", millis() / 1000,
            sensorMode.c_str(), irOk ? "true" : "false", irLeft ? "true" : "false", irRight ? "true" : "false",
@@ -445,6 +558,218 @@ static esp_err_t capture_handler(httpd_req_t* req) {
   esp_err_t res = httpd_resp_send(req, (const char*)fb->buf, fb->len);
   esp_camera_fb_return(fb);
   return res;
+}
+
+static String urlDecode(const char* s);
+// ---------------------------------------------------------------- /settings: every car setting, checked and saved in the car
+static String jsonStr(const String& v) {
+  String o = "\"";
+  for (unsigned i = 0; i < v.length(); i++) { char c = v[i]; if (c == '"' || c == '\\') o += '\\'; if ((uint8_t)c >= 0x20) o += c; }
+  return o + "\"";
+}
+static String settingsJson(const char* extra) {
+  String j = "{\"fw\":\"" FW_VERSION "\",\"board\":\"esp32cam\",\"values\":{";
+  for (int i = 0; i < S_COUNT; i++) { if (i) j += ","; j += "\""; j += SETTINGS[i].key; j += "\":"; j += savedv[i]; }
+  j += "},\"active\":{";  // values in use now, where they differ (until the restart)
+  bool first = true;
+  for (int i = 0; i < S_COUNT; i++) if (cfgv[i] != savedv[i]) { if (!first) j += ","; first = false; j += "\""; j += SETTINGS[i].key; j += "\":"; j += cfgv[i]; }
+  j += "},\"strings\":{\"name\":" + jsonStr(robotName) + ",\"apSsid\":" + jsonStr(apSsid) + "},\"restartPending\":";
+  j += restartPending ? "true" : "false";
+  j += extra;
+  return j + "}";
+}
+static esp_err_t settings_handler(httpd_req_t* req) {
+  char q[400], key[16] = "", v[300] = "";
+  String extra = "";
+  if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+    if (httpd_query_key_value(q, "restart", v, sizeof(v)) == ESP_OK) { send_text(req, "application/json", "{\"ok\":true,\"restarting\":true}"); drive(0, 0); delay(400); ESP.restart(); }
+    if (httpd_query_key_value(q, "reset", v, sizeof(v)) == ESP_OK) {
+      Preferences c; c.begin("cfg", false); c.clear(); c.end();
+      send_text(req, "application/json", "{\"ok\":true,\"restarting\":true}"); drive(0, 0); delay(400); ESP.restart();
+    }
+    if (httpd_query_key_value(q, "many", v, sizeof(v)) == ESP_OK) {
+      int tmp[S_COUNT]; memcpy(tmp, savedv, sizeof(tmp));
+      bool touched[S_COUNT] = {}; String err; char* save = nullptr;
+      for (char* tok = strtok_r(v, ",", &save); tok && !err.length(); tok = strtok_r(nullptr, ",", &save)) {
+        char* c = strchr(tok, ':'); if (!c) { err = "use many=key:value,key:value"; break; }
+        *c = 0; int i = 0; while (i < S_COUNT && strcmp(SETTINGS[i].key, tok)) i++;
+        if (i == S_COUNT) err = String("unknown setting ") + tok; else { tmp[i] = atoi(c + 1); touched[i] = true; }
+      }
+      for (int i = 0; i < S_COUNT && !err.length(); i++) if (touched[i]) err = checkSetting(i, tmp[i], tmp);
+      if (err.length()) return send_text(req, "application/json", ("{\"ok\":false,\"error\":" + jsonStr(err) + "}").c_str());
+      bool restart = false; Preferences c; c.begin("cfg", false);
+      for (int i = 0; i < S_COUNT; i++) if (touched[i]) {
+        c.putInt(SETTINGS[i].key, tmp[i]); savedv[i] = tmp[i];
+        if (SETTINGS[i].restart) restart = restartPending = true; else cfgv[i] = tmp[i];
+      }
+      c.end();
+      safetyMm = CFG(S_STOPMM); if (cameraOk) applyCamera(); drive(curL, curR);
+      extra = String(",\"ok\":true,\"needsRestart\":") + (restart ? "true" : "false");
+    }
+    if (httpd_query_key_value(q, "set", key, sizeof(key)) == ESP_OK) {
+      String err; bool restart = false;
+      if (!strcmp(key, "name") || !strcmp(key, "apSsid") || !strcmp(key, "apPass")) {
+        String val = httpd_query_key_value(q, "s", v, sizeof(v)) == ESP_OK ? urlDecode(v) : "";
+        val.trim();
+        if (!strcmp(key, "apPass") && (val.length() < 8 || val.length() > 63)) err = "the hotspot password needs 8 to 63 characters";
+        else if (!val.length() || val.length() > 31) err = "use 1 to 31 characters";
+        else {
+          Preferences c; c.begin("cfg", false); c.putString(key, val); c.end();
+          if (!strcmp(key, "name")) robotName = val; else restart = restartPending = true;
+        }
+      } else {
+        int i = 0; while (i < S_COUNT && strcmp(SETTINGS[i].key, key)) i++;
+        if (i == S_COUNT) err = String("unknown setting ") + key;
+        else if (httpd_query_key_value(q, "v", v, sizeof(v)) != ESP_OK) err = "missing v=<number>";
+        else {
+          int val = atoi(v); err = checkSetting(i, val, savedv);
+          if (!err.length()) {
+            Preferences c; c.begin("cfg", false); c.putInt(SETTINGS[i].key, val); c.end();
+            savedv[i] = val;
+            if (SETTINGS[i].restart) { restart = restartPending = true; }
+            else {
+              cfgv[i] = val;
+              if (i == S_STOPMM) safetyMm = val;
+              if (i >= S_VFLIP && i <= S_AE && cameraOk) applyCamera();
+              if (i == S_LEDMAX) setLed(0);
+              if (i <= S_TRIM) drive(curL, curR);
+            }
+            Serial.printf("[settings] %s = %d%s\n", key, val, SETTINGS[i].restart ? " (after restart)" : "");
+          }
+        }
+      }
+      if (err.length()) return send_text(req, "application/json", ("{\"ok\":false,\"error\":" + jsonStr(err) + "}").c_str());
+      extra = String(",\"ok\":true,\"changed\":") + jsonStr(key) + ",\"needsRestart\":" + (restart ? "true" : "false");
+    }
+  }
+  return send_text(req, "application/json", settingsJson(extra.c_str()).c_str());
+}
+
+// ---------------------------------------------------------------- /diag: the car tests itself
+static const char* resetName(int r) {
+  switch (r) {
+    case ESP_RST_POWERON: return "power-on"; case ESP_RST_EXT: return "reset-pin"; case ESP_RST_SW: return "software";
+    case ESP_RST_PANIC: return "crash"; case ESP_RST_INT_WDT: case ESP_RST_TASK_WDT: case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_DEEPSLEEP: return "deep-sleep"; case ESP_RST_BROWNOUT: return "brownout"; default: return "other";
+  }
+}
+static String motorProbe(char side) {
+  if (!imuOk) return "null";
+  float y0 = yawDeg; int d0 = distMm;
+  // 'l' / 'r' = one side forward (the car should pivot right / left); 'b' = both forward briefly (closer to the wall)
+  drive(side != 'r' ? 70 : 0, side != 'l' ? 70 : 0); lastDrive = millis();
+  delay(side == 'b' ? 350 : 600);
+  drive(0, 0);
+  delay(350);
+  char b[80]; snprintf(b, sizeof(b), "{\"turnDeg\":%.1f,\"distBefore\":%d,\"distAfter\":%d}", (float)(yawDeg - y0), d0, (int)distMm);
+  return b;
+}
+// ---------------------------------------------------------------- /ota: firmware over Wi-Fi, and "undo" (boot the previous one)
+// GET /ota → what is possible. POST /ota (body = the .bin, header X-OTA-Key) → write it to the other app slot, restart.
+// GET /ota?rollback=1 (header X-OTA-Key) → restart into the firmware that was on the car before the last update.
+static bool otaKeyOk(httpd_req_t* req) {
+  if (!strlen(OTA_KEY)) return false;
+  char k[72] = "";
+  if (httpd_req_get_hdr_value_str(req, "X-OTA-Key", k, sizeof(k)) != ESP_OK) return false;
+  return strcmp(k, OTA_KEY) == 0;
+}
+static String slotInfo(const esp_partition_t* p) {
+  if (!p) return "null";
+  esp_app_desc_t d;
+  bool valid = esp_ota_get_partition_description(p, &d) == ESP_OK;
+  return String("{\"label\":\"") + p->label + "\",\"valid\":" + (valid ? "true" : "false") + (valid ? String(",\"built\":\"") + d.date + " " + d.time + "\"" : "") + "}";
+}
+static esp_err_t ota_handler(httpd_req_t* req) {
+  const esp_partition_t* next = esp_ota_get_next_update_partition(NULL);
+  if (req->method == HTTP_GET) {
+    char q[32], v[4];
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK && httpd_query_key_value(q, "rollback", v, sizeof(v)) == ESP_OK) {
+      if (!otaKeyOk(req)) { httpd_resp_set_status(req, "403 Forbidden"); return send_text(req, "application/json", "{\"ok\":false,\"error\":\"wrong or missing OTA key\"}"); }
+      esp_app_desc_t d;
+      if (!next || esp_ota_get_partition_description(next, &d) != ESP_OK) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"there is no previous firmware on the car\"}");
+      if (esp_ota_set_boot_partition(next) != ESP_OK) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"could not switch\"}");
+      send_text(req, "application/json", "{\"ok\":true,\"restarting\":true}");
+      drive(0, 0); delay(400); ESP.restart();
+    }
+    String j = String("{\"fw\":\"" FW_VERSION "\",\"ota\":") + (next ? "true" : "false") + ",\"keySet\":" + (strlen(OTA_KEY) ? "true" : "false") +
+               ",\"running\":" + slotInfo(esp_ota_get_running_partition()) + ",\"other\":" + slotInfo(next) + "}";
+    return send_text(req, "application/json", j.c_str());
+  }
+  if (!otaKeyOk(req)) { httpd_resp_set_status(req, "403 Forbidden"); return send_text(req, "application/json", "{\"ok\":false,\"error\":\"wrong or missing OTA key: update once over USB from this PC\"}"); }
+  if (!next) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"this firmware was flashed without OTA space: update once over USB from Muse Carpathron\"}");
+  int left = req->content_len;
+  if (left <= 0 || (size_t)left > next->size) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"the firmware file is empty or too big\"}");
+  drive(0, 0); turning = false;
+  if (!Update.begin(left)) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"could not start the update\"}");
+  Serial.printf("[ota] receiving %d bytes\n", left);
+  static uint8_t buf[4096];
+  int tries = 0;
+  while (left > 0) {
+    int n = httpd_req_recv(req, (char*)buf, left < (int)sizeof(buf) ? left : sizeof(buf));
+    if (n == HTTPD_SOCK_ERR_TIMEOUT && ++tries < 5) continue;
+    if (n <= 0) { Update.abort(); return send_text(req, "application/json", "{\"ok\":false,\"error\":\"the upload stopped\"}"); }
+    tries = 0;
+    if (Update.write(buf, n) != (size_t)n) { Update.abort(); return send_text(req, "application/json", "{\"ok\":false,\"error\":\"writing failed\"}"); }
+    left -= n;
+    lastDrive = millis();
+  }
+  if (!Update.end(true)) { String e = String("{\"ok\":false,\"error\":\"the firmware file is damaged (") + Update.errorString() + ")\"}"; return send_text(req, "application/json", e.c_str()); }
+  Serial.println("[ota] done, restarting");
+  send_text(req, "application/json", "{\"ok\":true,\"restarting\":true}");
+  delay(500); ESP.restart();
+  return ESP_OK;
+}
+
+static esp_err_t diag_handler(httpd_req_t* req) {
+  bool motors = queryInt(req, "motors", 0) == 1;
+  String j = "{\"fw\":\"" FW_VERSION "\",\"uptime\":" + String(millis() / 1000);
+  int rr = (int)esp_reset_reason();
+  j += ",\"reset\":{\"code\":" + String(rr) + ",\"name\":\"" + resetName(rr) + "\",\"brownoutDetector\":false}";
+  j += ",\"memory\":{\"heapFree\":" + String(ESP.getFreeHeap()) + ",\"psram\":" + (psramFound() ? "true" : "false") + ",\"psramFree\":" + String(ESP.getFreePsram()) + "}";
+  bool sta = WiFi.status() == WL_CONNECTED;
+  j += ",\"wifi\":{\"mode\":\"" + String(apMode ? "hotspot" : "wifi") + "\",\"connected\":" + (sta ? "true" : "false") + ",\"rssi\":" + String(sta ? WiFi.RSSI() : 0) + "}";
+  j += ",\"bootFix\":" + String(flashFuseSet() ? "true" : "false");
+  // camera: start-up error, sensor id, frames per second
+  float fps = 0;
+  if (cameraOk) {
+    unsigned long t0 = millis(); int n = 0;
+    for (int i = 0; i < 6; i++) { camera_fb_t* fb = esp_camera_fb_get(); if (fb) { n++; esp_camera_fb_return(fb); } }
+    unsigned long dt = millis() - t0; fps = dt ? n * 1000.0f / dt : 0;
+  }
+  char cb[120]; snprintf(cb, sizeof(cb), ",\"camera\":{\"ok\":%s,\"error\":%d,\"pid\":%d,\"fps\":%.1f}", cameraOk ? "true" : "false", cameraErr, cameraPid, fps);
+  j += cb;
+  // I2C: list every device that answers, read the gyro's WHO_AM_I
+  j += ",\"i2c\":{\"sda\":" + String(I2C_SDA) + ",\"scl\":" + String(I2C_SCL) + ",\"mode\":\"" + sensorMode + "\",\"active\":" + (wireOn ? "true" : "false") + ",\"devices\":[";
+  int who = -1;
+  if (wireOn) {
+    i2cHold = true;
+    for (int i = 0; i < 40 && !i2cIdle; i++) delay(5);
+    bool first = true;
+    for (uint8_t a = 1; a < 127; a++) if (i2cPresent(a)) { if (!first) j += ","; j += String(a); first = false; }
+    if (i2cPresent(MPU_ADDR)) { Wire.beginTransmission(MPU_ADDR); Wire.write(0x75); if (Wire.endTransmission(false) == 0 && Wire.requestFrom((int)MPU_ADDR, 1) == 1) who = Wire.read(); }
+    i2cHold = false;
+  }
+  j += "]}";
+  // laser: 25 readings over 1 s
+  int n = 0, none = 0; long sum = 0, sum2 = 0; int lo = 9999, hi = -1;
+  if (tofOk) for (int i = 0; i < 25; i++) { int d = distMm; if (d > 0) { n++; sum += d; sum2 += (long)d * d; lo = min(lo, d); hi = max(hi, d); } else none++; delay(40); }
+  float mean = n ? (float)sum / n : 0, sd = n > 1 ? sqrtf(max(0.0f, (float)sum2 / n - mean * mean)) : 0;
+  char tb[200]; snprintf(tb, sizeof(tb), ",\"tof\":{\"ok\":%s,\"samples\":%d,\"outOfRange\":%d,\"mean\":%.0f,\"sd\":%.1f,\"min\":%d,\"max\":%d,\"stopMm\":%d}",
+                         tofOk ? "true" : "false", n, none, mean, sd, n ? lo : -1, hi, (int)safetyMm);
+  j += tb;
+  // gyro: zero drift and noise while standing still (50 readings, 0.5 s)
+  float gs = 0, gs2 = 0; int gn = 0;
+  if (imuOk && !curL && !curR) for (int i = 0; i < 50; i++) { float d = lastDps; gs += d; gs2 += d * d; gn++; delay(10); }
+  float gm = gn ? gs / gn : 0, gsd = gn > 1 ? sqrtf(max(0.0f, gs2 / gn - gm * gm)) : 0;
+  char gb[160]; snprintf(gb, sizeof(gb), ",\"imu\":{\"ok\":%s,\"whoAmI\":%d,\"bias\":%.1f,\"restDps\":%.2f,\"noiseDps\":%.2f,\"yaw\":%.1f}", imuOk ? "true" : "false", who, gyroBias, gm, gsd, (float)yawDeg);
+  j += gb;
+  j += ",\"ir\":{\"ok\":" + String(irOk ? "true" : "false") + ",\"left\":" + (irLeft ? "true" : "false") + ",\"right\":" + (irRight ? "true" : "false") + "}";
+  if (motors) {
+    String ml = motorProbe('l'), mr = motorProbe('r');
+    j += ",\"motors\":{\"left\":" + ml + ",\"right\":" + mr + ",\"both\":" + (tofOk ? motorProbe('b') : String("null")) + "}";
+  }
+  j += ",\"pins\":{\"rEn\":" + String(R_EN) + ",\"rFwd\":" + String(R_FWD) + ",\"rBack\":" + String(R_BACK) + ",\"lEn\":" + String(L_EN) + ",\"lFwd\":" + String(L_FWD) + ",\"lBack\":" + String(L_BACK) + ",\"led\":" + String(LED_PIN) + "}}";
+  return send_text(req, "application/json", j.c_str());
 }
 
 #define PART_BOUNDARY "123456789000000000000987654321"
@@ -603,7 +928,7 @@ static esp_err_t setup_handler(httpd_req_t* req) {
   String opts;
   for (int i = 0; i < n && i < 25; i++) {
     String name = WiFi.SSID(i);
-    if (!name.length() || name == AP_SSID || opts.indexOf(">" + htmlEscape(name) + "<") >= 0) continue;  // never offer the car's own hotspot
+    if (!name.length() || name == apSsid.c_str() || opts.indexOf(">" + htmlEscape(name) + "<") >= 0) continue;  // never offer the car's own hotspot
     opts += "<option>" + htmlEscape(name) + "</option>";
   }
   String page = F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>Car Wi-Fi</title>"
@@ -632,7 +957,7 @@ static esp_err_t savewifi_handler(httpd_req_t* req) {
     if (httpd_query_key_value(q, "pass", v, sizeof(v)) == ESP_OK) pass = urlDecode(v);
   }
   if (!ssid.length()) return send_text(req, "text/plain", "Pick your home Wi-Fi first. Go back and choose it from the list.");
-  if (ssid == AP_SSID) return send_text(req, "text/plain", "That is the car's own hotspot. Go back and pick your home Wi-Fi (for example the one your PC uses).");
+  if (ssid == apSsid.c_str()) return send_text(req, "text/plain", "That is the car's own hotspot. Go back and pick your home Wi-Fi (for example the one your PC uses).");
   prefs.putString("ssid", ssid);
   prefs.putString("pass", pass);
   savedSsid = ssid; savedPass = pass;
@@ -658,8 +983,8 @@ void startServers() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = 80;
   config.ctrl_port = 32768;
-  config.max_uri_handlers = 16;
-  config.stack_size = 8192;
+  config.max_uri_handlers = 26;
+  config.stack_size = 10240;
   config.lru_purge_enable = true;
   httpd_uri_t uris[] = {
     { "/", HTTP_GET, index_handler, NULL },
@@ -675,6 +1000,10 @@ void startServers() {
     { "/turn", HTTP_GET, turn_handler, NULL },
     { "/safety", HTTP_GET, safety_handler, NULL },
     { "/config", HTTP_GET, config_handler, NULL },
+    { "/settings", HTTP_GET, settings_handler, NULL },
+    { "/diag", HTTP_GET, diag_handler, NULL },
+    { "/ota", HTTP_GET, ota_handler, NULL },
+    { "/ota", HTTP_POST, ota_handler, NULL },
   };
   if (httpd_start(&web_httpd, &config) == ESP_OK) {
     for (auto& u : uris) httpd_register_uri_handler(web_httpd, &u);
@@ -704,14 +1033,14 @@ bool connectSta(unsigned long timeoutMs) {
 void startHotspot() {
   apMode = true;
   WiFi.mode(WIFI_AP_STA);  // AP for setup + STA so the setup page can scan networks
-  WiFi.softAP(AP_SSID, AP_PASS);
-  Serial.printf("Hotspot \"%s\" (password %s). Open http://192.168.4.1/setup to choose your Wi-Fi.\n", AP_SSID, AP_PASS);
+  WiFi.softAP(apSsid.c_str(), apPass.c_str());
+  Serial.printf("Hotspot \"%s\" (password %s). Open http://192.168.4.1/setup to choose your Wi-Fi.\n", apSsid.c_str(), apPass.c_str());
 }
 
 void startWifi() {
   prefs.begin("carpathron", false);
   savedSsid = prefs.getString("ssid", "");
-  if (savedSsid == AP_SSID) { savedSsid = ""; prefs.remove("ssid"); prefs.remove("pass"); }  // old mistake: own hotspot saved as home Wi-Fi
+  if (savedSsid == apSsid.c_str()) { savedSsid = ""; prefs.remove("ssid"); prefs.remove("pass"); }  // old mistake: own hotspot saved as home Wi-Fi
   savedPass = prefs.getString("pass", "");
   if (!savedSsid.length() && strcmp(WIFI_SSID, "YOUR_WIFI_NAME") != 0 && strlen(WIFI_SSID)) { savedSsid = WIFI_SSID; savedPass = WIFI_PASS; }
   WiFi.setSleep(false);  // lower latency for driving
@@ -798,7 +1127,7 @@ void handleSerial() {
     }
     if (serialStep == 1) {
       line.trim();
-      if (!line.length() || line == AP_SSID) { Serial.println("Cancelled (type the name of your home Wi-Fi)."); serialStep = 0; continue; }
+      if (!line.length() || line == apSsid.c_str()) { Serial.println("Cancelled (type the name of your home Wi-Fi)."); serialStep = 0; continue; }
       newSsid = line; serialStep = 2;
       Serial.println("Now type the Wi-Fi password and press Enter (it is stored only in the car):");
       continue;
@@ -814,7 +1143,7 @@ void handleSerial() {
     if (line == "wifi") {
       int n = WiFi.scanNetworks();
       Serial.println("Wi-Fi networks the car can see (2.4 GHz only):");
-      for (int i = 0; i < n && i < 20; i++) if (WiFi.SSID(i) != AP_SSID) Serial.printf("  %s  (%d dBm)\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+      for (int i = 0; i < n && i < 20; i++) if (WiFi.SSID(i) != apSsid.c_str()) Serial.printf("  %s  (%d dBm)\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
       Serial.println("Type your Wi-Fi name exactly and press Enter:");
       serialStep = 1;
     } else if (line == "fixboot") {
@@ -835,6 +1164,8 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\nBaby Carpathron starting… firmware " FW_VERSION);
   Serial.printf("Reset reason: %d (1=power on, 3=software, 4/5/6=crash/watchdog, 9=low voltage/brownout)\n", (int)esp_reset_reason());
+  loadSettings();
+  safetyMm = CFG(S_STOPMM);
   initMotors();
   cameraOk = initCamera();
   if (initSensors()) xTaskCreatePinnedToCore(sensorTask, "sensors", 4096, NULL, 3, NULL, 0);

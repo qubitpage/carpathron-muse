@@ -434,10 +434,10 @@
   function modal(...kids) { const box = $('#modalBox'); box.innerHTML = ''; box.append(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false)); $('#modal').hidden = false; }
   function closeModal() { $('#modal').hidden = true; }
   // helpers shared with the page scripts (shield.js)
-  // ---- Robot page tabs: Control (drive) · Setup (calibration, firmware) · Devices (discovery) · Firmware studio
+  // ---- Robot page tabs: Control (drive) · Setup (calibration, firmware) · Car settings · Health · Devices (discovery) · Firmware studio
   try { S.robotTab = localStorage.getItem('mc.robotTab') || 'control'; } catch { S.robotTab = 'control'; }
   function robotTab(id) {
-    if (!['control', 'setup', 'devices', 'studio'].includes(id)) id = 'control';
+    if (!['control', 'setup', 'carset', 'health', 'devices', 'studio'].includes(id)) id = 'control';
     S.robotTab = id;
     try { localStorage.setItem('mc.robotTab', id); } catch {}
     $$('#robotTabs button').forEach((b) => { b.classList.toggle('on', b.dataset.rtab === id); b.setAttribute('aria-selected', b.dataset.rtab === id ? 'true' : 'false'); });
@@ -445,6 +445,8 @@
     if (id === 'setup') renderRobotSetup();
     if (id === 'devices' && window.MCstudio) window.MCstudio.renderDevices($('#robotDevices'));
     if (id === 'studio' && window.MCstudio) window.MCstudio.renderStudio($('#robotStudio'));
+    if (id === 'carset' && window.MClab) window.MClab.renderSettings($('#robotCarset'));
+    if (id === 'health' && window.MClab) window.MClab.renderHealth($('#robotHealth'));
   }
   function openRobot(tab) { S.robotTab = tab; show('robot'); }
   $$('#robotTabs button').forEach((b) => { b.onclick = () => robotTab(b.dataset.rtab); });
@@ -453,7 +455,7 @@
     S.settings = await api('/api/settings');
     el.innerHTML = '';
     const live = h('div', { class: 'small' }, 'Reading the car…');
-    el.append(h('div', { class: 'settings' }, buildRobotCard(S.settings),
+    el.append(h('div', { class: 'settings' }, buildRobotCard(S.settings), window.MClab ? window.MClab.firmwareCard() : null,
       h('div', { class: 'card' }, h('h3', {}, 'Sensors on the car'), live,
         h('div', { class: 'row' }, h('span', { class: 'small' }, 'Sensor mode:'),
           ...[['auto', 'Laser + gyro (I2C)'], ['ir', 'IR obstacle modules (kit)'], ['off', 'None']].map(([m, label]) => h('button', { class: 'btn tiny', onclick: async () => {
@@ -1142,8 +1144,6 @@
     const dsp = h('input', { type: 'number', min: 30, max: 100, value: r.driveSpeed || 60 });
     const cps = h('input', { type: 'number', min: 5, max: 200, value: r.cmPerSec || 40 });
     const info = h('span', { class: 'small muted' });
-    const fwOut = h('pre', { class: 'shield-cmds', hidden: true });
-    window.MCfirmware = (t) => { fwOut.hidden = false; fwOut.textContent = `⏳ ${t}`; };
     const find = h('button', { class: 'btn', onclick: async () => {
       find.disabled = true; info.textContent = 'Searching your network (≈10 s)…';
       try {
@@ -1164,11 +1164,6 @@
         h('button', { class: 'btn', onclick: async () => { const r = await api('/api/robot/forward', { body: { seconds: 1 } }); info.textContent = r.error ? `✕ ${r.error}` : `Drove 1 s at ${r.speed}% — measure the distance in cm.`; } }, '▶ Test 1 s drive'),
         h('button', { class: 'btn', title: 'The car turns in short steps and photographs until it sees the start view again', onclick: async () => { info.textContent = 'Calibrating the turn… (the car spins for about 7 s, about 2 circles)'; const r = await api('/api/robot/calibrate-turn', { body: {} }); info.textContent = r.error ? `✕ ${r.error}` : `✓ Turn calibrated: a full circle takes ${r.turnMs360} ms (${r.matches} photo matches). Press Test 360° turn to check.`; t360.value = r.turnMs360; } }, '🔄 Auto-calibrate turn'),
         h('button', { class: 'btn', onclick: async () => { const r = await api('/api/robot/turn', { body: { degrees: 360 } }); info.textContent = r.error ? `✕ ${r.error}` : 'Turned "360°" — did it end facing the same way?'; } }, '↻ Test 360° turn'),
-        h('button', { class: 'btn', title: 'Car connected to this PC with the USB-C cable', onclick: async (ev) => {
-          const b = ev.currentTarget; b.disabled = true; fwOut.textContent = 'Updating the car firmware… (first time: installs the ESP32 tools, several minutes)'; fwOut.hidden = false;
-          const r = await api('/api/robot/firmware', { body: { action: 'update' } }); b.disabled = false;
-          fwOut.textContent = r.error ? `✕ ${r.error}` : r.text; } }, '⬆ Update car firmware (USB)'),
-        h('button', { class: 'btn', onclick: async () => { fwOut.hidden = false; fwOut.textContent = 'Checking…'; const r = await api('/api/robot/firmware', { body: { action: 'status' } }); fwOut.textContent = r.error ? `✕ ${r.error}` : r.text; } }, 'Firmware version'),
         h('button', { class: 'btn', title: 'Put a box or a shoe exactly 50 cm in front of the car first', onclick: async () => { info.textContent = 'Measuring… (the vision model looks where the object touches the floor)'; const r = await api('/api/robot/calibrate-distance', { body: { cm: 50 } }); info.textContent = r.error ? `✕ ${r.error}` : `✓ Distance calibrated: camera tilt ${r.tiltDeg}° (measured by ${String(r.model).replace(/^local:/, '')}).`; } }, '📏 Calibrate distance (object at 50 cm)')),
       h('div', { class: 'row' },
         h('button', { class: 'btn primary', onclick: async () => {
@@ -1176,7 +1171,7 @@
           catch (e) { toast(e.message, true); }
         } }, 'Save'),
         find),
-      info, fwOut);
+      info);
   }
 
   async function renderSettings() {

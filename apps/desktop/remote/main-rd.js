@@ -328,7 +328,7 @@ function setupIpc() {
   });
   handle('rd-title', (e, t) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.setTitle(String(t).slice(0, 120)); });
   handle('rd-fullscreen', (e, on) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.setFullScreen(!!on); return w ? w.isFullScreen() : false; });
-  handle('rd-clipboard', () => clipboard.readText().slice(0, 20000));
+  handle('rd-clipboard', () => String(clipboard.readText() || '').slice(0, 20000));
 
   // files: open a dropped file (path from webUtils in the preload), read it in chunks; save received files
   handle('rd-file-open', async (_e, p) => {
@@ -362,7 +362,7 @@ function setupIpc() {
   });
   handle('rd-show-file', (_e, p) => { p = String(p || ''); if (received.has(p)) shell.showItemInFolder(p); else if (p === 'downloads' || p === 'rec') shell.openPath(recvDir(p === 'rec' ? 'rec' : 'file')); return true; });
   handle('rd-clip-write', (_e, text) => { if (S.clipSync !== false && typeof text === 'string') clipboard.writeText(text.slice(0, 100000)); return true; });
-  handle('rd-clip-read', () => (S.clipSync !== false ? clipboard.readText().slice(0, 100000) : ''));
+  handle('rd-clip-read', () => (S.clipSync !== false ? String(clipboard.readText() || '').slice(0, 100000) : ''));
 
   // session panel (on the controlled computer) <-> host page
   handle('rd-panel-cmd', (_e, cmd) => { if (hostWin && !hostWin.isDestroyed() && cmd && typeof cmd.t === 'string') hostWin.webContents.send('rd-panel-cmd', cmd); return true; });

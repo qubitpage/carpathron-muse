@@ -22,7 +22,7 @@ class Camera {
     return dir;
   }
 
-  async capture() {
+  async capture(opts = {}) {
     const r = this.getSettings().robot || {};
     const carIp = String(r.carIp || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
     const url = String(r.cameraUrl || '').trim() || (carIp && this.carHasCamera && this.carHasCamera() ? `http://${carIp}/capture` : '');
@@ -39,7 +39,9 @@ class Camera {
       buffer = await this.fromWindow();
       source = c && c.offersCamera ? 'phone camera' : 'PC webcam';
     }
-    const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+    if (opts.quiet) return { path: '', buffer, source, mime: 'image/jpeg' }; // calibration frames: not saved, not shown
+    // milliseconds in the name: photos taken within the same second must not overwrite each other
+    const stamp = new Date().toISOString().replace(/[:T]/g, '-').replace('.', '-').slice(0, 23);
     const file = path.join(this.folder(), `photo-${stamp}.jpg`);
     fs.writeFileSync(file, buffer);
     this.log(`Photo saved (${source}): ${file}`);

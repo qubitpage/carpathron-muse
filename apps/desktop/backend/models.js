@@ -13,6 +13,7 @@ const KNOWN = {
   'muse-spark-1.2': { kind: 'chat', caps: CHAT_CAPS, effort: ['minimal', 'low', 'medium', 'high', 'xhigh'], context: 1048576 },
   'muse-spark-1.2-contributor': { kind: 'chat', caps: CHAT_CAPS, effort: ['minimal', 'low', 'medium', 'high', 'xhigh'], context: 1048576 },
   'muse-spark-1.1': { kind: 'chat', caps: CHAT_CAPS, effort: ['minimal', 'low', 'medium', 'high', 'xhigh'], context: 1048576 },
+  'muse-glimmer-local': { kind: 'chat', caps: ['text', 'vision', 'tools', 'reasoning'], effort: ['low', 'medium', 'high', 'xhigh'], context: 131072, note: 'Open weights — runs on this PC (Ollama)', hidden: true },
   'muse-image-1.0': { kind: 'image', caps: ['text', 'vision', 'image-out'], note: 'Image generation and editing' },
   'sam-3.1': { kind: 'segment', caps: ['vision', 'video', 'segmentation'], note: 'Segment Anything: finds objects, returns boxes and masks' },
   'muse-voice-transcribe-1.0': { kind: 'transcribe', caps: ['audio', 'transcription'], note: 'Speech to text' },
@@ -22,9 +23,24 @@ const CAP_LABEL = {
   json: 'JSON', 'image-out': 'Makes images', segmentation: 'Segmentation', transcription: 'Speech→text',
 };
 
+// Capabilities Ollama reports for local models (filled by Ollama.status(); keys = model names without "local:").
+const LOCAL_CAPS = new Map();
+function setLocalCaps(name, caps) {
+  const c = new Set(['text']);
+  for (const x of caps || []) {
+    if (x === 'vision' || x === 'tools') c.add(x);
+    if (x === 'thinking') c.add('reasoning');
+  }
+  LOCAL_CAPS.set(String(name), [...c]);
+}
 function capsFor(id) {
   const k = String(id || '');
   if (KNOWN[k]) return { id: k, ...KNOWN[k] };
+  if (k.startsWith('local:')) {
+    const n = k.slice(6);
+    const caps = LOCAL_CAPS.get(n) || LOCAL_CAPS.get(n.replace(/:latest$/, '')) || LOCAL_CAPS.get(`${n}:latest`);
+    return { id: k, kind: 'chat', caps: caps || ['text', 'tools'], effort: caps && caps.includes('reasoning') ? ['low', 'medium', 'high'] : [], note: 'Runs on this PC (offline)', local: true };
+  }
   if (/sam/i.test(k)) return { id: k, kind: 'segment', caps: ['vision', 'segmentation'] };
   if (/image|imagine|emu/i.test(k)) return { id: k, kind: 'image', caps: ['text', 'image-out'] };
   if (/voice|asr|transcri|whisper/i.test(k)) return { id: k, kind: 'transcribe', caps: ['audio', 'transcription'] };
@@ -33,10 +49,11 @@ function capsFor(id) {
   return { id: k, kind: 'chat', caps: ['text', 'tools'], effort: [] };
 }
 const has = (id, cap) => capsFor(id).caps.includes(cap);
+const isLocal = (id) => String(id || '').startsWith('local:') || id === 'muse-glimmer-local';
 
 function withCaps(list) {
   const ids = new Set(list.map((m) => m.id));
-  for (const id of Object.keys(KNOWN)) if (!ids.has(id)) list.push({ id, label: id, notListed: true });
+  for (const id of Object.keys(KNOWN)) if (!ids.has(id) && !KNOWN[id].hidden) list.push({ id, label: id, notListed: true });
   return list.map((m) => {
     const c = capsFor(m.id);
     return { ...m, kind: c.kind, caps: c.caps, capLabels: c.caps.map((x) => CAP_LABEL[x] || x), effort: c.effort || [], note: c.note || '' };
@@ -148,4 +165,4 @@ function parseSam(text) {
   return { boxes, masks, raw: text };
 }
 
-module.exports = { KNOWN, capsFor, has, withCaps, Media, parseSam, mimeOf, dataUrl, CAP_LABEL };
+module.exports = { KNOWN, capsFor, has, isLocal, setLocalCaps, LOCAL_CAPS, withCaps, Media, parseSam, mimeOf, dataUrl, CAP_LABEL };

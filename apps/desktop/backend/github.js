@@ -18,7 +18,7 @@ const GH_TOOLS = [
   { name: 'github_account', risk: 'read', description: 'Show the connected GitHub account (login, name, plan) and its organizations. Use first to know the owner for new repositories.', parameters: obj({}) },
   { name: 'github_repos', risk: 'read', description: 'List repositories of the connected account (or an owner/org), newest first; optional text filter.', parameters: obj({ owner: { type: 'string' }, filter: { type: 'string' } }) },
   { name: 'github_create_repo', risk: 'write', description: 'Create a new GitHub repository (personal or in an organization).', parameters: obj({ name: { type: 'string' }, org: { type: 'string', description: 'organization login; empty = your account' }, private: { type: 'boolean' }, description: { type: 'string' }, homepage: { type: 'string' } }, ['name']) },
-  { name: 'github_publish', risk: 'write', description: 'Publish a local folder to GitHub: git init if needed, commit all changes, set the remote and push (creates the repository first if it does not exist). Uses the saved token; commits use the saved author name/email.', parameters: obj({ path: { type: 'string', description: 'local folder' }, repo: { type: 'string', description: 'owner/name' }, branch: { type: 'string', description: 'default main' }, message: { type: 'string' }, private: { type: 'boolean', description: 'when the repo must be created' }, force: { type: 'boolean', description: 'force-push (overwrites remote history) — only if the user asked' } }, ['path', 'repo']) },
+  { name: 'github_publish', risk: 'write', description: 'Publish a local folder to GitHub: git init if needed, commit all changes, set the remote and push (creates the repository first if it does not exist). Uses the saved token; commits use the saved author name/email.', parameters: obj({ path: { type: 'string', description: 'local folder' }, repo: { type: 'string', description: 'owner/name' }, branch: { type: 'string', description: 'default main' }, message: { type: 'string' }, private: { type: 'boolean', description: 'when the repo must be created' }, force: { type: 'boolean', description: 'force-push (overwrites remote history) — only if the user asked' }, allow_risky: { type: 'boolean', description: 'publish even though Carpathron Shield found critical problems (secrets, .env, keys) — ONLY after the user explicitly accepted the risk' } }, ['path', 'repo']) },
   { name: 'github_clone', risk: 'write', description: 'Clone a GitHub repository (private ones too) to a local folder.', parameters: obj({ repo: { type: 'string' }, path: { type: 'string' } }, ['repo']) },
   { name: 'github_release', risk: 'write', description: 'Create a GitHub release (tag created from the branch if missing) and upload files as release assets (installers, APKs, zips — up to 2 GB each). Returns the release and download URLs.', parameters: obj({ repo: { type: 'string' }, tag: { type: 'string' }, name: { type: 'string' }, notes: { type: 'string', description: 'Markdown release notes' }, files: { type: 'array', items: { type: 'string' } }, target: { type: 'string', description: 'branch or commit for a new tag (default: default branch)' }, draft: { type: 'boolean' }, prerelease: { type: 'boolean' }, latest: { type: 'boolean' } }, ['repo', 'tag']) },
   { name: 'github_issues', risk: 'write', description: 'Work with issues: action list | get | create | comment | close.', parameters: obj({ repo: { type: 'string' }, action: { type: 'string', enum: ['list', 'get', 'create', 'comment', 'close'] }, number: { type: 'integer' }, title: { type: 'string' }, body: { type: 'string' }, state: { type: 'string' } }, ['repo', 'action']) },
@@ -324,7 +324,15 @@ async function execGitHub(name, args, ctx) {
       const r = await gh.ensureRepo(owner, args.name, { private: args.private !== false, description: args.description });
       return `Repository ready: ${r.html_url} (${r.private ? 'private' : 'public'})`;
     }
-    case 'github_publish': return gh.publish({ ...args, path: path.resolve(ctx.workspace, String(args.path || '.')) }, ctx.signal);
+    case 'github_publish': {
+      const dir = path.resolve(ctx.workspace, String(args.path || '.'));
+      if (ctx.shield) {
+        ctx.status && ctx.status('Shield: checking for secrets before publishing…');
+        const g = await ctx.shield.gate(dir, { purpose: 'github' });
+        if (g.blocked && !args.allow_risky) throw new Error(g.message);
+      }
+      return gh.publish({ ...args, path: dir }, ctx.signal);
+    }
     case 'github_clone': return gh.clone(args, ctx.workspace, ctx.signal);
     case 'github_release': return gh.release(args, ctx.workspace);
     case 'github_issues': {

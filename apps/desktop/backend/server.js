@@ -14,6 +14,7 @@ const selfsigned = require('selfsigned');
 const { Store } = require('./store');
 const { Robot } = require('./robot');
 const { Mapper } = require('./mapper');
+const { Vision } = require('./vision');
 const voice = require('./voice');
 const { McpManager, BUILTIN_MCP } = require('./mcp');
 const { Agent } = require('./agent');
@@ -24,7 +25,11 @@ const { Camera } = require('./camera');
 const { Secrets } = require('./secrets');
 const { Remote } = require('./remote');
 const { GitHub } = require('./github');
-const { Jobs, findArduinoCli } = require('./xtools');
+const { Shield } = require('./shield');
+const { Ollama } = require('./ollama');
+const { Jobs, findArduinoCli, execX, runProc } = require('./xtools');
+const devices = require('./devices');
+const { Studio } = require('./studio');
 const models = require('./models');
 const render = require('./render');
 
@@ -63,6 +68,7 @@ const BUILTIN_SKILLS = [
   { name: 'nvidia-jetson', description: 'NVIDIA work: GPU/CUDA on this PC, or a Jetson board over SSH (JetPack, CUDA, TensorRT, cameras, AI models)', body: 'NVIDIA workflow:\n1. dev_environment: GPU and driver (nvidia-smi), CUDA Toolkit (nvcc), Nsight, Jetson on USB (recovery mode) or on the network.\n2. On this PC: install the CUDA Toolkit with dev_install cuda if needed, build and run a small CUDA/PyTorch check (torch.cuda.is_available()), profile with Nsight (open_ide nsight-systems).\n3. Jetson over SSH (add it with ssh_save_server): cat /etc/nv_tegra_release and dpkg -l nvidia-jetpack for the JetPack version; sudo nvpmodel -q / jetson_clocks for power modes; jtop (pip install jetson-stats) for load; CUDA samples / deviceQuery; TensorRT (trtexec) and DeepStream for AI pipelines; cameras with gst-launch-1.0 nvarguscamerasrc; Docker with the NVIDIA runtime (l4t containers).\n4. Flashing a Jetson needs NVIDIA SDK Manager on Ubuntu (a Linux PC or WSL2): explain the steps (recovery mode jumper/button, USB-C to the host, SDK Manager) — or flash an SD-card image for Orin Nano dev kits with sd_card_image.\n5. Always measure and test on the device before saying it works.' },
   { name: 'test-app', description: 'Test an app or website like a user: run it, click through it, find defects, fix them and test again', body: 'App testing loop:\n1. Build and start the app (run_command / job_start for servers; open the page with browser_view open, or the desktop app with computer_act open_app).\n2. Make a task list (task_update) of the main user flows and checks (start, navigation, forms, errors, mobile width 390 for websites).\n3. Go through each flow visually: screenshot, act (browser_act / computer_act), screenshot again. Note every defect: crashes, console errors, wrong text, broken layout, slow steps.\n4. Fix the defects in the code, rebuild, and test the same flow again until it passes.\n5. Run the automated tests if the project has them. Report what was tested, what was fixed, and anything still open — with evidence (screenshots, outputs).' },
   { name: 'security-audit', description: 'Check and harden a public server or website (ports, firewall, SSH, updates, TLS, headers, exposed files)', body: 'Security audit:\n1. security_check with the server and/or the domain.\n2. Explain the findings in plain words, most critical first.\n3. With the user\'s OK, fix them over SSH step by step (keep your own SSH access working: allow OpenSSH in the firewall BEFORE enabling it; test a second SSH login before disabling passwords).\n4. Run security_check again and show the before/after.' },
+  { name: 'secure-publish', description: 'Publish an app safely with Carpathron Shield: scan before upload, deploy, then scan, fix and monitor the server and site', body: 'Secure publish with Carpathron Shield:\n1. shield_scan target project on the folder you will publish (purpose server for an SSH upload, github for GitHub; remote_path = the destination). Fix every critical finding in the code first: move secrets to environment variables on the server, add .env* to .gitignore, build without source maps, turn on row-level security. Never use allow_risky unless the user explicitly accepts the risk.\n2. Publish (ssh_upload / github_publish) and configure the web server.\n3. shield_scan target server, then target site with the public url (deep true when the app uses Supabase or Firebase).\n4. Explain the findings in plain words, most critical first. With the user\'s OK apply built-in fixes with shield_fix (preview first); make other changes with ssh_exec carefully.\n5. Scan again and show before/after scores, then offer shield_monitor start with the site url.' },
   { name: 'server-setup', description: 'Set up or fix a VPS / dedicated server over SSH', body: 'On the chosen server (ssh_servers to list):\n1. Inspect first: OS, disk, memory, running services (ssh_exec: uname -a; df -h; free -m; systemctl --failed; ss -tlnp).\n2. Say what you will change, then do it step by step: updates, firewall (keep SSH open!), users, nginx/caddy, certificates, docker, databases, app deployment with systemd or docker compose.\n3. Use ssh_shell for interactive programs. Verify each step (curl the site, check logs).\n4. Summarise what was changed and how to undo it.' },
 ];
 function seedSkills(skills) {
@@ -171,6 +177,16 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   const agent = new Agent({ store, robot, mcp, emit, log: logFn, memory, projects, skills, camera, remote, jobs, dataDir, github });
   const mapper = new Mapper({ robot, camera, api: agent.api, memory, getSettings: () => store.settings, emit, log: logFn });
   agent.mapper = mapper;
+  const shield = new Shield({ store, remote, log: logFn, emit, dataDir });
+  agent.shield = shield;
+  const ollama = new Ollama({ getSettings: () => store.settings, saveSettings: () => store.saveSettings(), emit, log: logFn });
+  agent.api.ollama = ollama;
+  agent.ollama = ollama;
+  const studio = new Studio({ getSettings: () => store.settings, findCli: () => findArduinoCli(dataDir, store.settings.arduinoCli), emit, log: logFn, dataDir });
+  const vision = new Vision({ api: agent.api, getSettings: () => store.settings, ollama, log: logFn });
+  agent.vision = vision; mapper.vision = vision;
+  setTimeout(() => ollama.status().catch(() => {}), 1500); // local model capabilities (vision, tools) for routing
+  shield.resume();
   wa = new WhatsApp({ store, agent, emit, log: logFn, dataDir });
   mcp.sync(store.settings.mcpServers).then(() => emit('mcp:status', mcp.status())).catch(() => {});
   wa.applySettings().catch(() => {});
@@ -380,7 +396,14 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/models') {
       const engine = url.searchParams.get('engine') || 'api';
       try {
-        const list = engine === 'muse' ? await agent.muse.listModels() : models.withCaps(await agent.api.listModels());
+        let list;
+        if (engine === 'muse') list = await agent.muse.listModels();
+        else {
+          // cloud models (or the known list when offline) + the local models picked in Settings → Local models
+          if (ollama.enabledModels().length && !models.LOCAL_CAPS.size) await ollama.status().catch(() => {}); // learn what each local model can do
+          const local = ollama.enabledModels().map((n) => ({ id: `local:${n}`, label: `${n} — on this PC (offline)` }));
+          list = models.withCaps([...(await agent.api.listModels()), ...local]);
+        }
         return send(res, 200, { models: list });
       } catch (e) { return send(res, 200, { models: [], error: e.message }); }
     }
@@ -396,7 +419,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       if (b.whatsapp && b.whatsapp.cloud && b.whatsapp.cloud.enabled && !(b.whatsapp.cloud.appSecret || store.settings.whatsapp.cloud.appSecret)) {
         return send(res, 400, { error: 'WhatsApp Cloud needs the App Secret (Meta app → Settings → Basic) so the app can check that messages really come from Meta.' });
       }
-      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'museSandbox', 'museTrustWorkspace', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel', 'finishAllTasks', 'verifyBeforeFinish', 'maxTotalSteps', 'apiWire', 'contextTokens', 'autoUpdate']) if (k in b) patch[k] = b[k];
+      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'museSandbox', 'museTrustWorkspace', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel', 'finishAllTasks', 'verifyBeforeFinish', 'toolRouting', 'localEnabled', 'localBase', 'localModel', 'localModels', 'localContext', 'localFallback', 'ollamaBin', 'visionModel', 'maxTotalSteps', 'apiWire', 'contextTokens', 'autoUpdate']) if (k in b) patch[k] = b[k];
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey.trim();
       if (b.clearApiKey) patch.apiKey = '';
       if (b.workspace) {
@@ -410,6 +433,10 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         patch.robot = {
           carIp: String(b.robot.carIp ?? cur.carIp ?? '').trim(), cameraUrl: String(b.robot.cameraUrl ?? cur.cameraUrl ?? '').trim(),
           turnMs360: num(b.robot.turnMs360, cur.turnMs360 || 2400, 600, 5000), turnSpeed: num(b.robot.turnSpeed, cur.turnSpeed || 70, 40, 100),
+          driveSpeed: num(b.robot.driveSpeed, cur.driveSpeed || 60, 30, 100), cmPerSec: num(b.robot.cmPerSec, cur.cmPerSec || 40, 5, 200),
+          turnSteps360: b.robot.turnSteps360 === 0 ? 0 : num(b.robot.turnSteps360, cur.turnSteps360 || 0, 0, 200),
+          usbPort: String(b.robot.usbPort ?? cur.usbPort ?? ''),
+          camHeightCm: num(b.robot.camHeightCm, cur.camHeightCm || 10, 3, 60), camTiltDeg: Number.isFinite(Number(b.robot.camTiltDeg)) ? Math.max(-30, Math.min(45, Number(b.robot.camTiltDeg))) : (cur.camTiltDeg || 0),
         };
       }
       if ('vision' in b) patch.vision = !!b.vision;
@@ -419,6 +446,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         const cur = store.settings.whatsapp;
         if (Array.isArray(w.allowed)) cur.allowed = w.allowed.map(String).map((x) => x.trim()).filter(Boolean);
         if (w.personal) cur.personal.enabled = !!w.personal.enabled;
+        if ('model' in w) cur.model = String(w.model || '');
         if (w.cloud) {
           for (const k of ['enabled', 'phoneNumberId', 'verifyToken', 'graphVersion', 'cloudflaredPath']) if (k in w.cloud) cur.cloud[k] = w.cloud[k];
           if (w.cloud.accessToken) cur.cloud.accessToken = String(w.cloud.accessToken).trim();
@@ -456,6 +484,17 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       try { await agent.muse.close(); await agent.muse.ensure(); const models = await agent.muse.listModels(); return send(res, 200, { ok: true, models, status: await agent.muse.status() }); }
       catch (e) { return send(res, 200, { ok: false, error: e.message, status: await agent.muse.status() }); }
     }
+    // Local models (Ollama on this PC)
+    if (p === '/api/local' && m === 'GET') return send(res, 200, await ollama.status());
+    if (p === '/api/local/test' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await agent.api.testLocal(b.model ? `local:${b.model}` : undefined)); } catch (e) { return send(res, 200, { ok: false, error: e.message }); } }
+    if (p === '/api/local/install' && m === 'POST') { try { return send(res, 200, ollama.install()); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/local/compat/install' && m === 'POST') { try { return send(res, 200, ollama.compat.install()); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/local/compat/start' && m === 'POST') { try { return send(res, 200, await ollama.compat.start()); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/local/start' && m === 'POST') { try { return send(res, 200, await ollama.start()); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/local/pull' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await ollama.pull(b.name)); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/local/pull' && m === 'DELETE') { const b = await readJson(req); return send(res, 200, { ok: ollama.cancelPull(String(b.name || '')) }); }
+    if (p === '/api/local/models' && m === 'DELETE') { const b = await readJson(req); try { return send(res, 200, await ollama.remove(String(b.name || ''))); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/local/enabled' && m === 'POST') { const b = await readJson(req); ollama.setEnabled(b.models); if (b.defaultModel) { store.settings.localModel = String(b.defaultModel); store.saveSettings(); } return send(res, 200, await ollama.status()); }
     if (p === '/api/api/test' && m === 'POST') {
       try {
         const r = await agent.api.complete({ model: store.settings.model, messages: [{ role: 'user', content: 'Reply with exactly: OK' }] });
@@ -524,6 +563,32 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         if (m === 'DELETE') { termConvs.delete(mm[1]); return send(res, 200, { ok: remote.shellClose(mm[1]) }); }
       } catch (e) { return send(res, 200, { error: e.message }); }
     }
+    // Carpathron Shield: scans, fixes, monitoring
+    if (p === '/api/shield' && m === 'GET') return send(res, 200, shield.status());
+    if (p === '/api/shield/last' && m === 'GET') return send(res, 200, shield.last[url.searchParams.get('key') || ''] || null);
+    if (p === '/api/shield/scan' && m === 'POST') {
+      const b = await readJson(req);
+      try {
+        if (b.target === 'project') return send(res, 200, await shield.scanProject(String(b.path || store.settings.workspace || ''), { purpose: ['github', 'server', 'review'].includes(b.purpose) ? b.purpose : 'review', remotePath: b.remotePath || '' }));
+        if (b.target === 'server') return send(res, 200, await shield.scanServer(String(b.server || '')));
+        if (b.target === 'site') return send(res, 200, await shield.scanSite(String(b.url || ''), { deep: !!b.deep }));
+        return send(res, 400, { error: 'target must be project, server or site' });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    if (p === '/api/shield/fix/preview' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await shield.preview(String(b.server || ''), String(b.fix || ''), { allowPorts: b.allowPorts })); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/shield/fix' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await shield.applyFix(String(b.server || ''), String(b.fix || ''), { allowPorts: b.allowPorts })); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/shield/undo' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await shield.undo(String(b.id || ''))); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/shield/monitor' && m === 'POST') {
+      const b = await readJson(req);
+      try {
+        if (b.action === 'start') return send(res, 200, shield.monitorStart(String(b.server || ''), { intervalMin: b.intervalMin, urls: b.urls }));
+        if (b.action === 'stop') return send(res, 200, shield.monitorStop(String(b.server || '')));
+        if (b.action === 'reset') { shield.resetBaseline(String(b.server || '')); return send(res, 200, { ok: true }); }
+        if (b.action === 'now') { const sv = remote.need(String(b.server || '')); await shield.tick(sv.id); return send(res, 200, shield.monitorStatus(sv.id)); }
+        return send(res, 400, { error: 'action must be start, stop, reset or now' });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    if (p === '/api/shield/events' && m === 'DELETE') { shield.events = []; shield.writeJson('events.json', []); return send(res, 200, { ok: true }); }
     // GitHub plugin
     if (p === '/api/github' && m === 'GET') return send(res, 200, github.publicInfo());
     if (p === '/api/github/connect' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, await github.connect(String(b.token || '').trim(), b)); } catch (e) { return send(res, 400, { error: e.message }); } }
@@ -638,6 +703,132 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       const b = await readJson(req);
       try { const ph = await mapper.look(b.direction, { comeBack: b.comeBack !== false, source: 'pc' }); return send(res, 200, { ok: true, path: ph.path, degrees: ph.degrees }); }
       catch (e) { return send(res, 200, { ok: false, error: e.message }); }
+    }
+    // Distance calibration: an object stands `cm` in front of the car; where it touches the floor in the photo → camera tilt
+    if (p === '/api/robot/calibrate-distance' && m === 'POST') {
+      const b = await readJson(req);
+      try {
+        const geo = require('./geometry');
+        const cm = Math.max(15, Math.min(300, Number(b.cm) || 50));
+        const ph = await camera.capture();
+        const meas = await vision.measure({ buffer: ph.buffer, mime: ph.mime }, String(b.target || 'the object standing on the floor straight ahead'), {});
+        if (!meas.visible || !meas.box) return send(res, 200, { error: `The vision model did not find the object (${meas.what || 'nothing'}). Put a box or a shoe ${cm} cm in front of the car, in the middle.`, photo: ph.path });
+        const cur = store.settings.robot || {};
+        const g = geo.cfgOf(cur);
+        const tilt = Math.round(geo.calibrateTilt(meas.box[3], cm, g) * 10) / 10;
+        store.updateSettings({ robot: { ...cur, camTiltDeg: tilt } });
+        emit('settings:update', store.publicSettings());
+        return send(res, 200, { ok: true, tiltDeg: tilt, row: meas.box[3], model: meas.model, photo: ph.path });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    // ---- Robot page → Devices: boards on USB + robots on the network
+    if (p === '/api/hw/devices' && m === 'GET') {
+      const cli = findArduinoCli(dataDir, store.settings.arduinoCli);
+      let usb = [], cores = [];
+      if (cli) {
+        const r = await runProc(cli, ['board', 'list', '--format', 'json'], { timeoutMs: 30000 });
+        usb = devices.fromBoardList(r.out);
+        const c = await runProc(cli, ['core', 'list', '--format', 'json'], { timeoutMs: 30000 });
+        try { const j = JSON.parse(c.out); cores = (j.platforms || j || []).map((x) => ({ id: x.id || (x.metadata && x.metadata.id), version: x.installed_version || x.installed || '' })); } catch {}
+      }
+      if (process.platform === 'win32') {
+        // boards without a serial port (Pico in BOOTSEL, Jetson) and everything when arduino-cli is missing
+        const r = await runProc('powershell.exe', ['-NoProfile', '-Command', "Get-CimInstance Win32_PnPEntity | Where-Object { $_.DeviceID -match 'VID_' } | Select-Object Name,DeviceID | ConvertTo-Json -Compress"], { timeoutMs: 20000 }).catch(() => ({ out: '' }));
+        for (const d of devices.fromPnp(r.out)) if (!usb.some((u) => (u.address && u.address === d.address) || (!d.address && u.vid === d.vid && u.pid === d.pid))) usb.push(d);
+      }
+      // the car on USB: the port the firmware was last flashed through
+      const lastPort = (store.settings.robot || {}).usbPort;
+      for (const u of usb) if (lastPort && u.address === lastPort) { u.robot = 'Baby Carpathron car'; u.fqbn = 'esp32:esp32:esp32cam'; u.core = 'esp32:esp32'; }
+      const network = await devices.networkDevices({ settings: store.settings, servers: remote.publicList(), robotStatus: robot.status() });
+      return send(res, 200, { usb, network, cli: cli || null, cores });
+    }
+    if (p === '/api/hw/install' && m === 'POST') {
+      const b = await readJson(req);
+      const core = String(b.core || '').trim();
+      if (core && !/^[\w.-]+:[\w.-]+(@[\w.-]+)?$/.test(core)) return send(res, 200, { error: 'bad core id' });
+      try {
+        const ctx = { settings: store.settings, workspace: store.settings.workspace, dataDir, status: (t) => emit('studio:log', { text: `${t}\n` }) };
+        const text = await execX('arduino_setup', { cores: core ? [core === 'esp32:esp32' ? 'esp32:esp32@2.0.12' : core] : [] }, ctx);
+        return send(res, 200, { ok: !/FAILED/.test(text), text });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    // ---- Robot page → Firmware studio
+    if (p.startsWith('/api/studio/')) {
+      const b = m === 'GET' ? Object.fromEntries(url.searchParams) : await readJson(req);
+      try {
+        if (p === '/api/studio/projects') return send(res, 200, { root: studio.root(), projects: studio.projects(), templates: Object.entries(require('./studio').TEMPLATES).map(([id, t]) => ({ id, label: t.label })).concat([{ id: 'carpathron_car', label: 'Baby Carpathron car firmware (bundled)' }]) });
+        if (p === '/api/studio/new') {
+          if (b.template === 'carpathron_car') { const fwm = require('./firmware'); const r = fwm.prepare(store.settings); studio.setMeta('carpathron_car', { fqbn: 'esp32:esp32:esp32cam' }); return send(res, 200, { name: 'carpathron_car', dir: r.dir, backup: r.backup }); }
+          return send(res, 200, studio.create(String(b.name || ''), b.template, b.fqbn));
+        }
+        if (p === '/api/studio/files') return send(res, 200, { files: studio.files(b.project), meta: studio.meta(b.project), dir: studio.dir(b.project) });
+        if (p === '/api/studio/file' && m === 'GET') return send(res, 200, { content: studio.file(b.project, b.name), history: studio.history(b.project, b.name) });
+        if (p === '/api/studio/file') return send(res, 200, studio.save(b.project, b.name, String(b.content ?? '')));
+        if (p === '/api/studio/restore') return send(res, 200, studio.restore(b.project, b.name, b.id));
+        if (p === '/api/studio/meta') return send(res, 200, studio.setMeta(b.project, { fqbn: String(b.fqbn || ''), port: String(b.port || '') }));
+        if (p === '/api/studio/compile') return send(res, 200, await studio.compile(b.project, b.fqbn));
+        if (p === '/api/studio/upload') {
+          const r = await studio.upload(b.project, b.fqbn, b.port);
+          if (r.ok && b.project === 'carpathron_car') { store.updateSettings({ robot: { ...store.settings.robot, usbPort: b.port } }); setTimeout(() => robot.connect(), 4000); }
+          return send(res, 200, r);
+        }
+        if (p === '/api/studio/cancel') return send(res, 200, { cancelled: studio.cancel() });
+        if (p === '/api/studio/serial') {
+          if (b.action === 'start') return send(res, 200, studio.serialStart(b.port, b.baud));
+          if (b.action === 'send') return send(res, 200, studio.serialSend(String(b.text || '')));
+          return send(res, 200, { stopped: studio.serialStop() });
+        }
+        if (p === '/api/studio/boards') {
+          const cli = studio.cli();
+          const r = await runProc(cli, ['board', 'listall', '--format', 'json'], { timeoutMs: 60000 });
+          let boards = []; try { boards = (JSON.parse(r.out).boards || []).map((x) => ({ name: x.name, fqbn: x.fqbn })); } catch {}
+          return send(res, 200, { boards });
+        }
+        return send(res, 404, { error: 'unknown studio call' });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    // Car firmware: status / update over USB (Settings → Devices & robots → Update car firmware)
+    if (p === '/api/robot/firmware' && m === 'POST') {
+      const b = await readJson(req);
+      if (agent.firmwareBusy && b.action === 'update') return send(res, 200, { error: 'A firmware update is already running.' });
+      if (b.action === 'update') agent.firmwareBusy = true;
+      try {
+        const ctx = { settings: store.settings, workspace: store.settings.workspace, dataDir, robot, status: (t) => emit('robot:firmware', { text: t }) };
+        const text = await execX('robot_firmware', { action: b.action === 'update' ? 'update' : 'status', port: b.port }, ctx);
+        return send(res, 200, { ok: !/UPDATE FAILED/.test(text), text });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+      finally { if (b.action === 'update') agent.firmwareBusy = false; }
+    }
+    // Sensor mode on the car (firmware 2.1): auto (I2C laser + gyro) | ir (IR obstacle modules) | off — the car restarts
+    if (p === '/api/robot/sensor-mode' && m === 'POST') {
+      const b = await readJson(req);
+      const mode = ['auto', 'ir', 'off'].includes(b.mode) ? b.mode : null;
+      const ip = String((store.settings.robot || {}).carIp || '').trim();
+      if (!mode || !ip) return send(res, 200, { error: !ip ? 'Set the car address first.' : 'mode must be auto, ir or off' });
+      try {
+        const r = await fetch(`http://${ip}/config?sensors=${mode}`, { signal: AbortSignal.timeout(4000) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        setTimeout(() => robot.connect(), 5000);
+        return send(res, 200, { ok: true, mode, restarting: true });
+      } catch (e) { return send(res, 200, { error: `The car did not accept it (${e.message}). It needs firmware 2.1 — update it first.` }); }
+    }
+    if (p === '/api/robot/calibrate-turn' && m === 'POST') {
+      try {
+        const r = await mapper.calibrateTurn({ source: 'pc' });
+        store.updateSettings({ robot: { ...store.settings.robot, turnMs360: r.turnMs360, turnSteps360: 0 } });
+        emit('settings:update', store.publicSettings());
+        return send(res, 200, { ok: true, ...r });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    if (p === '/api/robot/forward' && m === 'POST') {
+      const b = await readJson(req);
+      try {
+        mapper.needCar();
+        const { driveSpeed } = mapper.cfg();
+        const ms = Math.max(200, Math.min(3000, Math.round((Number(b.seconds) || 1) * 1000)));
+        const r = await robot.runPlan([{ type: 'drive', left: driveSpeed, right: driveSpeed, ms }, { type: 'stop' }], 'pc');
+        return send(res, 200, { ok: !!r.completed, ms, speed: driveSpeed });
+      } catch (e) { return send(res, 200, { error: e.message }); }
     }
     if (p === '/api/robot/turn' && m === 'POST') {
       const b = await readJson(req);
@@ -868,13 +1059,14 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   return {
     port,
     token: token(),
-    store, agent, robot, mcp, wa, memory, projects, skills, camera, remote, jobs, github,
+    store, agent, robot, mcp, wa, memory, projects, skills, camera, remote, jobs, github, shield, ollama,
     async close() {
       for (const c of clients) try { c.close(); } catch {}
       wss.close();
       await new Promise((r) => front.close(r));
       server.close(); redirect.close();
       robot.close();
+      shield.stopAll();
       remote.closeAll();
       jobs.stopAll();
       await mcp.closeAll();

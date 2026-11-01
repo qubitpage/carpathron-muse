@@ -21,6 +21,12 @@ const DEFAULT_SETTINGS = {
   maxSteps: 100, // Ask / Plan: pause after this many steps; Auto / Full: checkpoint, keeps going
   maxTotalSteps: 1000, // Auto / Full safety limit for one message
   finishAllTasks: true, // keep working while the task list has unfinished tasks
+  localEnabled: false, // Muse Glimmer (open weights) through Ollama / llama.cpp on this PC
+  localBase: 'http://127.0.0.1:11434/v1',
+  localModel: 'muse-glimmer', // the default local model (offline fallback); localModels = models shown in the model menu
+  localContext: 32768, // context window for local models (a tuned copy is created in Ollama)
+  localFallback: true, // when Meta's cloud cannot be reached, continue with the local model
+  toolRouting: true, // send only the tool groups a chat needs (load_tools adds more)
   verifyBeforeFinish: true, // one self-check pass before delivering work that changed something
   effort: '', // reasoning effort for Muse Spark / Wonder: '', minimal, low, medium, high, xhigh, max
   servers: [], // SSH servers (passwords/keys encrypted, see secrets.js)
@@ -39,7 +45,8 @@ const DEFAULT_SETTINGS = {
   accessToken: '',
   systemPrompt: '',
   mcpServers: {}, // { name: { command, args: [], env: {}, enabled: true } }
-  robot: { carIp: '', cameraUrl: '', turnMs360: 2400, turnSpeed: 70 },
+  robot: { carIp: '', cameraUrl: '', turnMs360: 2400, turnSpeed: 70, driveSpeed: 60, cmPerSec: 40 },
+  visionModel: 'auto', // who looks at photos: auto | a model id (e.g. local:llama3.2-vision:11b)
   vision: true,
   whatsapp: {
     allowed: [], // phone numbers (digits, with country code) allowed to control the app

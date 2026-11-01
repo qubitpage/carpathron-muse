@@ -6,6 +6,7 @@
 //                and as a memory, so later chats know the room.
 'use strict';
 const fs = require('fs');
+const geometry = require('./geometry');
 const path = require('path');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -14,14 +15,28 @@ const DIRS = { front: 0, ahead: 0, forward: 0, right: 90, back: 180, behind: 180
 const FOV = 60; // ESP32-CAM OV2640 horizontal field of view, about 60 degrees
 
 class Mapper {
-  constructor({ robot, camera, api, memory, getSettings, emit, log }) {
-    Object.assign(this, { robot, camera, api, memory, getSettings, emit, log });
+  constructor({ robot, camera, api, vision, memory, getSettings, emit, log }) {
+    Object.assign(this, { robot, camera, api, vision, memory, getSettings, emit, log });
+    this.frameDiff = geometry.frameDiff; // replaceable in tests
+    this.thumb = geometry.thumb; this.thumbDiff = geometry.thumbDiff;
     this.busy = false;
   }
 
   cfg() {
     const r = this.getSettings().robot || {};
-    return { turnMs360: Number(r.turnMs360) || 2400, turnSpeed: Number(r.turnSpeed) || 70 };
+    // cmPerSec: how far the car drives in 1 s at driveSpeed (calibrate on the Robot page / Settings → Robots)
+    return { turnMs360: Number(r.turnMs360) || 2400, turnSpeed: Number(r.turnSpeed) || 70, driveSpeed: Number(r.driveSpeed) || 60, cmPerSec: Number(r.cmPerSec) || 40 };
+  }
+
+  // Drive straight ahead about `m` metres (calibrated), then stop.
+  async forward(m, source = 'ai') {
+    const { driveSpeed, cmPerSec } = this.cfg();
+    const ms = Math.max(150, Math.min(4000, Math.round((Math.abs(m) * 100 / cmPerSec) * 1000)));
+    const sp = m < 0 ? -driveSpeed : driveSpeed; // negative metres = back up
+    const r = await this.robot.runPlan([{ type: 'drive', left: sp, right: sp, ms }, { type: 'stop' }], source);
+    if (!r.completed) throw new Error(`Drive interrupted: ${r.reason || 'stopped'}`);
+    await sleep(350);
+    return { metres: m, ms };
   }
 
   needCar() {
@@ -32,6 +47,11 @@ class Mapper {
   async turn(deg, source = 'ai') {
     deg = Math.max(-360, Math.min(360, Number(deg) || 0));
     if (!deg) return { turned: 0 };
+    // with the gyro on the car: exact turn done by the car itself
+    if (this.robot.gyroTurn) {
+      const g = await this.robot.gyroTurn(deg, this.cfg().turnSpeed).catch(() => null);
+      if (g) { if (g.result === 'cancelled') throw new Error('Turn interrupted (STOP or manual control)'); await sleep(250); return { turned: deg, gyro: true, result: g.result }; }
+    }
     const { turnMs360, turnSpeed } = this.cfg();
     const ms = Math.round((Math.abs(deg) / 360) * turnMs360);
     const s = deg > 0 ? [turnSpeed, -turnSpeed] : [-turnSpeed, turnSpeed];
@@ -39,6 +59,60 @@ class Mapper {
     if (!r.completed) throw new Error(`Turn interrupted: ${r.reason || 'stopped'}`);
     await sleep(350); // let the car settle so the photo is sharp
     return { turned: deg, ms };
+  }
+
+  // Turn calibration with the camera. Short bursts turn by different amounts on a real floor (every start slips), so
+  // the car spins CONTINUOUSLY for a few seconds at the turn speed while photographing as fast as it can. For each
+  // photo the most similar later photo (1.2–6 s later) marks one full circle; the median of those times = Full turn (ms).
+  // turn() then uses one continuous spin of the matching length.
+  async calibrateTurn({ source = 'pc', onStatus, spinMs = 7000 } = {}) {
+    this.needCar();
+    if (this.busy) throw new Error('The car is busy.');
+    this.busy = true;
+    const say = (t) => { this.emit('robot:scan', { text: t }); if (onStatus) onStatus(t); };
+    try {
+      const { turnSpeed } = this.cfg();
+      const frames = [];
+      say('Turn calibration: spinning for about 7 seconds…');
+      const t0 = Date.now();
+      const plan = [];
+      for (let left = spinMs; left > 0; left -= 4000) plan.push({ type: 'drive', left: turnSpeed, right: -turnSpeed, ms: Math.min(4000, left) });
+      plan.push({ type: 'stop' });
+      const spin = this.robot.runPlan(plan, source);
+      let spinning = true;
+      spin.finally(() => { spinning = false; });
+      await sleep(600); // let it reach a steady speed
+      while (spinning) {
+        const t = Date.now() - t0;
+        let ph;
+        try { ph = await this.camera.capture({ quiet: true }); } catch { continue; }
+        if (!spinning) break;
+        const th = this.thumb(ph.buffer);
+        if (th) frames.push({ t: (t + (Date.now() - t0)) / 2, th });
+      }
+      const r = await spin;
+      if (!r.completed) throw new Error(`Calibration interrupted: ${r.reason || 'stopped'}`);
+      if (frames.length < 8) throw new Error(`Too few photos while spinning (${frames.length}). Is the camera working (Robot page → live video)?`);
+      const cands = [];
+      for (let i = 0; i < frames.length; i++) {
+        let best = null;
+        for (let j = i + 1; j < frames.length; j++) {
+          const dt = frames[j].t - frames[i].t;
+          if (dt < 1200 || dt > 6000) continue;
+          const d = this.thumbDiff(frames[i].th, frames[j].th);
+          if (d != null && (!best || d < best.d)) best = { dt, d };
+        }
+        if (best) cands.push(best);
+      }
+      if (cands.length < 3) throw new Error('The car turned too slowly to come round in 6 seconds — raise Turn speed and try again.');
+      // keep the clearest matches, then the median time
+      cands.sort((a, b) => a.d - b.d);
+      const good = cands.slice(0, Math.max(3, Math.ceil(cands.length / 2))).map((c) => c.dt).sort((a, b) => a - b);
+      const ms = Math.round(good[Math.floor(good.length / 2)] + 120); // + spin-up from standstill
+      const spread = Math.round(good[good.length - 1] - good[0]);
+      say(`Turn calibrated: a full circle takes ${ms} ms at ${turnSpeed}% (${frames.length} photos, ${good.length} matches, spread ${spread} ms)`);
+      return { turnMs360: ms, photos: frames.length, matches: good.length, spreadMs: spread };
+    } finally { this.busy = false; }
   }
 
   static angleOf(direction) {
@@ -106,15 +180,41 @@ class Mapper {
     } finally { this.busy = false; }
   }
 
+  // What is in the photos. A local vision model (offline) looks at one photo at a time; a cloud model sees all at once.
   async analyze(photos) {
     const s = this.getSettings();
-    if (!s.apiKey) return null;
+    const vm = this.vision ? this.vision.pick(s.model) : (s.apiKey ? s.model : null);
+    if (!vm) return null;
+    if (this.vision && require('./models').isLocal(vm)) return this.analyzeEach(photos, vm);
+    try { return await this.analyzeAll(photos, vm); } catch (e) {
+      const local = this.vision ? this.vision.localVisionModels() : [];
+      if (!local.length) throw e;
+      this.log(`room scan: ${vm} failed (${e.message}); using ${local[0]} on this PC`);
+      return this.analyzeEach(photos, local[0]);
+    }
+  }
+
+  async analyzeEach(photos, model) {
+    const views = [];
+    for (let i = 0; i < photos.length; i++) {
+      this.emit('robot:scan', { text: `Looking at photo ${i + 1}/${photos.length} (${model.replace(/^local:/, '')})…` });
+      const v = await this.vision.view({ buffer: photos[i].buffer, mime: 'image/jpeg' }, { model }).catch((e) => ({ description: `(not analysed: ${e.message})`, objects: [], free_m: 0 }));
+      views.push({ heading: photos[i].heading, description: v.description, objects: v.objects, free_m: v.free_m });
+    }
+    const near = views.flatMap((v) => v.objects.map((o) => ({ ...o, at: Math.round((v.heading + o.bearing + 360) % 360) }))).sort((a, b) => a.distance_m - b.distance_m);
+    const open = views.slice().sort((a, b) => b.free_m - a.free_m)[0];
+    const summary = `${near.slice(0, 6).map((o) => `${o.name} at ${o.at}° (~${o.distance_m.toFixed(1)} m)`).join(', ') || 'No objects recognised'}.${open && open.free_m ? ` Most open space towards ${open.heading}° (~${open.free_m.toFixed(1)} m free).` : ''}`;
+    return { views, room: `seen by ${model.replace(/^local:/, '')} on this PC`, summary, model };
+  }
+
+  async analyzeAll(photos, model) {
+    const s = this.getSettings();
     const content = [{ type: 'text', text: `These ${photos.length} photos were taken by a small robot car's camera (about ${FOV}° wide, 10 cm above the floor) while it turned on the spot to the RIGHT in equal steps. Heading 0° = the direction it faced first; headings grow clockwise. For each photo list the main objects with: bearing inside the photo in degrees (-${FOV / 2} = left edge, 0 = centre, +${FOV / 2} = right edge) and estimated distance from the car in metres. Also estimate free_m = how far the car could drive straight towards the photo centre before hitting something. Reply with JSON only:\n{"views":[{"heading":0,"description":"short","objects":[{"name":"chair","bearing":-10,"distance_m":1.2}],"free_m":1.5}],"room":"one line about the room type and size","summary":"2-3 sentences: what is around the car at which headings, where the open space and the exits/doors are"}` }];
     for (const p of photos) {
       content.push({ type: 'text', text: `Heading ${p.heading}°:` });
       content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${p.buffer.toString('base64')}` } });
     }
-    const res = await this.api.complete({ model: s.model, messages: [{ role: 'user', content }] });
+    const res = await this.api.complete({ model: model || s.model, messages: [{ role: 'user', content }] });
     const m = String(res.content || '').match(/\{[\s\S]*\}/);
     if (!m) throw new Error('the model did not return a map');
     const j = JSON.parse(m[0]);
@@ -127,9 +227,172 @@ class Mapper {
     return j;
   }
 
+  // Newest room map (or null).
+  latestMap() {
+    const root = path.join(this.getSettings().workspace, 'maps');
+    try {
+      const id = fs.readdirSync(root).filter((d) => fs.existsSync(path.join(root, d, 'map.json'))).sort().pop();
+      return id ? { id, ...JSON.parse(fs.readFileSync(path.join(root, id, 'map.json'), 'utf8')) } : null;
+    } catch { return null; }
+  }
+
+  // Go to an object: find it with the camera (straight ahead, the last room map, then looking around), turn towards it
+  // and drive in short hops, checking with a new photo after each hop, until it is close. Returns a step log and the
+  // final photo. onPhoto(photo) is called for the photo where the target was found and for the final one.
+  async goto(target, { stopAt = 0.45, maxHops = 6, source = 'ai', onPhoto, signal, chatModel, onStatus } = {}) {
+    if (!this.vision) throw new Error('vision is not available');
+    target = String(target || '').trim();
+    if (!target) throw new Error('say what to go to, e.g. "the red chair"');
+    this.needCar();
+    if (this.busy) throw new Error('The car is busy (a scan is running).');
+    this.busy = true;
+    const log = [];
+    const say = (t) => { log.push(t); this.emit('robot:scan', { text: t }); if (onStatus) onStatus(t); };
+    const stop = () => signal && signal.aborted;
+    const snap = async () => { const ph = await this.camera.capture(); this.emit('robot:look', { direction: 'goto', path: ph.path }); return ph; };
+    // Where is the target, and how much free floor is ahead? Distances come from the floor geometry (where the box /
+    // the obstacle touches the floor in the picture); the model's own guess is only the fallback.
+    const g = geometry.cfgOf(this.getSettings().robot);
+    const laser = async () => { const s = this.robot.sensors ? await this.robot.sensors().catch(() => null) : null; return s && s.tof ? (s.dist > 0 ? s.dist / 1000 : 2) : null; }; // metres ahead, 2 = nothing within 2 m
+    const where0 = async (ph) => {
+      const img = { buffer: ph.buffer, mime: ph.mime || 'image/jpeg' };
+      let m = null;
+      if (this.vision.measure) { try { m = await this.vision.measure(img, target, { chatModel, signal }); } catch (e) { this.log(`goto: measuring failed (${e.message}), using the model's estimate`); } }
+      if (m && (m.box || m.floorEndY != null)) {
+        const free = m.floorEndY != null ? Math.min(6, geometry.floorDistanceCm(m.floorEndY, g) / 100) : null;
+        if (!m.visible) return { visible: false, bearing: 0, distance_m: null, free_m: free, what: m.what };
+        const [x1, y1, x2, y2] = m.box;
+        const close = y2 > 0.97 || y2 - y1 > 0.85 || x2 - x1 > 0.9; // it fills the picture: right in front of the car
+        return { visible: true, bearing: geometry.bearingOf((x1 + x2) / 2, g), distance_m: close ? 0 : Math.min(6, geometry.floorDistanceCm(y2, g) / 100), free_m: free, what: m.what, close, measured: true };
+      }
+      return this.vision.locate(img, target, { chatModel, signal });
+    };
+    // the laser (VL53L0X) measures straight ahead in millimetres: it replaces the camera's free-space estimate, and the
+    // target distance too when the target is straight ahead
+    const where = async (ph) => {
+      const r = await where0(ph);
+      const l = await laser();
+      if (l == null) return r;
+      const out = { ...r, free_m: l, laser: true };
+      if (r.visible && Math.abs(r.bearing || 0) < 8 && (r.distance_m == null || l < r.distance_m + 0.4)) { out.distance_m = l; out.measured = true; }
+      return out;
+    };
+    const cm = (v) => (v == null || !Number.isFinite(v) ? '?' : `${Math.round(v * 100)} cm`);
+    let heading = 0; // degrees turned from the start, + = right
+    const turn = async (d) => { d = Math.round(d); if (Math.abs(d) < 4) return; await this.turn(d, source); heading += d; };
+    try {
+      // 1) search: ahead, then the heading from the last room map, then around in 60° steps
+      let ph = await snap(), seen = await where(ph);
+      say(`Ahead: ${seen.visible ? `found ${target} (${seen.what})` : `no ${target}`}`);
+      if (!seen.visible) {
+        const map = this.latestMap();
+        const words = target.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+        const hit = map && map.analysis && (map.analysis.views || []).flatMap((v) => (v.objects || []).map((o) => ({ ...o, heading: v.heading }))).find((o) => words.some((w) => o.name.toLowerCase().includes(w)));
+        if (hit) {
+          const d = ((hit.heading + hit.bearing + 540) % 360) - 180;
+          say(`The room map (${map.id}) has ${hit.name} at ${Math.round(hit.heading + hit.bearing)}° — turning ${Math.round(d)}°`);
+          await turn(d); ph = await snap(); seen = await where(ph);
+        }
+      }
+      for (let i = 0; !seen.visible && i < 5 && !stop(); i++) {
+        await turn(60); ph = await snap(); seen = await where(ph);
+        say(`Looked at ${((heading % 360) + 360) % 360}°: ${seen.visible ? `found ${target}` : 'not here'}`);
+      }
+      if (!seen.visible) {
+        await turn(-((heading % 360 + 540) % 360 - 180)).catch(() => {});
+        say(`Could not find ${target} anywhere around the car.`);
+        if (onPhoto) onPhoto(ph);
+        return { arrived: false, found: false, log, photo: ph };
+      }
+      if (onPhoto) onPhoto(ph);
+      // 2) approach in short hops. Never drive further in total than the first measured distance (a "budget"), never
+      // further than the free floor, and stop when the picture shows the car did not move (it bumped into something).
+      let lost = 0, driven = 0;
+      let budget = Math.max(0, (seen.distance_m ?? 1) - stopAt);
+      for (let hop = 1; hop <= maxHops && !stop(); hop++) {
+        if (!seen.visible) {
+          // out of the picture (after steering around something): look a little left and right
+          for (const d of [-30, 60]) { await turn(d); ph = await snap(); seen = await where(ph); if (seen.visible) break; }
+          if (!seen.visible) { await turn(-30); say(`Lost sight of ${target}.`); break; }
+        }
+        if (Math.abs(seen.bearing) >= 6) await turn(seen.bearing);
+        const dist = seen.distance_m ?? 1;
+        budget = Math.min(budget, driven + Math.max(0, dist - stopAt)); // a closer measurement shrinks the budget
+        const left = budget - driven;
+        if (seen.close || left < 0.08) { say(`Arrived: ${target} is ${seen.close ? 'right in front of the car' : `about ${cm(dist)} ahead`}.`); if (onPhoto) onPhoto(ph); return { arrived: true, found: true, log, photo: ph, distance_m: dist }; }
+        let go = Math.max(0.08, Math.min(0.35, left));
+        const free = seen.free_m;
+        if (free != null && free < dist - 0.1) {
+          if (free < 0.3) {
+            say(`Hop ${hop}: something is in the way (${cm(free)} free) — steering around it`);
+            const side = await this.findGap(snap, where, turn, say);
+            if (!side) { say('Blocked on both sides — stopping here.'); break; }
+            ph = await snap(); seen = await where(ph);
+            continue;
+          }
+          go = Math.min(go, Math.max(0.08, free - 0.2));
+        }
+        say(`Hop ${hop}: ${target} ${cm(dist)} ${seen.bearing < -5 ? 'left' : seen.bearing > 5 ? 'right' : 'ahead'}${free != null ? `, ${cm(free)} free` : ''}${seen.measured ? '' : ' (estimated)'} → driving ${cm(go)}`);
+        const before = ph.buffer;
+        await this.forward(go, source);
+        driven += go;
+        ph = await snap();
+        const s = this.robot.sensors ? await this.robot.sensors().catch(() => null) : null;
+        if (s && s.blocked) say(`The car's distance sensor stopped it ${s.dist > 0 ? `${Math.round(s.dist / 10)} cm` : ''} before an obstacle.`);
+        const diff = before && ph.buffer ? this.frameDiff(before, ph.buffer) : null;
+        if ((s && s.blocked && !(seen.visible && seen.distance_m != null && seen.distance_m < stopAt + 0.3)) || (diff != null && diff < 0.02)) {
+          say(`Bump: the picture did not change after driving (${(diff * 100).toFixed(1)}%) — the car is blocked. Backing up 10 cm.`);
+          await this.forward(-0.1, source); driven -= 0.1;
+          const side = await this.findGap(snap, where, turn, say);
+          if (!side) { say('Blocked on both sides — stopping here.'); break; }
+          ph = await snap(); seen = await where(ph);
+          continue;
+        }
+        seen = await where(ph);
+        if (!seen.visible) {
+          // maybe it is just outside the picture: check a little left and right
+          let found = false;
+          for (const d of [-30, 60]) { await turn(d); ph = await snap(); seen = await where(ph); if (seen.visible) { found = true; break; } }
+          if (!found) { await turn(-30); if (++lost >= 2) break; say(`Lost sight of ${target}; trying once more.`); seen = { visible: true, bearing: 0, distance_m: Math.max(stopAt, dist - go) }; }
+        } else lost = 0;
+      }
+      if (onPhoto) onPhoto(ph);
+      const done = seen.visible && (seen.close || (seen.distance_m ?? 9) <= stopAt + 0.2);
+      say(done ? `Arrived near ${target}.` : `Stopped: ${seen.visible ? `${target} is still about ${cm(seen.distance_m)} away` : `lost sight of ${target}`}.`);
+      return { arrived: done, found: true, log, photo: ph, distance_m: seen.distance_m };
+    } finally {
+      this.busy = false;
+      try { this.robot.stop('goto'); } catch {}
+    }
+  }
+
+  // Blocked ahead: look 40° left and right for free space, drive past the obstacle on the freer side.
+  // Returns the angle turned (to turn back to the target afterwards) or 0 when both sides are blocked.
+  async findGap(snap, where, turn, say) {
+    // IR obstacle modules on the car (front-left / front-right): go to the side that is free
+    const sn = this.robot.sensors ? await this.robot.sensors().catch(() => null) : null;
+    if (sn && sn.ir && sn.irLeft !== sn.irRight) {
+      const side = sn.irLeft ? 40 : -40;
+      say(`The ${sn.irLeft ? 'left' : 'right'} IR sensor sees the obstacle — going round on the ${side > 0 ? 'right' : 'left'}`);
+      await turn(side); await this.forward(0.2); await turn(-side);
+      return side;
+    }
+    const sides = [];
+    for (const d of [-40, 80]) { await turn(d); const ph = await snap(); const s = await where(ph); sides.push({ side: d < 0 ? -40 : 40, free: s.free_m == null ? 0.4 : s.free_m }); }
+    await turn(-40); // back to the middle
+    const best = sides.sort((a, b) => b.free - a.free)[0];
+    if (!best || best.free < 0.4) return 0;
+    await turn(best.side);
+    const step = Math.min(0.3, best.free - 0.2);
+    say(`More room on the ${best.side < 0 ? 'left' : 'right'} (${Math.round(best.free * 100)} cm) — driving ${Math.round(step * 100)} cm to get past`);
+    await this.forward(step);
+    await turn(-best.side);
+    return best.side;
+  }
+
   static summaryText(map) {
     const a = map.analysis;
-    if (!a) return `🗺️ Scanned ${map.steps} directions (photos saved). Add the Meta API key in Settings so the AI can name what is around the car and draw the objects on the map.`;
+    if (!a) return `🗺️ Scanned ${map.steps} directions (photos saved). To name what is around the car, add the Meta API key or download a vision model (Settings → AI models → Local models, e.g. llama3.2-vision:11b).`;
     const lines = [`🗺️ *Room map* — ${a.room || ''}`.trim(), a.summary || ''];
     for (const v of a.views || []) {
       const objs = (v.objects || []).map((o) => `${o.name} ${o.distance_m.toFixed(1)} m`).join(', ');

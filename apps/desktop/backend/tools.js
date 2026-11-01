@@ -88,6 +88,11 @@ const BUILTIN = [
     parameters: { type: 'object', properties: { steps: { type: 'integer', description: 'number of directions, 4-12 (default 8)' } } },
   },
   {
+    name: 'robot_goto', risk: 'robot',
+    description: 'Go to an object or place and show it: the car looks for it with its camera (ahead, the last room map, then all around), turns towards it and drives there in short hops, checking with a photo after each hop. The photos are shown to the user (also on WhatsApp). Use for "go to the door", "find the red ball", "show me the kitchen table".',
+    parameters: { type: 'object', properties: { target: { type: 'string', description: 'what to go to, in simple words, e.g. "door", "red chair", "black bag"' }, stop_at_m: { type: 'number', description: 'stop this far from it in metres (default 0.45)' } }, required: ['target'] },
+  },
+  {
     name: 'robot_photo', risk: 'read',
     description: 'Take a photo with the robot camera (or the PC webcam if the robot has no camera). The photo is saved, shown to the user (also sent back on WhatsApp) and you can see it.',
     parameters: { type: 'object', properties: { note: { type: 'string', description: 'optional reason, e.g. "look ahead"' } } },
@@ -338,6 +343,11 @@ async function execBuiltin(name, args, ctx) {
       ctx.mapper.needCar();
       return JSON.stringify(await ctx.mapper.turn(args.degrees));
     }
+    case 'robot_goto': {
+      if (!ctx.mapper) throw new Error('not available');
+      const r = await ctx.mapper.goto(args.target, { stopAt: Number(args.stop_at_m) > 0 ? Math.min(2, Number(args.stop_at_m)) : 0.45, onPhoto: ctx.onPhoto, signal: ctx.signal, chatModel: ctx.model, onStatus: ctx.status });
+      return `${r.arrived ? 'ARRIVED' : r.found ? 'NOT THERE YET' : 'NOT FOUND'} — ${args.target}\n${r.log.map((l) => `- ${l}`).join('\n')}\nLast photo: ${r.photo && r.photo.path}`;
+    }
     case 'robot_scan_room': {
       if (!ctx.mapper) throw new Error('not available');
       const r = await ctx.mapper.scan({ steps: args.steps });
@@ -350,14 +360,23 @@ async function execBuiltin(name, args, ctx) {
       ctx.robot.stop('agent');
       return 'Robot stopped.';
     case 'robot_drive': {
-      const steps = Array.isArray(args.steps) ? args.steps : [];
-      if (!steps.length) throw new Error('steps is empty');
+      const steps = driveSteps(args);
+      if (!steps.length) throw new Error('steps is empty: give a list like [{"type":"drive","left":60,"right":60,"ms":800}]');
       const r = await ctx.robot.runPlan(steps, 'ai');
       return JSON.stringify(r);
     }
     default:
       throw new Error(`Unknown tool ${name}`);
   }
+}
+
+// robot_drive steps as small models send them: a list, a JSON string, one object, or left/right/ms at the top level.
+function driveSteps(a) {
+  let st = a && a.steps;
+  if (typeof st === 'string') { try { st = JSON.parse(st); } catch { st = null; } }
+  if (st && !Array.isArray(st) && typeof st === 'object') st = [st];
+  if (!Array.isArray(st) && a && (a.left != null || a.right != null)) st = [{ type: 'drive', left: a.left, right: a.right, ms: a.ms || a.duration_ms || 800 }];
+  return (Array.isArray(st) ? st : []).filter((s) => s && typeof s === 'object').map((s) => (s.type ? s : { type: 'drive', ...s }));
 }
 
 // One-line human summary for approvals and tool cards
@@ -370,8 +389,10 @@ function describeCall(name, args) {
     case 'robot_photo': return 'Take a photo';
     case 'robot_look': return `Look ${a.direction} (the car turns${a.return_to_start === false ? '' : ' and comes back'})`;
     case 'robot_turn': return `Turn the car ${a.degrees}°`;
+    case 'robot_goto': return `Go to ${a.target} (the car looks around and drives there)`;
+    case 'robot_firmware': return a.action === 'update' ? `Update the car firmware over USB${a.port ? ` (${a.port})` : ''}` : 'Check the car firmware version';
     case 'robot_scan_room': return `Scan the room (${a.steps || 8} directions, car turns a full circle)`;
-    case 'robot_drive': return `Drive robot: ${(a.steps || []).map((s) => (s.type === 'drive' ? `L${s.left}/R${s.right} ${s.ms}ms` : s.type)).join(', ')}`;
+    case 'robot_drive': return `Drive robot: ${driveSteps(a).map((s) => (s.type === 'drive' ? `L${s.left}/R${s.right} ${s.ms}ms` : s.type)).join(', ')}`;
     case 'read_file': return `Read ${a.path}`;
     case 'list_dir': return `List ${a.path || 'workspace'}`;
     case 'search': return `Search "${a.pattern}"${a.path ? ' in ' + a.path : ''}`;
@@ -401,6 +422,9 @@ function describeCall(name, args) {
     case 'pico_flash': return `Flash Pico with ${a.uf2}`;
     case 'sd_card_image': return a.action === 'write' ? `ERASE disk ${a.disk} and write ${a.image}` : 'List removable drives';
     case 'security_check': return `Security check ${[a.server, a.url].filter(Boolean).join(' + ')}`;
+    case 'shield_scan': return `Shield scan ${a.target}: ${a.path || a.server || a.url || 'workspace'}${a.deep ? ' (deep)' : ''}`;
+    case 'shield_fix': return `${a.preview ? 'Preview' : 'Apply'} Shield fix "${a.fix}" on ${a.server}${(a.allow_ports || []).length ? ` (keep ports ${a.allow_ports.join(', ')})` : ''}`;
+    case 'shield_monitor': return `Shield monitor ${a.action}${a.server ? ' ' + a.server : ''}`;
     case 'ask_model': return `Ask ${a.model}`;
     case 'computer_view': return a.action === 'screenshot' ? 'Look at the screen' : `Screen: ${a.action}`;
     case 'computer_act': return { click: `Click at ${a.x},${a.y}`, double_click: `Double-click at ${a.x},${a.y}`, right_click: `Right-click at ${a.x},${a.y}`, middle_click: `Middle-click at ${a.x},${a.y}`, move: `Move mouse to ${a.x},${a.y}`, drag: `Drag ${a.x},${a.y} → ${a.x2},${a.y2}`, scroll: `Scroll ${a.direction || 'down'}`, type: `Type "${String(a.text || '').slice(0, 60)}"`, key: `Press ${a.keys || a.text}`, focus_window: `Switch to window "${a.window}"`, open_app: `Open ${a.app}`, wait: `Wait ${a.seconds || 1}s` }[a.action] || `Computer: ${a.action}`;

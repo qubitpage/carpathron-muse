@@ -10,6 +10,9 @@ const { XTOOLS, execX } = require('./xtools');
 const { GH_TOOLS, execGitHub } = require('./github');
 const { COMPUTER_TOOLS, COMPUTER_NAMES, execComputer, hideBanner } = require('./computer');
 const { DEV_TOOLS, DEV_NAMES, execDev } = require('./devtools');
+const { SHIELD_TOOLS, SHIELD_NAMES, execShield } = require('./shield');
+const toolroute = require('./toolroute');
+const { isLocalModel } = require('./engines/api');
 const GHNAMES = new Set(GH_TOOLS.map((t) => t.name));
 const models = require('./models');
 const { effectiveRisk } = require('./guard');
@@ -41,28 +44,67 @@ function folderTree(root, maxEntries = 150, maxDepth = 2) {
   return out.join('\n') || '(empty folder)';
 }
 
+// Can this chat model look at images itself? Local models say so (Ollama reports "vision"); unknown cloud models are
+// tried with images (and retried without when they refuse).
+const canSee = (model) => models.has(model, 'vision') || (!models.KNOWN[model] && !models.isLocal(model));
+
+// What every model (big or small) needs to know to drive Baby Carpathron well.
+const ROBOT_BRIEF = [
+  '## Baby Carpathron (the robot car you control)',
+  '- A small 4WD car with tank steering and an ESP32-CAM camera fixed at the front, about 10 cm above the floor, about 60° wide. It is connected over Wi-Fi.',
+  '- To find something or go to it ("go to the door", "show me the table", "where is the ball?"): call robot_goto with the object in simple words. It looks around, turns, drives there in short hops, checks with photos and sends the user a photo when it arrives. Prefer it over driving by hand.',
+  '- To look: robot_photo (straight ahead), robot_look with left / right / back (the car turns, takes a photo and turns back). For an overview of the room: robot_scan_room (a map with objects and free space, also sent on WhatsApp).',
+  '- To move by hand: robot_turn with degrees (+ = right, - = left); robot_drive with short steps (speed 40-70 indoors; 1 s at 60 ≈ 40 cm). Keep moves short, take a photo after moving, and call robot_stop if anything looks wrong.',
+  '- Firmware: robot_firmware action "status" shows the car firmware version; action "update" flashes the firmware that comes with this app over USB by itself (port, compile, upload, check). To change the firmware, edit <workspace>/firmware/carpathron_car and flash it with arduino_upload (fqbn esp32:esp32:esp32cam). Optional sensors on the car: VL53L0X distance (stops it 15 cm before obstacles) and MPU-6050 gyro (exact turns).',
+  '- Only move the car when the user asks for movement (go, drive, turn, find, scan). For "what do you see" just take a photo and describe it.',
+  '- Say what the photos show and what you did. Do not claim the car reached something unless robot_goto said ARRIVED or a photo shows it.',
+].join('\n');
+
+// A short prompt for models running on this PC (Llama 3.1 8B, Glimmer): fewer instructions = faster and better choices.
+function compactPrompt(settings, conv, ctx) {
+  const { memory = '' } = ctx;
+  const lines = [
+    'You are Carpathron, an assistant on the user\'s Windows PC. You act through tools: files, run_command, memory, and the robot car. Call a tool whenever it helps; answer directly when it does not.',
+    process.platform === 'win32' ? 'run_command runs Windows PowerShell 5.1 (use Get-ChildItem, Select-String, $env:NAME; no && ).' : 'run_command runs bash.',
+    `Working folder: ${conv.workspace}. Today: ${new Date().toISOString().slice(0, 10)}.`,
+    'Rules: never invent results — only report what a tool showed. Keep answers short and in the user\'s language. If a tool you need is missing, call load_tools with its group (robot, ssh, documents, research, media, firmware, github, computer, security).',
+    '',
+    ROBOT_BRIEF,
+  ];
+  if (ctx.modelCaps && !ctx.modelCaps.includes('vision')) lines.push('You cannot see images yourself: after a photo, a vision model describes it to you in words.');
+  if ((conv.mode || settings.mode) === 'plan') lines.push('PLAN MODE: only read and research; do not change files, run commands or move the robot.');
+  if (settings.systemPrompt) lines.push('', '## User instructions', settings.systemPrompt);
+  if (memory) lines.push('', '## What you remember about the user', String(memory).slice(0, 2500));
+  if (ctx.tasks && ctx.tasks.length) lines.push('', '## Task list', ctx.tasks.map((t, i) => `${i + 1}. [${t.status}] ${t.title}`).join('\n'));
+  return lines.join('\n');
+}
+
 function systemPrompt(settings, conv, ctx = {}) {
   const { sub = false, memory = '', project = null, projectText = null, skills = [] } = ctx;
   ctx.remote = ctx.remote || null;
+  if (ctx.localModel && !sub && !ctx.remote && !project && settings.localCompactPrompt !== false) return compactPrompt(settings, conv, ctx);
   const lines = [
     sub
       ? 'You are a sub-agent of Carpathron. Complete only the task you were given, using tools as needed, then reply with a concise final report of what you did and found.'
       : 'You are Carpathron (the Muse Carpathron app), an agentic assistant running on the user\'s computer, powered by Meta Muse models. You work like a local bridge: you see the user\'s files through tools, decide what to do, and your tool calls are executed on the user\'s PC.',
-    `Operating system: ${os.type()} ${os.release()} (${process.platform}). Shell for run_command: ${process.platform === 'win32' ? 'Windows PowerShell' : 'bash'}.`,
+    `Operating system: ${os.type()} ${os.release()} (${process.platform}). Shell for run_command: ${process.platform === 'win32' ? 'Windows PowerShell 5.1' : 'bash'}.`,
+    process.platform === 'win32' && !ctx.remote ? 'run_command runs Windows PowerShell 5.1, not bash: use Select-Object -First/-Last N (not head/tail), Select-String (not grep), Get-ChildItem (not ls -la/find), $env:NAME (not $NAME), and ; or separate calls (&& does not exist in 5.1). node, npm, npx, git and python work as usual. Paths use backslashes; quote paths with spaces.' : '',
     ctx.remote
       ? `WORKING ON REMOTE SERVER "${ctx.remote.name}" (${ctx.remote.username}@${ctx.remote.host}, ${ctx.remote.os || 'linux'}) over SSH. list_dir, read_file, write_file, edit_file, search and run_command run ON THAT SERVER, in ${ctx.remote.path} (relative paths are there). Use ssh_upload / ssh_download to move files between this PC (${conv.workspace}) and the server. Be careful with destructive commands on servers (rm -rf, firewall, reboots): say what you will do first.`
       : `Attached folder (workspace): ${conv.workspace}. Relative paths are inside it.`,
     `Today: ${new Date().toISOString().slice(0, 10)}.`,
     'Work step by step: inspect before you change things, prefer small precise edits (edit_file) over rewriting whole files, and verify your work (run it, read it back).',
     'Tool calls may need the user\'s approval; if one is denied, do not retry the same action — adapt or ask.',
+    settings.toolRouting !== false ? 'Tools come in groups. You always have the core tools (files, run_command, web_fetch, memory, tasks); more groups load automatically when the conversation mentions them. If a tool you need below is not in your tool list, call load_tools with its group first (ssh, documents, research, media, firmware, hardware, robot, github, computer, security, jobs).' : '',
+    'Coding: read only the parts of files you need (search first, then read_file), make small edit_file changes instead of rewriting files, run the tests or the program after each meaningful change, and read error output carefully before the next attempt. Batch independent tool calls in one step when you can.',
     'Capabilities: full shell access (run_command, background jobs with job_start), remote servers over SSH (ssh_servers, ssh_exec, interactive ssh_shell, ssh_upload/ssh_download), documents (read_document for PDF/Word/Excel/PowerPoint, create_pdf with designed HTML+CSS, view_image), web (web_search, web_fetch, deep_research for cited reports), design (build HTML/CSS sites and PDFs, then check them visually with screenshot_page at desktop 1366 px and phone 390 px and fix what looks wrong; generate_image for illustrations/logos), firmware (arduino_setup, arduino_boards, arduino_compile, arduino_upload, serial_monitor, arduino_cli, open_arduino_ide — ESP32 FQBN esp32:esp32:esp32, ESP32-CAM esp32:esp32:esp32cam), vision (segment_image with SAM 3.1), speech (transcribe_audio). For multi-step engineering work: plan, do it step by step, build/run/test after each change, read errors and fix them until it works.',
-    'Hardware beyond Arduino: dev_environment (what is installed and connected: IDEs, SDKs, NVIDIA GPU/CUDA, boards on USB and on the network), dev_install, open_ide (Arduino, VS Code, Thonny, Raspberry Pi Imager, Nsight, SDK Manager), micropython (Pico/ESP32 MicroPython over USB with mpremote), pico_flash (.uf2 to a Pico in BOOTSEL), sd_card_image (Raspberry Pi SD cards — erases the drive, confirm first). Raspberry Pi and Jetson boards are worked on over SSH like servers. Security: security_check for servers and websites. Other models: ask_model gets a second opinion from another Muse model (e.g. muse-wonder-1.0 for hard reasoning or reviews).',
+    'Hardware beyond Arduino: dev_environment (what is installed and connected: IDEs, SDKs, NVIDIA GPU/CUDA, boards on USB and on the network), dev_install, open_ide (Arduino, VS Code, Thonny, Raspberry Pi Imager, Nsight, SDK Manager), micropython (Pico/ESP32 MicroPython over USB with mpremote), pico_flash (.uf2 to a Pico in BOOTSEL), sd_card_image (Raspberry Pi SD cards — erases the drive, confirm first). Raspberry Pi and Jetson boards are worked on over SSH like servers. Security: Carpathron Shield — shield_scan (project before publishing, server, website), shield_fix (built-in fixes with backups and lockout protection), shield_monitor (live monitoring); security_check is the quick text version. Other models: ask_model gets a second opinion from another Muse model (e.g. muse-wonder-1.0 for hard reasoning or reviews).',
     'Computer use: computer_view (screenshot / list_windows) and computer_act (click, type, key, scroll, drag, focus_window, open_app) control this Windows PC like a person — use them for desktop apps without an API (IDEs, installers, settings dialogs) and to test the apps you build; browser_view / browser_act drive the visible Muse Browser (open, elements, click by index, type, key, text) for websites and web apps. Always take a screenshot first, act, then check the new screenshot. Prefer direct tools (files, commands, APIs) when they can do the job — they are faster and more exact. Never type passwords, card or bank details, never solve CAPTCHAs, and ask before sending, deleting, buying or confirming anything irreversible.',
     'GitHub (when connected in Plugins): github_account, github_repos, github_create_repo, github_publish (commit + push a folder, creates the repo), github_clone, github_release (create a release and upload installers/APKs), github_issues, github_pulls, github_api. Never force-push unless the user asks.',
-    'You can drive the Baby Carpathron robot car with robot_drive / robot_stop. Its camera is fixed to the car like a robot head: to look left/right/behind use robot_look (the car turns its body, photographs, turns back); robot_turn turns by degrees; robot_scan_room makes a room map. Voice notes from WhatsApp arrive as transcribed text.',
+    ROBOT_BRIEF + '\nVoice notes from WhatsApp arrive as transcribed text.',
     'Answer in the user\'s language. Use Markdown. Be concise when reporting.',
     '## Honesty (no hallucinations)\n- Never invent facts, file contents, command output, prices, versions, URLs, API behaviour or test results. If you did not see it in a tool result or the conversation, you do not know it: check with a tool (read_file, run_command, web_search, web_fetch) or say plainly that you are not sure.\n- Do not claim something works, was created, deployed or fixed unless a tool result in this conversation proves it. Say what you verified and what you assume.\n- For current facts (prices, versions, news, people, rules) search the web and cite the sources. If sources disagree, say so.\n- If a request is ambiguous or impossible, say so instead of guessing.',
-    '## How to work\n- For any job with more than one step keep the task list up to date with task_update (pass the full list each time: pending / in_progress / done / blocked). Mark a task done only after checking it.\n- New messages can arrive while you work. Unless a message explicitly says to stop or cancel, keep every earlier task, add the new request to the task list and finish ALL tasks before your final answer.\n- Test before delivery: build it, run the tests, start the app and check it (screenshot_page, browser, computer); fix what fails and test again. Never hand over untested work as done.\n- If you get stuck (the same error twice), do not repeat the same call: read the error carefully, check logs and docs, web_search the exact error message, try another approach or tool. Mark a task blocked only when you truly need the user, and say exactly what is needed.\n- Work clean and professionally: keep files in the project folder in a sensible structure, put temporary files in the scratch folder and delete them when done, remove debug leftovers, never hard-code secrets (use .env + .gitignore), and leave servers tidy (no stray files in web roots).\n- Security: after setting up or changing anything reachable from the internet (servers, websites, APIs, domains) run security_check on it and fix what it reports.',
+    '## How to work\n- For any job with more than one step keep the task list up to date with task_update (pass the full list each time: pending / in_progress / done / blocked). Mark a task done only after checking it.\n- New messages can arrive while you work. Unless a message explicitly says to stop or cancel, keep every earlier task, add the new request to the task list and finish ALL tasks before your final answer.\n- Test before delivery: build it, run the tests, start the app and check it (screenshot_page, browser, computer); fix what fails and test again. Never hand over untested work as done.\n- If you get stuck (the same error twice), do not repeat the same call: read the error carefully, check logs and docs, web_search the exact error message, try another approach or tool. Mark a task blocked only when you truly need the user, and say exactly what is needed.\n- Work clean and professionally: keep files in the project folder in a sensible structure, put temporary files in the scratch folder and delete them when done, remove debug leftovers, never hard-code secrets (use .env + .gitignore), and leave servers tidy (no stray files in web roots).\n- Security: before publishing (ssh_upload, github_publish) run shield_scan on the project; publishing is blocked when it finds critical problems such as keys in browser code. After setting up or changing anything reachable from the internet run shield_scan on the server and the site, fix what it reports (shield_fix for built-in fixes, with the user\'s OK), and offer shield_monitor.',
   ];
   if (!sub) {
     lines.push('For big jobs that split into independent parts you may use the delegate tool to run sub-agents in parallel.');
@@ -100,7 +142,7 @@ const MUSE_RULES = [
   '- Keep the task list current with the app tool task_update (mcp__carpathron__task_update): full list each time, statuses pending / in_progress / done / blocked.',
   '- Messages that arrive while you work add to the task list unless they say stop. Finish all tasks before the final answer.',
   '- Test before delivery (build, run, check visually with screenshot_page / browser / computer). When stuck, change approach, search the exact error, do not repeat failing calls.',
-  '- Work clean: tidy project structure, temporary files removed, no secrets in code. Run security_check after changing anything public.',
+  '- Work clean: tidy project structure, temporary files removed, no secrets in code. Run shield_scan after changing anything public.',
 ].join('\n');
 const openTasks = (conv) => (conv.tasks || []).filter((t) => t.status === 'pending' || t.status === 'in_progress');
 const KNOWLEDGE_SEARCH = { name: 'knowledge_search', risk: 'read', description: 'Search this project\'s uploaded knowledge files (RAG) and return the most relevant passages with file names.', parameters: { type: 'object', properties: { query: { type: 'string' }, max_results: { type: 'integer' } }, required: ['query'] } };
@@ -167,6 +209,7 @@ class Agent {
     if (rs) ctx.remote = { name: rs.name, host: rs.host, username: rs.username, os: rs.os, path: conv.remote.path || rs.defaultPath || '~' };
     else ctx.tree = folderTree(conv.workspace);
     ctx.modelCaps = models.capsFor(conv.model || this.settings().model).caps;
+    ctx.localModel = models.isLocal(conv.model || this.settings().model);
     ctx.tasks = conv.tasks || [];
     if (!sub && this.dataDir && conv.id) ctx.scratch = path.join(this.dataDir, 'scratch', conv.id);
     return ctx;
@@ -191,6 +234,7 @@ class Agent {
 
   async execKnowledgeTool(conv, name, args) {
     switch (name) {
+      case 'load_tools': { const r = toolroute.loadTools(conv, args.groups); this.store.touch(conv); return r; }
       case 'memory_save': { const m = this.memory.add(args.fact, 'agent', conv.id); this.emit('memory:update', {}); return `Saved to memory (id ${m.id}): ${m.text}`; }
       case 'memory_search': { const r = this.memory.search(String(args.query || '')); return r.length ? r.map((m) => `[${m.id}] ${m.text}`).join('\n') : 'No matching memories.'; }
       case 'memory_forget': { const ok = this.memory.remove(String(args.id || '')); this.emit('memory:update', {}); return ok ? 'Forgotten.' : 'No memory with that id.'; }
@@ -277,6 +321,7 @@ class Agent {
 
   async engineFor(conv) {
     let e = conv.engine || this.settings().engine;
+    if (isLocalModel(conv.model || this.settings().model)) return 'api'; // open-weight model on this PC (Ollama)
     if (e === 'auto') e = this.settings().apiKey ? 'api' : (this.muse.resolveBin() ? 'muse' : 'api');
     return e;
   }
@@ -411,7 +456,7 @@ class Agent {
     if (!rt.inbox || !rt.inbox.length) return false;
     const model = conv.model || this.settings().model;
     for (const m of rt.inbox.splice(0)) {
-      if (m.images && m.images.length && (models.has(model, 'vision') || !models.KNOWN[model])) {
+      if (m.images && m.images.length && canSee(model)) {
         const parts = [{ type: 'text', text: m.text }];
         for (const im of m.images.slice(0, 6)) { try { parts.push({ type: 'image_url', image_url: { url: models.dataUrl(fs.readFileSync(im.path), im.mime) } }); } catch {} }
         llm.push({ role: 'user', content: parts, _image: true });
@@ -555,7 +600,8 @@ class Agent {
 
   // ---------------------------------------------------------------- API-key engine
   toolSpecs(conv, { sub = false } = {}) {
-    const specs = [...BUILTIN, ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...KNOWLEDGE_TOOLS, ...this.mcp.toolSpecs()];
+    const specs = [...BUILTIN, ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...SHIELD_TOOLS, ...KNOWLEDGE_TOOLS, ...this.mcp.toolSpecs()];
+    if (this.settings().toolRouting !== false) specs.push(toolroute.LOAD_TOOLS);
     if (!sub) specs.push(TASK_TOOL);
     if (conv.projectId) specs.push(KNOWLEDGE_SEARCH);
     if (!sub) specs.push(DELEGATE);
@@ -564,7 +610,17 @@ class Agent {
 
   // How much of the model's context window a request may use before old parts are shortened.
   // Muse models: 1,048,576 tokens -> 70 % (about 730k tokens); a custom value can be set in Settings.
+  // The local model to continue with when the cloud is unreachable (null = fallback off / no local model).
+  offlineModel() {
+    const s = this.settings();
+    if (s.localFallback === false) return null;
+    const list = Array.isArray(s.localModels) ? s.localModels : (s.localEnabled ? [s.localModel] : []);
+    if (!list.length) return null;
+    return `local:${list.includes(s.localModel) ? s.localModel : list[0]}`;
+  }
+
   contextBudget(model) {
+    if (isLocalModel(model)) return Math.floor((Number(this.settings().localContext) || 32768) * 0.75); // tools + answer need room
     const set = Number(this.settings().contextTokens);
     const ctx = (models.KNOWN[model] && models.KNOWN[model].context) || 128000;
     if (Number.isFinite(set) && set >= 16000) return Math.min(set, Math.floor(ctx * 0.95));
@@ -574,10 +630,18 @@ class Agent {
   async runApi(conv, text, rt, images = []) {
     conv.llm = conv.llm || [];
     const model = conv.model || this.settings().model;
-    if (images.length && (models.has(model, 'vision') || !models.KNOWN[model])) {
+    if (images.length && canSee(model)) {
       const parts = [{ type: 'text', text }];
       for (const im of images.slice(0, 6)) { try { parts.push({ type: 'image_url', image_url: { url: models.dataUrl(fs.readFileSync(im.path), im.mime) } }); } catch {} }
       conv.llm.push({ role: 'user', content: parts, _image: true });
+    } else if (images.length && this.vision) {
+      this.status(conv, 'Looking at the picture…');
+      let note = '';
+      try {
+        const d = await this.vision.describe(images.slice(0, 4).map((im) => ({ buffer: fs.readFileSync(im.path), mime: im.mime })), text, { chatModel: model, signal: rt.abort.signal });
+        note = `\n\n[The attached picture(s), described by ${String(d.model).replace(/^local:/, '')} — you cannot see them yourself]:\n${d.text}`;
+      } catch (e) { note = `\n\n[A picture is attached, but no vision model could look at it: ${e.message}]`; }
+      conv.llm.push({ role: 'user', content: text + note });
     } else conv.llm.push({ role: 'user', content: text });
     const final = await this.agentLoop(conv, conv.llm, rt, { sub: false });
     return final;
@@ -585,7 +649,7 @@ class Agent {
 
   async agentLoop(conv, llm, rt, { sub, label }) {
     const s = this.settings();
-    const model = conv.model || s.model;
+    let model = conv.model || s.model;
     const baseSteps = Math.max(1, Math.min(500, Number(s.maxSteps) || 100));
     let maxSteps = baseSteps;
     // Auto / Full: the step limit is only a checkpoint — keep going until the job is done
@@ -611,7 +675,8 @@ class Agent {
       const prefix = sub ? `[${label}] ` : '';
       let textMsg = null, thinkMsg = null;
       const sentChars = JSON.stringify(llm).length;
-      this.track({ kind: 'cloud', convId: conv.id, text: `${prefix}Sent to Meta API (${model}): ${llm.length} messages, ~${Math.round(sentChars / 1024)} KB, ${specs.length} tools` });
+      const offered = toolroute.route(specs, conv, llm, s, { local: models.isLocal(model) });
+      this.track({ kind: models.isLocal(model) ? 'local' : 'cloud', convId: conv.id, text: `${prefix}${models.isLocal(model) ? `Asked ${model.replace(/^local:/, '')} on this PC` : `Sent to Meta API (${model})`}: ${llm.length} messages, ~${Math.round(sentChars / 1024)} KB, ${offered.length}${offered.length < specs.length ? ` of ${specs.length}` : ''} tools` });
       if (!sub) this.status(conv, step === 0 ? `Asking ${model}…` : `Thinking about the results (step ${step + 1})…`);
       const stripImages = () => {
         let n = 0;
@@ -622,7 +687,7 @@ class Agent {
         model,
         effort: conv.effort || s.effort || undefined,
         messages: [{ role: 'system', content: systemPrompt(s, conv, ctx) }, ...llm.map(({ _image, ...m }) => m)],
-        tools: specs,
+        tools: offered,
         signal: rt.abort.signal,
         onText: (d) => {
           if (sub) return; // sub-agent text is reported through its tool card
@@ -638,6 +703,15 @@ class Agent {
       try { res = await callModel(); }
       catch (e) {
         if (/image|vision|content type|multimodal|400/i.test(e.message) && stripImages()) { this.log(`Model refused images, retrying without: ${e.message}`); res = await callModel(); }
+        else if (!isLocalModel(model) && /Cannot reach the Meta API|did not answer within|stopped sending data|fetch failed|No Meta API key/i.test(e.message) && this.offlineModel()) {
+          // offline (or no key): continue this turn with the local model on this PC
+          const local = this.offlineModel();
+          this.addMsg(conv, { role: 'info', text: `📴 Meta's cloud is not reachable (${e.message.split('. ')[0]}). Continuing offline with ${local.slice(6)} on this PC.` });
+          this.log(`offline fallback: ${model} -> ${local}`);
+          model = local;
+          compactHistory(llm, this.contextBudget(model));
+          res = await callModel();
+        }
         else throw e;
       }
       if (textMsg) this.patchMsg(conv, textMsg, { streaming: false, text: res.content });
@@ -668,7 +742,7 @@ class Agent {
             if (textMsg) this.patchMsg(conv, textMsg, { draft: true });
             this.addMsg(conv, { role: 'info', text: '🔎 Checking the work before finishing…' });
             this.status(conv, 'Checking the work…');
-            llm.push({ role: 'user', content: '[Automatic self-check before you finish] Go through your answer above claim by claim (files created or changed, commands that worked, tests that passed, things deployed, facts and numbers). Every claim must be backed by a tool result from this conversation. If something is not proven yet, check it now with tools (run the tests, open/screenshot the page, read the file, query the server). If you cannot check it, say so. Remove anything you invented. Then give the final answer — short, saying what was verified and anything still open.' });
+            llm.push({ role: 'user', content: '[Automatic self-check before you finish] Go through your answer above claim by claim (files created or changed, commands that worked, tests that passed, things deployed, facts and numbers). Every claim must be backed by a tool result from this conversation. A claim already shown by a successful tool result AFTER your last change (for example the test run that passed) is verified: do not run it again. Only check what is not proven yet (run the tests, open/screenshot the page, read the file, query the server); if everything is already proven, give the final answer now without tool calls. If you cannot check something, say so. Remove anything you invented. Then give the final answer — short, saying what was verified and anything still open.' });
             continue;
           }
         }
@@ -681,10 +755,26 @@ class Agent {
         llm.push({ role: 'tool', tool_call_id: call.id, content: output });
       }
       // Let the model see photos it just took (Muse Spark accepts images).
-      if (rt.newImages && rt.newImages.length && s.vision !== false && (models.has(model, 'vision') || !models.KNOWN[model])) {
+      if (rt.newImages && rt.newImages.length && s.vision !== false && canSee(model)) {
         const parts = [{ type: 'text', text: `[${rt.newImages.length} image(s): ${rt.newImages.map((x) => x.source).join(', ')}. Look at them if it helps the task.]` }];
         for (const ph of rt.newImages.slice(-3)) parts.push({ type: 'image_url', image_url: { url: `data:${ph.mime || 'image/jpeg'};base64,${ph.buffer.toString('base64')}` } });
         llm.push({ role: 'user', content: parts, _image: true });
+      } else if (rt.newImages && rt.newImages.length && s.vision !== false && this.vision && !rt.newImages.every((x) => x.noVision)) {
+        // This model cannot see (e.g. Llama 3.1 8B): a vision model describes the new photos in words.
+        const imgs = rt.newImages.filter((x) => !x.noVision).slice(-2);
+        if (!sub) this.status(conv, 'Looking at the photo…');
+        try {
+          const lastUser = [...conv.messages].reverse().find((m) => m.role === 'user');
+          const d = await this.vision.describe(imgs.map((x) => ({ buffer: x.buffer, mime: x.mime })), lastUser && lastUser.text, { chatModel: model, signal: rt.abort.signal });
+          const note = `\n\n[What the photo shows — described by ${String(d.model).replace(/^local:/, '')} (you cannot see it yourself, use this description)]:\n${d.text}`;
+          if (!sub) this.addMsg(conv, { role: 'info', text: `👁 ${String(d.model).replace(/^local:/, '')}: ${d.text}` });
+          this.track({ kind: models.isLocal(d.model) ? 'local' : 'cloud', convId: conv.id, text: `${prefix}Photo described by ${String(d.model).replace(/^local:/, '')}${models.isLocal(d.model) ? ' on this PC' : ''}` });
+          const lastTool = [...llm].reverse().find((m) => m.role === 'tool');
+          if (lastTool) lastTool.content = `${lastTool.content}${note}`; else llm.push({ role: 'user', content: note.trim() });
+        } catch (e) {
+          llm.push({ role: 'user', content: `[A photo was taken, but no vision model could look at it: ${e.message}]` });
+          if (!sub) this.addMsg(conv, { role: 'info', text: `👁 No model could look at the photo: ${e.message}` });
+        }
       }
       rt.newImages = [];
     }
@@ -739,6 +829,7 @@ class Agent {
         if (XNAMES.has(call.name)) return execX(call.name, args, ctx);
         if (COMPUTER_NAMES.has(call.name)) return execComputer(call.name, args, ctx);
         if (DEV_NAMES.has(call.name)) return execDev(call.name, args, ctx);
+        if (SHIELD_NAMES.has(call.name)) return execShield(call.name, args, ctx);
         if (GHNAMES.has(call.name)) return execGitHub(call.name, args, ctx);
         return execBuiltin(call.name, args, ctx);
       })();
@@ -785,7 +876,7 @@ class Agent {
     return {
       workspace: conv.workspace, robot: this.robot, camera: this.camera, mapper: this.mapper, signal: rt.abort.signal,
       remote: this.remote, remoteServer: rs ? rs.id : null, remotePath: rs ? (conv.remote.path || rs.defaultPath || '') : null,
-      media: this.media, api: this.api, jobs: this.jobs, settings: s, dataDir: this.dataDir, model: conv.model || s.model, github: this.github,
+      media: this.media, api: this.api, jobs: this.jobs, settings: s, dataDir: this.dataDir, model: conv.model || s.model, github: this.github, shield: this.shield,
       computerState: this.screenState(conv.id), requestStop: () => this.stop(conv.id),
       ...extra,
     };
@@ -908,7 +999,7 @@ class Agent {
       env: { ELECTRON_RUN_AS_NODE: '1', MC_URL: `https://127.0.0.1:${b.port}`, MC_TOKEN: b.token, MC_CONV: conv.id, MC_CA: b.ca },
     };
   }
-  bridgeList() { return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...KNOWLEDGE_TOOLS, TASK_TOOL]; }
+  bridgeList() { return [...BUILTIN.filter((t) => t.name.startsWith('robot_')), ...XTOOLS, ...GH_TOOLS, ...COMPUTER_TOOLS, ...DEV_TOOLS, ...SHIELD_TOOLS, ...KNOWLEDGE_TOOLS, TASK_TOOL]; }
   bridgeSpecs() { return new Map(this.bridgeList().map((t) => [t.name, t])); }
   bridgeTools() {
     return this.bridgeList().map(({ name, description, parameters }) => ({ name, description, parameters }));
@@ -933,7 +1024,7 @@ class Agent {
       let output = k;
       if (output === null) {
         const ctx = this.toolCtx(conv, rt, { onPhoto, status: (t) => this.status(conv, t) });
-        output = XNAMES.has(name) ? await execX(name, args, ctx) : GHNAMES.has(name) ? await execGitHub(name, args, ctx) : COMPUTER_NAMES.has(name) ? await execComputer(name, args, ctx) : DEV_NAMES.has(name) ? await execDev(name, args, ctx) : await execBuiltin(name, args, ctx);
+        output = XNAMES.has(name) ? await execX(name, args, ctx) : GHNAMES.has(name) ? await execGitHub(name, args, ctx) : COMPUTER_NAMES.has(name) ? await execComputer(name, args, ctx) : DEV_NAMES.has(name) ? await execDev(name, args, ctx) : SHIELD_NAMES.has(name) ? await execShield(name, args, ctx) : await execBuiltin(name, args, ctx);
       }
       return { output: clip(output), images: images.slice(-3) };
     } catch (e) { return { output: `Error: ${e.message || e}`, isError: true, images }; }

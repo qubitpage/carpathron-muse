@@ -13,10 +13,19 @@
        /stop        stop now
        /capture     one JPEG photo (Muse Carpathron uses this for robot photos / WhatsApp)
        /led?v=0..255   headlight
-       /status      JSON: ip, signal, motors, uptime
+       /status      JSON: ip, signal, motors, uptime, sensors (distance mm, heading)
+       /turn?deg=..&speed=..   exact turn with the gyro (needs the MPU-6050), runs by itself, see "turning" in /status
+       /safety?mm=..   stop distance in front (needs the VL53L0X; 0 = off, default 150)
        /setup       Wi-Fi setup page
   - Live video (MJPEG) on port 81:  http://<car-ip>:81/stream
   - Safety: motors stop if no /drive command arrives for 600 ms.
+  - Optional sensors on the free pins RXD (GPIO 3) = SDA and TXD (GPIO 1) = SCL, powered from 3V3:
+       VL53L0X laser distance sensor  -> the car refuses to drive forward closer than 15 cm to anything
+       MPU-6050 (GY-521) gyro         -> exact turns (/turn) and the heading in /status
+    Or (sensor mode "ir", set from Muse Carpathron or /config?sensors=ir): two IR obstacle modules ("Avoid", active LOW)
+    on RXD = front-left and TXD = front-right — the car refuses to drive forward while one of them sees something.
+    They are found by themselves at start. While they are connected the USB Serial Monitor is off (the same pins);
+    without them everything works as before. The VL53L0X driver is Pololu's (MIT), included in this folder.
 
   Arduino IDE setup (same as the kit tutorial)
   - Board package "esp32" by Espressif: works with 2.0.12 (kit) and 3.x.
@@ -26,6 +35,7 @@
   - Then set up Wi-Fi from the phone (see above). Muse Carpathron > Robot > "Find my car" finds its IP.
 */
 
+#define FW_VERSION "2.1.0"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -38,6 +48,8 @@
 #include "esp_efuse.h"
 #include "esp_efuse_table.h"
 #include "lwip/sockets.h"
+#include <Wire.h>
+#include "VL53L0X.h"
 
 // ---------------------------------------------------------------- Wi-Fi
 // Optional: you may type your Wi-Fi here instead of using the /setup page.
@@ -102,6 +114,24 @@ const unsigned long FAILSAFE_MS = 2500;  // like the kit: a press keeps the car 
 
 // ---------------------------------------------------------------- state
 volatile int curL = 0, curR = 0;
+// optional sensors (I2C on the serial pins)
+const int I2C_SDA = 3, I2C_SCL = 1;      // RXD, TXD on the ESP32-CAM board
+const uint8_t MPU_ADDR = 0x68;
+bool tofOk = false, imuOk = false;
+bool irOk = false;                        // sensor mode "ir": IR obstacle modules on RXD (left) / TXD (right)
+volatile bool irLeft = false, irRight = false;
+String sensorMode = "auto";               // "auto" = look for I2C sensors, "ir" = IR obstacle modules, "off"
+VL53L0X tof;
+volatile int distMm = -1;                // -1 = nothing in range / no sensor
+volatile int safetyMm = 150;             // refuse to drive forward when something is closer (0 = off)
+volatile bool blocked = false;           // the last forward command was refused / stopped by the distance sensor
+volatile float yawDeg = 0;               // heading from the gyro, + = right (clockwise seen from above)
+float gyroBias = 0;
+volatile bool turning = false;
+volatile float turnTarget = 0, turnFrom = 0;
+volatile int turnSpeed = 70;
+volatile unsigned long turnStarted = 0;
+volatile int turnResult = 0;             // 1 = reached, 2 = timeout, 3 = cancelled
 volatile unsigned long lastDrive = 0;
 bool cameraOk = false;
 bool apMode = false;
@@ -128,6 +158,9 @@ void setLed(int v) { PWM_WRITE(LED_PIN, CH_LED, v); }
 void drive(int l, int r) {
   l = constrain(l, -100, 100);
   r = constrain(r, -100, 100);
+  // distance sensor: never drive forward into something closer than safetyMm (turning and backing up are fine)
+  if (l > 0 && r > 0 && ((tofOk && safetyMm > 0 && distMm > 0 && distMm < safetyMm) || (irOk && (irLeft || irRight)))) { l = 0; r = 0; blocked = true; }
+  else if (l > 0 || r > 0) blocked = false;
   curL = l; curR = r;
   if (SWAP_SIDES) { int t = l; l = r; r = t; }
   if (INVERT_LEFT) l = -l;
@@ -147,6 +180,90 @@ void initMotors() {
 }
 
 // ---------------------------------------------------------------- camera
+// ---------------------------------------------------------------- sensors (optional)
+static void mpuWrite(uint8_t reg, uint8_t v) { Wire.beginTransmission(MPU_ADDR); Wire.write(reg); Wire.write(v); Wire.endTransmission(); }
+static int16_t mpuGyroZ() {
+  Wire.beginTransmission(MPU_ADDR); Wire.write(0x47); if (Wire.endTransmission(false) != 0) return 0;
+  if (Wire.requestFrom((int)MPU_ADDR, 2) != 2) return 0;
+  return (int16_t)((Wire.read() << 8) | Wire.read());
+}
+static bool i2cPresent(uint8_t addr) { Wire.beginTransmission(addr); return Wire.endTransmission() == 0; }
+
+// Looks for the sensors on RXD/TXD. Only when one answers do the pins stay I2C (the USB Serial Monitor then stops).
+bool initSensors() {
+  { Preferences sp; sp.begin("carpathron", true); sensorMode = sp.getString("sensors", "auto"); sp.end(); }
+  if (sensorMode == "off") { Serial.println("Sensors switched off (sensor mode off)."); return false; }
+  if (sensorMode == "ir") {
+    Serial.println("Sensor mode ir: IR obstacle modules on RXD (front-left) and TXD (front-right). The Serial Monitor stops now.");
+    Serial.flush(); delay(50); Serial.end();
+    pinMode(I2C_SDA, INPUT_PULLUP); pinMode(I2C_SCL, INPUT_PULLUP);
+    irOk = true;
+    return true;
+  }
+  Serial.println("Looking for sensors on RXD/TXD (VL53L0X distance, MPU-6050 gyro)... the Serial Monitor pauses for a moment.");
+  Serial.flush(); delay(50);
+  Serial.end();
+  Wire.begin(I2C_SDA, I2C_SCL, 400000);
+  Wire.setTimeOut(20);
+  bool tofHere = i2cPresent(0x29), imuHere = i2cPresent(MPU_ADDR);
+  if (!tofHere && !imuHere) { Wire.end(); Serial.begin(115200); Serial.println("No sensors found: Serial Monitor stays on."); return false; }
+  if (imuHere) {
+    mpuWrite(0x6B, 0x00);      // wake up
+    mpuWrite(0x1A, 0x03);      // low-pass filter ~44 Hz
+    mpuWrite(0x1B, 0x08);      // gyro ±500 °/s (65.5 per °/s)
+    delay(100);
+    long sum = 0;              // the car must stand still: measure the gyro's zero
+    for (int i = 0; i < 300; i++) { sum += mpuGyroZ(); delay(3); }
+    gyroBias = sum / 300.0f;
+    imuOk = true;
+  }
+  if (tofHere) {
+    tof.setBus(&Wire);
+    tof.setTimeout(100);
+    if (tof.init()) { tof.setMeasurementTimingBudget(33000); tof.startContinuous(); tofOk = true; }
+  }
+  return tofOk || imuOk;
+}
+
+// 200 Hz: integrate the gyro, read the distance when a new value is ready, run gyro turns, stop before obstacles.
+static void sensorTask(void*) {
+  unsigned long last = micros();
+  for (;;) {
+    unsigned long now = micros();
+    float dt = (now - last) / 1e6f; last = now;
+    if (imuOk) {
+      float dps = (mpuGyroZ() - gyroBias) / 65.5f;
+      if (fabsf(dps) > 0.4f) yawDeg -= dps * dt;     // MPU-6050 Z up: positive = counter-clockwise → our + = right
+    }
+    if (irOk) {
+      irLeft = digitalRead(I2C_SDA) == LOW; irRight = digitalRead(I2C_SCL) == LOW;   // "Avoid" modules pull LOW on an obstacle
+      if (curL > 0 && curR > 0 && (irLeft || irRight)) { drive(0, 0); blocked = true; }
+    }
+    if (tofOk && (tof.readReg(VL53L0X::RESULT_INTERRUPT_STATUS) & 0x07)) {
+      uint16_t mm = tof.readReg16Bit(VL53L0X::RESULT_RANGE_STATUS + 10);
+      tof.writeReg(VL53L0X::SYSTEM_INTERRUPT_CLEAR, 0x01);
+      distMm = (mm == 0 || mm >= 2000) ? -1 : mm;
+      if (curL > 0 && curR > 0 && safetyMm > 0 && distMm > 0 && distMm < safetyMm) { drive(0, 0); blocked = true; }
+    }
+    if (turning) {
+      float done = yawDeg - turnFrom, left = turnTarget - done;
+      if (fabsf(left) <= 2.0f) { drive(0, 0); turning = false; turnResult = 1; }
+      else if (millis() - turnStarted > 8000) { drive(0, 0); turning = false; turnResult = 2; }
+      else {
+        int sp = fabsf(left) < 25 ? max(55, turnSpeed - 20) : turnSpeed;   // slow down near the end
+        if (left > 0) drive(sp, -sp); else drive(-sp, sp);
+        lastDrive = millis();                       // the failsafe must not stop a running turn
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+}
+
+static void startTurn(float deg, int speed) {
+  turnFrom = yawDeg; turnTarget = deg; turnSpeed = constrain(speed, 50, 100);
+  turnStarted = millis(); turnResult = 0; turning = true;
+}
+
 bool initCamera() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -208,6 +325,7 @@ static esp_err_t send_text(httpd_req_t* req, const char* type, const char* body)
 
 static esp_err_t drive_handler(httpd_req_t* req) {
   int l = queryInt(req, "l", 0), r = queryInt(req, "r", 0);
+  if (turning) { if (!l && !r) return send_text(req, "text/plain", "turning"); turning = false; turnResult = 3; }
   if (l != curL || r != curR) Serial.printf("[drive] left %d  right %d\n", l, r);
   drive(l, r);
   lastDrive = millis();
@@ -226,8 +344,9 @@ static esp_err_t ws_handler(httpd_req_t* req) {
   if (f.type != HTTPD_WS_TYPE_TEXT) return ESP_OK;
   buf[f.len] = 0;
   int l = 0, rr = 0;
-  if (buf[0] == 's') { if (curL || curR) Serial.println("[drive] stop"); drive(0, 0); lastDrive = millis(); }
+  if (buf[0] == 's') { if (turning) { turning = false; turnResult = 3; } if (curL || curR) Serial.println("[drive] stop"); drive(0, 0); lastDrive = millis(); }
   else if (sscanf((const char*)buf, "%d,%d", &l, &rr) == 2) {
+    if (turning) { if (!l && !rr) return ESP_OK; turning = false; turnResult = 3; }
     if (l != curL || rr != curR) Serial.printf("[drive] left %d  right %d\n", l, rr);
     drive(l, rr); lastDrive = millis();
   } else return ESP_OK;
@@ -256,6 +375,7 @@ static esp_err_t test_handler(httpd_req_t* req) {
 }
 
 static esp_err_t stop_handler(httpd_req_t* req) {
+  if (turning) { turning = false; turnResult = 3; }
   drive(0, 0);
   return send_text(req, "text/plain", "stopped");
 }
@@ -266,14 +386,47 @@ static esp_err_t led_handler(httpd_req_t* req) {
   return send_text(req, "text/plain", "ok");
 }
 
+static esp_err_t turn_handler(httpd_req_t* req) {
+  if (!imuOk) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"no gyro (MPU-6050) found\"}");
+  int deg = constrain(queryInt(req, "deg", 0), -720, 720), sp = queryInt(req, "speed", 70);
+  if (!deg) return send_text(req, "application/json", "{\"ok\":true,\"turning\":false}");
+  startTurn(deg, sp); lastDrive = millis();
+  return send_text(req, "application/json", "{\"ok\":true,\"turning\":true}");
+}
+
+static esp_err_t safety_handler(httpd_req_t* req) {
+  safetyMm = constrain(queryInt(req, "mm", safetyMm), 0, 1000);
+  char b[64]; snprintf(b, sizeof(b), "{\"ok\":true,\"stopMm\":%d}", (int)safetyMm);
+  return send_text(req, "application/json", b);
+}
+
+// Sensor mode: /config?sensors=auto|ir|off — saved in the car, it restarts to apply it
+static esp_err_t config_handler(httpd_req_t* req) {
+  char q[64], v[12] = "";
+  if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) httpd_query_key_value(q, "sensors", v, sizeof(v));
+  String m = String(v);
+  if (m != "auto" && m != "ir" && m != "off") {
+    char b[96]; snprintf(b, sizeof(b), "{\"ok\":true,\"sensors\":\"%s\"}", sensorMode.c_str());
+    return send_text(req, "application/json", b);
+  }
+  { Preferences sp; sp.begin("carpathron", false); sp.putString("sensors", m); sp.end(); }
+  send_text(req, "application/json", "{\"ok\":true,\"restarting\":true}");
+  delay(400); ESP.restart();
+  return ESP_OK;
+}
+
 static esp_err_t status_handler(httpd_req_t* req) {
-  char json[384];
+  char json[760];
   bool sta = WiFi.status() == WL_CONNECTED;
   snprintf(json, sizeof(json),
-           "{\"name\":\"Baby Carpathron\",\"ip\":\"%s\",\"mode\":\"%s\",\"wifi\":\"%s\",\"wifiIp\":\"%s\",\"connecting\":%s,\"rssi\":%d,\"left\":%d,\"right\":%d,\"camera\":%s,\"psram\":%s,\"uptime\":%lu}",
+           "{\"name\":\"Baby Carpathron\",\"fw\":\"" FW_VERSION "\",\"ip\":\"%s\",\"mode\":\"%s\",\"wifi\":\"%s\",\"wifiIp\":\"%s\",\"connecting\":%s,\"rssi\":%d,\"left\":%d,\"right\":%d,\"camera\":%s,\"psram\":%s,\"uptime\":%lu,"
+           "\"sensors\":{\"mode\":\"%s\",\"ir\":%s,\"irLeft\":%s,\"irRight\":%s,\"tof\":%s,\"imu\":%s,\"dist\":%d,\"stopMm\":%d,\"blocked\":%s,\"yaw\":%.1f,\"turning\":%s,\"turnResult\":%d}}",
            (sta ? WiFi.localIP() : WiFi.softAPIP()).toString().c_str(), apMode ? "hotspot" : "wifi", savedSsid.c_str(),
            sta ? WiFi.localIP().toString().c_str() : "", wifiChangeRequested ? "true" : "false", sta ? WiFi.RSSI() : 0, curL, curR,
-           cameraOk ? "true" : "false", psramFound() ? "true" : "false", millis() / 1000);
+           cameraOk ? "true" : "false", psramFound() ? "true" : "false", millis() / 1000,
+           sensorMode.c_str(), irOk ? "true" : "false", irLeft ? "true" : "false", irRight ? "true" : "false",
+           tofOk ? "true" : "false", imuOk ? "true" : "false", (int)distMm, (int)safetyMm, blocked ? "true" : "false", (float)yawDeg,
+           turning ? "true" : "false", (int)turnResult);
   return send_text(req, "application/json", json);
 }
 
@@ -519,6 +672,9 @@ void startServers() {
     { "/savewifi", HTTP_GET, savewifi_handler, NULL },
     { "/forgetwifi", HTTP_GET, forget_handler, NULL },
     { "/test", HTTP_GET, test_handler, NULL },
+    { "/turn", HTTP_GET, turn_handler, NULL },
+    { "/safety", HTTP_GET, safety_handler, NULL },
+    { "/config", HTTP_GET, config_handler, NULL },
   };
   if (httpd_start(&web_httpd, &config) == ESP_OK) {
     for (auto& u : uris) httpd_register_uri_handler(web_httpd, &u);
@@ -677,10 +833,11 @@ void handleSerial() {
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // motors can dip the battery; don't reset on brownout
   Serial.begin(115200);
-  Serial.println("\nBaby Carpathron starting…");
+  Serial.println("\nBaby Carpathron starting… firmware " FW_VERSION);
   Serial.printf("Reset reason: %d (1=power on, 3=software, 4/5/6=crash/watchdog, 9=low voltage/brownout)\n", (int)esp_reset_reason());
   initMotors();
   cameraOk = initCamera();
+  if (initSensors()) xTaskCreatePinnedToCore(sensorTask, "sensors", 4096, NULL, 3, NULL, 0);
   startWifi();
   startServers();
   for (int i = 0; i < 3; i++) { setLed(20); delay(80); setLed(0); delay(80); }  // ready

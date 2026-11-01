@@ -78,6 +78,9 @@ class WhatsApp {
       this.store.saveSettings();
       this.emit('conv:update', { id: conv.id, title: conv.title, updatedAt: conv.updatedAt, source: 'whatsapp' });
     }
+    // Settings → WhatsApp → "Model for WhatsApp chats" (e.g. a local model so the robot works with the PC offline)
+    const want = this.store.settings.whatsapp.model;
+    if (want && conv.model !== want) { conv.model = want; conv.engine = 'api'; this.store.touch(conv); }
     return conv;
   }
 

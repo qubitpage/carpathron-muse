@@ -20,6 +20,7 @@
       <nav class="nav" id="nav">
         <button data-view="projects"><i>▦</i> Projects</button>
         <button data-view="remote"><i>🌐</i> Remote</button>
+        <button data-view="shield"><i>🛡</i> Shield <b class="nav-badge" id="shieldNavBadge" hidden></b></button>
         <button data-view="plugins"><i>🧩</i> Plugins</button>
         <button data-view="memory"><i>◎</i> Memory</button>
         <button data-view="skills"><i>/</i> Skills</button>
@@ -105,6 +106,21 @@
         <div class="list" id="keyList"></div>
       </section>
 
+      <!-- SHIELD -->
+      <section class="view page" id="view-shield" hidden>
+        <div class="page-head"><h1>🛡 Carpathron Shield</h1></div>
+        <p class="muted">Security for what you build and where you publish it: secrets in code before publishing, server hardening, website checks and live monitoring. Fixes are backed up, and firewall/SSH fixes undo themselves if the app cannot log in again. Only scan projects, servers and sites you own or manage.</p>
+        <div class="shield-scan" id="shieldScan"></div>
+        <div id="shieldResult"></div>
+        <div class="page-head" style="margin-top:22px"><h2>Live monitoring</h2></div>
+        <p class="muted small">Checks run from this PC over SSH while the app is open: new open ports, password-guessing bursts, new logins, full disk, high load, server down, and <code>/.env</code> or <code>/.git</code> exposed on your sites. Nothing is installed on the server.</p>
+        <div class="list" id="shieldServers"></div>
+        <div class="page-head" style="margin-top:22px"><h2>Alerts</h2><button class="btn tiny" id="shieldClear">Clear</button></div>
+        <div class="list activity" id="shieldEvents"></div>
+        <div class="page-head" style="margin-top:22px"><h2>Fix history</h2></div>
+        <div class="list" id="shieldHistory"></div>
+      </section>
+
       <!-- PLUGINS -->
       <section class="view page" id="view-plugins" hidden>
         <div class="page-head"><h1>Plugins</h1></div>
@@ -138,8 +154,17 @@
 
       <!-- ROBOT -->
       <section class="view page" id="view-robot" hidden>
-        <div class="page-head"><h1>Baby Carpathron</h1><span class="pill" id="robotPill">…</span></div>
-        <div class="robot-grid">
+        <div class="page-head"><h1>Robots</h1><span class="pill" id="robotPill">…</span></div>
+        <nav class="settings-tabs robot-tabs" id="robotTabs" role="tablist">
+          <button role="tab" data-rtab="control" class="on">🎮 Control</button>
+          <button role="tab" data-rtab="setup">⚙ Setup</button>
+          <button role="tab" data-rtab="devices">🔌 Devices</button>
+          <button role="tab" data-rtab="studio">🧩 Firmware studio</button>
+        </nav>
+        <div class="robot-pane" data-rtab="setup" id="robotSetup" hidden></div>
+        <div class="robot-pane" data-rtab="devices" id="robotDevices" hidden></div>
+        <div class="robot-pane" data-rtab="studio" id="robotStudio" hidden></div>
+        <div class="robot-grid robot-pane" data-rtab="control">
           <div class="card">
             <div class="pad" id="pad">
               <button data-dir="fl">↖</button><button data-dir="f">▲</button><button data-dir="fr">↗</button>
@@ -218,6 +243,8 @@
       <!-- SETTINGS -->
       <section class="view page" id="view-settings" hidden>
         <div class="page-head"><h1>Settings</h1></div>
+        <nav class="settings-tabs" id="settingsTabs" role="tablist"></nav>
+        <p class="muted small settings-intro" id="settingsIntro"></p>
         <div class="settings" id="settingsBody"></div>
       </section>
     </main>
@@ -231,5 +258,7 @@
   <script src="app.js"></script>
   <script src="xr-robot.js"></script>
   <script src="robot.js"></script>
+  <script src="shield.js"></script>
+    <script src="studio.js"></script>
 </body>
 </html>

@@ -19,7 +19,7 @@ const XTOOLS = [
   { name: 'ssh_servers', risk: 'read', description: 'List the saved remote servers (VPS / dedicated) you can work on over SSH, with their OS and whether they are connected.', parameters: obj({}) },
   { name: 'ssh_exec', risk: 'exec', description: 'Run a command on a saved remote server over SSH (bash on Linux, PowerShell on Windows servers) and return the output. The connection stays open between calls. Use for installing packages, git, builds, docker, systemctl, logs…', parameters: obj({ server: { type: 'string', description: 'server name (from ssh_servers)' }, command: { type: 'string' }, cwd: { type: 'string', description: 'folder on the server' }, timeout_seconds: { type: 'integer', description: 'default 120, max 3600' } }, ['server', 'command']) },
   { name: 'ssh_shell', risk: 'exec', description: 'Interactive terminal on a remote server that stays open (for programs that ask questions, REPLs, sudo prompts, top, tail -f, editors). action=start returns a shell_id; action=send types input (add {ctrl-c}, {enter}, {tab} if needed) and returns new output; action=read waits for more output; action=close ends it.', parameters: obj({ server: { type: 'string' }, action: { type: 'string', enum: ['start', 'send', 'read', 'close', 'list'] }, shell_id: { type: 'string' }, input: { type: 'string' }, wait_ms: { type: 'integer', description: 'how long to wait for output (default 1500, max 120000)' } }, ['action']) },
-  { name: 'ssh_upload', risk: 'write', description: 'Copy a file or folder from this PC to a remote server (SFTP). Folders are copied recursively without node_modules/.git.', parameters: obj({ server: { type: 'string' }, local_path: { type: 'string' }, remote_path: { type: 'string' } }, ['server', 'local_path', 'remote_path']) },
+  { name: 'ssh_upload', risk: 'write', description: 'Copy a file or folder from this PC to a remote server (SFTP). Folders are copied recursively without node_modules/.git. Carpathron Shield scans what you upload first and blocks it when it finds critical problems (e.g. secret keys in files browsers can download, .env in a web root).', parameters: obj({ server: { type: 'string' }, local_path: { type: 'string' }, remote_path: { type: 'string' }, allow_risky: { type: 'boolean', description: 'upload even though Shield found critical problems — ONLY after the user explicitly accepted the risk' } }, ['server', 'local_path', 'remote_path']) },
   { name: 'ssh_download', risk: 'write', description: 'Copy a file from a remote server to this PC (SFTP).', parameters: obj({ server: { type: 'string' }, remote_path: { type: 'string' }, local_path: { type: 'string' } }, ['server', 'remote_path', 'local_path']) },
   { name: 'ssh_key', risk: 'write', description: 'SSH keys: action=list shows keys (app keys and ~/.ssh); action=generate creates a new ed25519 key (stored encrypted); action=install adds a key to a server\'s authorized_keys and switches that server to key login.', parameters: obj({ action: { type: 'string', enum: ['list', 'generate', 'install'] }, name: { type: 'string', description: 'key name (generate) or key name/id (install)' }, server: { type: 'string' }, remove_password: { type: 'boolean' } }, ['action']) },
   { name: 'ssh_save_server', risk: 'write', description: 'Save a remote server (only when the user gives you the details). Credentials are stored encrypted on this PC.', parameters: obj({ name: { type: 'string' }, host: { type: 'string' }, port: { type: 'integer' }, username: { type: 'string' }, password: { type: 'string' }, private_key_path: { type: 'string' }, default_path: { type: 'string' } }, ['host', 'username']) },
@@ -42,6 +42,7 @@ const XTOOLS = [
   { name: 'arduino_upload', risk: 'exec', description: 'Compile and flash (upload) a sketch to a board on a serial port (e.g. COM5). Hardware action: the board resets.', parameters: obj({ sketch_path: { type: 'string' }, fqbn: { type: 'string' }, port: { type: 'string' } }, ['sketch_path', 'fqbn', 'port']) },
   { name: 'serial_monitor', risk: 'exec', description: 'Read the serial output of a board for some seconds (and optionally send a line first). Use to see boot logs, IP addresses, debug prints.', parameters: obj({ port: { type: 'string' }, baud: { type: 'integer', description: 'default 115200' }, seconds: { type: 'integer', description: 'default 8, max 120' }, send: { type: 'string' } }, ['port']) },
   { name: 'arduino_cli', risk: 'exec', description: 'Run any arduino-cli command (arguments only, e.g. "lib search FastLED", "core list", "board details -b esp32:esp32:esp32").', parameters: obj({ args: { type: 'string' } }, ['args']) },
+  { name: 'robot_firmware', risk: 'exec', description: 'Baby Carpathron car firmware. action "status": the firmware version bundled with this app, the copy in the workspace and the version the car reports. action "update": put the bundled firmware on the car over USB by itself — copies the sketch to <workspace>/firmware/carpathron_car (keeps a backup), finds the car\'s USB port (CH340), installs the ESP32 core if needed, compiles for the AI Thinker ESP32-CAM, uploads and checks the car comes back on Wi-Fi with the new version. Use it whenever the user asks to update / flash / reinstall the car firmware. To change the firmware, edit the sketch in the workspace copy, then use arduino_upload on it (fqbn esp32:esp32:esp32cam).', parameters: obj({ action: { type: 'string', enum: ['status', 'update'] }, port: { type: 'string', description: 'serial port, e.g. COM4 (found automatically when empty)' }, sketch_path: { type: 'string', description: 'optional: flash this sketch folder instead of the bundled one' } }, ['action']) },
   { name: 'open_arduino_ide', risk: 'exec', description: 'Open the Arduino IDE on this PC, optionally with a sketch, so the user can see or edit it.', parameters: obj({ path: { type: 'string' } }) },
   // ---------- Meta media models
   { name: 'generate_image', risk: 'write', description: 'Create an image with Muse Image (logos, product renders, illustrations, website hero images, UI mockups) or edit existing images (give edit_images). Saves PNG/JPG/WEBP to output_path and shows it.', parameters: obj({ prompt: { type: 'string' }, output_path: { type: 'string' }, size: { type: 'string', description: 'aspect, e.g. 1024x1024, 1792x1024, 1024x1792' }, edit_images: { type: 'array', items: { type: 'string' } } }, ['prompt', 'output_path']) },
@@ -294,7 +295,17 @@ async function execX(name, args, ctx) {
     }
     case 'ssh_upload': {
       const srv = remote.need(args.server || ctx.remoteServer);
-      return remote.upload(srv.id, resolveLocal(ws, args.local_path), await remote.resolve(srv.id, args.remote_path, srv.defaultPath));
+      const local = resolveLocal(ws, args.local_path);
+      const target = await remote.resolve(srv.id, args.remote_path, srv.defaultPath);
+      let note = '';
+      if (ctx.shield) {
+        ctx.status && ctx.status('Shield: checking what will be uploaded…');
+        const g = await ctx.shield.gate(local, { purpose: 'server', remotePath: target });
+        if (g.blocked && !args.allow_risky) throw new Error(g.message);
+        const w = g.result.counts.warning;
+        note = g.blocked ? `\n⚠ Uploaded despite ${g.result.counts.critical} critical Shield finding(s) (allowed by the user).` : `\nShield: ${w ? `${w} warning${w === 1 ? '' : 's'} (shield_scan target project for details)` : 'no problems found'}.`;
+      }
+      return (await remote.upload(srv.id, local, target)) + note;
     }
     case 'ssh_download': {
       const srv = remote.need(args.server || ctx.remoteServer);
@@ -396,6 +407,7 @@ async function execX(name, args, ctx) {
     }
     // ---- Arduino
     case 'arduino_setup': return arduinoSetup(args, ctx);
+    case 'robot_firmware': return robotFirmware(args, ctx);
     case 'arduino_boards': {
       const cli = needCli(ctx);
       if (args.search) { const r = await runProc(cli, ['board', 'listall', String(args.search)], { timeoutMs: 60000, signal }); return clip(r.out); }
@@ -493,6 +505,73 @@ function needCli(ctx) {
   const cli = findArduinoCli(ctx.dataDir, ctx.settings.arduinoCli);
   if (!cli) throw new Error('arduino-cli not found. Run the arduino_setup tool first (it downloads arduino-cli), or install Arduino IDE 2.');
   return cli;
+}
+
+// Baby Carpathron firmware: status / update over USB (see firmware.js)
+async function robotFirmware(args, ctx) {
+  const fw = require('./firmware');
+  const status = ctx.status || (() => {});
+  const carVersion = async () => {
+    const ip = String((ctx.settings.robot || {}).carIp || '').trim();
+    if (!ip) return { online: false, note: 'no car address set' };
+    try { const r = await fetch(`http://${ip}/status`, { signal: AbortSignal.timeout(2500) }); const j = await r.json(); return { online: true, version: j.fw || 'older than 2.0 (no version in /status)', sensors: j.sensors || null, ip }; }
+    catch (e) { return { online: false, note: `not reachable at ${ip}`, ip }; }
+  };
+  const bundled = fw.bundledDir();
+  const bundledVersion = bundled ? fw.versionOf(fs.readFileSync(path.join(bundled, `${fw.SKETCH}.ino`), 'utf8')) : null;
+  if (args.action !== 'update') {
+    const c = await carVersion();
+    const inst = fw.installDir(ctx.settings);
+    const instVersion = fs.existsSync(path.join(inst, `${fw.SKETCH}.ino`)) ? fw.versionOf(fs.readFileSync(path.join(inst, `${fw.SKETCH}.ino`), 'utf8')) : null;
+    return [`Bundled with the app: ${bundledVersion || 'none'}${bundled ? ` (${bundled})` : ''}`, `Workspace copy: ${instVersion ? `${instVersion} (${inst})` : 'none yet'}`,
+      `Car: ${c.online ? `online at ${c.ip}, firmware ${c.version}${c.sensors ? `, sensors: distance ${c.sensors.tof ? 'yes' : 'no'}, gyro ${c.sensors.imu ? 'yes' : 'no'}` : ''}` : c.note}`,
+      c.online && c.version && bundledVersion && fw.cmpVersion(bundledVersion, c.version) > 0 ? `→ An update is available (${c.version} → ${bundledVersion}): robot_firmware action "update" with the car on USB.` : ''].filter(Boolean).join('\n');
+  }
+  const log = [];
+  // 1) the sketch
+  let sketch;
+  if (args.sketch_path) { sketch = resolveLocal(ctx.workspace, args.sketch_path); log.push(`Sketch: ${sketch}`); }
+  else {
+    const p = fw.prepare(ctx.settings);
+    sketch = p.dir;
+    log.push(`Firmware ${p.version} copied to ${p.dir}${p.backup ? ` (previous copy kept in ${p.backup})` : ''}`);
+  }
+  // 2) arduino-cli and the ESP32 core (2.0.12, like the kit)
+  let cli = findArduinoCli(ctx.dataDir, ctx.settings.arduinoCli);
+  const cores = cli ? await runProc(cli, ['core', 'list'], { timeoutMs: 60000 }) : { out: '' };
+  if (!cli || !/esp32:esp32/.test(cores.out)) {
+    status('Installing the Arduino tools and the ESP32 core (first time only, several minutes)…');
+    log.push(await arduinoSetup({ cores: ['esp32:esp32@2.0.12'] }, ctx));
+    cli = needCli(ctx);
+  }
+  // 3) the car's USB port
+  let port = args.port ? { address: String(args.port), chip: 'given' } : null;
+  if (!port) {
+    status('Looking for the car on USB…');
+    const r = await runProc(cli, ['board', 'list', '--format', 'json'], { timeoutMs: 60000, signal: ctx.signal });
+    port = fw.pickPort(r.out);
+    if (!port) throw new Error(`${log.join('\n')}\nThe car was not found on USB. Connect it with the USB-C cable (a data cable, not charge-only), check the CH340 driver, then try again.`);
+  }
+  log.push(`Car on ${port.address} (${port.chip})`);
+  // 4) compile + upload
+  status(`Compiling and flashing the car on ${port.address} (about a minute)…`);
+  const up = await runProc(cli, ['compile', '--upload', '-p', port.address, '--fqbn', fw.FQBN, sketch], { timeoutMs: 900000, signal: ctx.signal });
+  const size = (up.out.match(/Sketch uses (\d+) bytes \((\d+)%\)/) || []);
+  if (up.code !== 0) {
+    let hint = '';
+    if (/Failed to connect|Wrong boot mode|timed out waiting for packet/i.test(up.out)) hint = '\nHint: hold the board\'s BOOT button while "Connecting…" appears, then try again.';
+    if (/could not open port|Access is denied|busy/i.test(up.out)) hint = '\nHint: another program uses the port (Arduino IDE serial monitor?). Close it and try again.';
+    return `${log.join('\n')}\n${clip(up.out.trim(), 20000)}\n[UPDATE FAILED]${hint}`;
+  }
+  log.push(`Compiled for ${fw.FQBN}${size[1] ? ` (${size[1]} bytes, ${size[2]}% of flash)` : ''} and uploaded.`);
+  if (ctx.settings.robot) ctx.settings.robot.usbPort = port.address; // Devices tab: this port is the car
+  // 5) back online with the new version?
+  status('Waiting for the car to restart and join Wi-Fi…');
+  let c = { online: false };
+  for (let i = 0; i < 20 && !(c.online && c.version === (args.sketch_path ? c.version : bundledVersion)); i++) { await new Promise((r) => setTimeout(r, 1500)); c = await carVersion(); }
+  log.push(c.online ? `Car online at ${c.ip}, firmware ${c.version}${c.sensors ? ` — distance sensor: ${c.sensors.tof ? 'found' : 'not connected'}, gyro: ${c.sensors.imu ? 'found' : 'not connected'}` : ''}` : `The car did not answer on Wi-Fi yet (${c.note}). If it stays offline: Robot page → Find my car.`);
+  if (ctx.robot && ctx.robot.connect) try { ctx.robot.connect(); } catch {}
+  return `${log.join('\n')}\n[UPDATE OK]`;
 }
 
 async function arduinoSetup(args, ctx) {
@@ -599,4 +678,4 @@ async function deepResearch(args, ctx) {
   return `Report saved to ${out} (${queries.length} searches, ${notes.length} sources read).\n\n${clip(report, 20000)}`;
 }
 
-module.exports = { XTOOLS, execX, readDocument, Jobs, ddgSearch, fetchText, htmlToText, findArduinoCli, splitArgs, parseRanges };
+module.exports = { XTOOLS, execX, readDocument, Jobs, ddgSearch, fetchText, htmlToText, findArduinoCli, splitArgs, parseRanges, runProc };

@@ -120,8 +120,12 @@
       case 'camera:request': captureWebcam(d.id); break;
       case 'camera:photo': window.MCRobot && window.MCRobot.onPhoto && window.MCRobot.onPhoto(d); break;
       case 'robot:status': case 'robot:motors': case 'robot:scan': case 'robot:map': window.MCRobot && window.MCRobot.onEvent(ev, d); break;
+      case 'robot:firmware': window.MCfirmware && window.MCfirmware(d.text); break;
+      case 'studio:log': case 'studio:serial': window.MCstudio && window.MCstudio.onEvent(ev, d); break;
       case 'avatar:link': avatarLinkPrompt(d); break;
-      case 'remote:status': S.boot.servers = d; if (S.view === 'chat') renderHead(); if (S.view === 'remote') renderServerList(); break;
+      case 'remote:status': S.boot.servers = d; if (S.view === 'chat') renderHead(); if (S.view === 'remote') renderServerList(); window.MCShield && window.MCShield.onEvent(ev, d); break;
+      case 'shield:event': case 'shield:scan': case 'shield:status': window.MCShield && window.MCShield.onEvent(ev, d); break;
+      case 'local:pull': case 'local:install': case 'local:status': case 'local:compat': window.MClocal && window.MClocal.onEvent(ev, d); break;
       default: break;
     }
   }
@@ -170,11 +174,13 @@
     if (view === 'skills') renderSkills();
     if (view === 'activity') renderActivity();
     if (view === 'settings') renderSettings();
+    if (view === 'robot') robotTab(S.robotTab);
     if (view === 'robot') window.MCRobot && window.MCRobot.show(S);
     if (view === 'remote') renderRemote();
     if (view === 'guide') renderGuide();
     $('#btnGuide').classList.toggle('on', view === 'guide');
     if (view === 'plugins') renderPlugins();
+    if (view === 'shield') window.MCShield && window.MCShield.show();
     renderChatList();
   }
   $$('#nav button').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
@@ -262,11 +268,12 @@
     el.innerHTML = '';
     el.append(...[
       h('div', { class: conn ? 'ok' : 'bad' }, h('span', { class: 'dot' }), conn ? 'Connected' : 'Reconnecting…'),
-      h('div', { class: e.muse.installed ? 'ok' : 'warn' }, h('span', { class: 'dot' }), e.muse.installed ? `Muse Code ${e.muse.version || 'installed'}` : 'Muse Code not found'),
-      h('div', { class: e.api.hasKey ? 'ok' : 'warn' }, h('span', { class: 'dot' }), e.api.hasKey ? 'Meta API key set' : 'No Meta API key'),
+      // One working engine is enough: the other one is shown as optional (grey), not as a warning.
+      h('div', { class: e.muse.installed ? 'ok' : e.api.hasKey ? 'off' : 'warn', title: e.muse.installed ? '' : 'Optional: sign in with your Meta account through Muse Code (Settings → Meta Muse)' }, h('span', { class: 'dot' }), e.muse.installed ? `Muse Code ${e.muse.version || 'installed'}` : e.api.hasKey ? 'Muse Code (optional)' : 'Muse Code not found'),
+      h('div', { class: e.api.hasKey ? 'ok' : e.muse.installed ? 'off' : 'warn', title: e.api.hasKey ? '' : 'Optional when Muse Code is installed (Settings → Meta Muse)' }, h('span', { class: 'dot' }), e.api.hasKey ? 'Meta API key set' : e.muse.installed ? 'Meta API key (optional)' : 'No Meta API key'),
       wa && (wa.personal.status !== 'off' || wa.cloud.status !== 'off') ? h('div', { class: wa.personal.status === 'connected' ? 'ok' : 'warn' }, h('span', { class: 'dot' }), `WhatsApp: ${wa.personal.status !== 'off' ? wa.personal.status : wa.cloud.status}`) : null,
     ].filter(Boolean));
-    if (!e.muse.installed && !e.api.hasKey) el.append(h('a', { href: '#', onclick: (ev) => { ev.preventDefault(); show('settings'); } }, 'Connect to Meta →'));
+    if (!e.muse.installed && !e.api.hasKey) el.append(h('a', { href: '#', onclick: (ev) => { ev.preventDefault(); openSettings('models'); } }, 'Connect to Meta →'));
   }
 
   // ------------------------------------------------------------ chat
@@ -370,10 +377,12 @@
   }
 
   async function loadModels(engine, force = false) {
-    if (S.models[engine].length && !force) return S.models[engine];
+    // cached for 30 s: local models appear/disappear as they are downloaded, enabled or deleted
+    S.modelsAt = S.modelsAt || {};
+    if (S.models[engine].length && !force && Date.now() - (S.modelsAt[engine] || 0) < 30000) return S.models[engine];
     try {
       const r = await api(`/api/models?engine=${engine}`);
-      S.models[engine] = r.models || [];
+      S.models[engine] = r.models || []; S.modelsAt[engine] = Date.now();
       if (r.error && engine === 'muse') S.models.museError = r.error;
     } catch { S.models[engine] = []; }
     return S.models[engine];
@@ -421,6 +430,53 @@
   // ---- modal
   function modal(...kids) { const box = $('#modalBox'); box.innerHTML = ''; box.append(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false)); $('#modal').hidden = false; }
   function closeModal() { $('#modal').hidden = true; }
+  // helpers shared with the page scripts (shield.js)
+  // ---- Robot page tabs: Control (drive) · Setup (calibration, firmware) · Devices (discovery) · Firmware studio
+  try { S.robotTab = localStorage.getItem('mc.robotTab') || 'control'; } catch { S.robotTab = 'control'; }
+  function robotTab(id) {
+    if (!['control', 'setup', 'devices', 'studio'].includes(id)) id = 'control';
+    S.robotTab = id;
+    try { localStorage.setItem('mc.robotTab', id); } catch {}
+    $$('#robotTabs button').forEach((b) => { b.classList.toggle('on', b.dataset.rtab === id); b.setAttribute('aria-selected', b.dataset.rtab === id ? 'true' : 'false'); });
+    $$('#view-robot .robot-pane').forEach((p) => { p.hidden = p.dataset.rtab !== id; });
+    if (id === 'setup') renderRobotSetup();
+    if (id === 'devices' && window.MCstudio) window.MCstudio.renderDevices($('#robotDevices'));
+    if (id === 'studio' && window.MCstudio) window.MCstudio.renderStudio($('#robotStudio'));
+  }
+  function openRobot(tab) { S.robotTab = tab; show('robot'); }
+  $$('#robotTabs button').forEach((b) => { b.onclick = () => robotTab(b.dataset.rtab); });
+  async function renderRobotSetup() {
+    const el = $('#robotSetup');
+    S.settings = await api('/api/settings');
+    el.innerHTML = '';
+    const live = h('div', { class: 'small' }, 'Reading the car…');
+    el.append(h('div', { class: 'settings' }, buildRobotCard(S.settings),
+      h('div', { class: 'card' }, h('h3', {}, 'Sensors on the car'), live,
+        h('div', { class: 'row' }, h('span', { class: 'small' }, 'Sensor mode:'),
+          ...[['auto', 'Laser + gyro (I2C)'], ['ir', 'IR obstacle modules (kit)'], ['off', 'None']].map(([m, label]) => h('button', { class: 'btn tiny', onclick: async () => {
+            const r = await api('/api/robot/sensor-mode', { body: { mode: m } }); toast(r.error || `Car set to "${label}" — it restarts (about 5 s)`, !!r.error); } }, label))),
+        h('p', { class: 'small muted' }, 'On the free RXD/TXD pins, either: VL53L0X laser distance + MPU-6050 gyro (I2C — the car stops 15 cm before obstacles, exact turns), or two IR obstacle modules from a sensor kit ("Avoid": RXD = front-left, TXD = front-right — the car refuses to drive into what they see). See Guide 3.4.2. Changing the mode restarts the car.'))));
+    const tick = async () => {
+      if (S.view !== 'robot' || S.robotTab !== 'setup' || !document.body.contains(live)) return;
+      try {
+        const r = await api('/api/robot');
+        const sn = r.sensors;
+        live.innerHTML = '';
+        live.append(h('div', {}, `Car: ${r.state}${r.ip ? ` · ${r.ip}` : ''}${r.version ? ` · firmware ${r.version}` : r.firmware === 'carpathron' ? ' · firmware older than 2.0 (update it)' : ''}${r.rssi ? ` · Wi-Fi ${r.rssi} dBm` : ''}`),
+          sn ? h('div', {}, `Mode: ${sn.mode || 'auto'} · ${sn.ir ? `IR left ${sn.irLeft ? '⛔ obstacle' : 'free'} · IR right ${sn.irRight ? '⛔ obstacle' : 'free'}` : `Distance ahead: ${sn.tof ? (sn.dist > 0 ? `${Math.round(sn.dist / 10)} cm` : 'nothing within 2 m') : 'no sensor'} · Heading: ${sn.imu ? `${Math.round(sn.yaw)}°` : 'no gyro'}`}${sn.blocked ? ' · ⛔ blocked by an obstacle' : ''}`) : h('div', { class: 'muted' }, 'No sensor data (firmware 2.0+ reports it).'));
+      } catch (e) { live.textContent = e.message; }
+      setTimeout(tick, 1000);
+    };
+    tick();
+  }
+  // Hand a job to the AI in a new chat working in `folder` (used by the Firmware studio)
+  async function askAgent(text, folder) {
+    S.conv = { id: null, title: 'New chat', messages: [], projectId: null, workspace: folder || S.settings.workspace, engine: null, mode: null, draft: true };
+    show('chat'); renderConv();
+    $('#input').value = text;
+    $('#btnSend').click();
+  }
+  window.MCui = { api, h, $, $$, toast, md, fmtDate, isDesktop, S, askAgent: (t, f) => askAgent(t, f), openRobot: (t) => openRobot(t), modal: (...k) => modal(...k), closeModal: () => closeModal(), newChat: (...a) => newChat(...a), patchConv: (p) => patchConv(p), show: (v) => show(v), view: () => S.view };
   // Text / choice dialogs (window.prompt does not work inside the desktop app).
   function askText(title, value = '', { multiline = false, placeholder = '', hint = '' } = {}) {
     return new Promise((resolve) => {
@@ -470,7 +526,7 @@
       servers.length ? h('div', {}, h('label', { class: 'small muted' }, 'Folder on the server'), h('div', { class: 'row' }, pathIn, h('button', { class: 'btn', onclick: browse }, 'Browse')), dirs) : null,
       h('div', { class: 'row' },
         servers.length ? h('button', { class: 'btn primary', onclick: async () => { if (!picked) return toast('Pick a server', true); await patchConv({ remote: { serverId: picked, path: pathIn.value.trim() } }); closeModal(); toast(`Working on ${whereLabel()}`); } }, 'Use this server') : null,
-        h('button', { class: 'btn', onclick: () => { closeModal(); show('settings'); setTimeout(() => $('#srvCard')?.scrollIntoView({ behavior: 'smooth' }), 300); } }, '＋ Add / edit servers'),
+        h('button', { class: 'btn', onclick: () => { closeModal(); openSettings('integrations', 'srvCard'); } }, '＋ Add / edit servers'),
         h('button', { class: 'btn', onclick: closeModal }, 'Close')));
     if (cur) browse();
   };
@@ -927,6 +983,199 @@
 
   // ------------------------------------------------------------ settings
   function field(label, el, hint) { return h('label', {}, label, el, hint ? h('span', { class: 'small muted' }, hint) : null); }
+  // ---- Local models (Ollama) card in Settings
+  const LOCAL = { pulls: {}, install: null };
+  const gb = (b) => (b ? `${(b / 1e9).toFixed(1)} GB` : '');
+  async function renderLocalCard() {
+    const card = $('#localCard');
+    if (!card) return;
+    let st;
+    try { st = await api('/api/local'); } catch (e) { card.append(h('div', { class: 'small' }, `✕ ${e.message}`)); return; }
+    if (!$('#localCard')) return;
+    const enabled = new Set(st.enabled || []);
+    const save = async (patch) => { S.settings = await api('/api/settings', { body: patch }); S.models.api = []; };
+    const setEnabled = async (list, def) => { await api('/api/local/enabled', { body: { models: list, defaultModel: def } }); S.models.api = []; renderLocalCard(); };
+    const out = h('div', { class: 'small muted' });
+    const head = [];
+    if (!st.installed) head.push(h('div', { class: 'row' }, h('span', { class: 'pill warn' }, 'Ollama not installed'),
+      h('button', { class: 'btn primary', onclick: async () => { const r = await api('/api/local/install', { body: {} }); if (r.error) toast(r.error, true); else { LOCAL.install = { status: 'installing', lines: ['Starting winget…'] }; renderLocalCard(); } } }, '⬇ Install Ollama'),
+      h('span', { class: 'small muted' }, 'Free, from ollama.com (installed with winget, ~1 GB).')));
+    else if (!st.running) head.push(h('div', { class: 'row' }, h('span', { class: 'pill warn' }, 'Ollama installed, not running'),
+      h('button', { class: 'btn primary', onclick: async () => { out.textContent = 'Starting Ollama…'; const r = await api('/api/local/start', { body: {} }); if (r.error) out.textContent = `✕ ${r.error}`; renderLocalCard(); } }, '▶ Start Ollama')));
+    else head.push(h('div', { class: 'row' }, h('span', { class: 'pill ok' }, `Ollama ${st.version} running`), h('span', { class: 'small muted' }, st.base)));
+    const inst = LOCAL.install || st.installing;
+    if (inst) head.push(h('pre', { class: 'shield-cmds' }, `${inst.status === 'installing' ? '⏳ Installing Ollama…' : inst.status === 'done' ? '✓ Ollama installed' : '✕ Install failed'}\n${(inst.lines || []).join('\n')}`));
+
+    // Llama 3.2 Vision needs the compatibility runner (Ollama 0.24, next to the main Ollama)
+    const compatLine = (c) => {
+      const job = LOCAL.compat || c.installing;
+      const pct = job && job.total ? ` ${Math.round((job.completed / job.total) * 100)}% of ${(job.total / 1e9).toFixed(1)} GB` : '';
+      if (job && job.status !== 'done') return h('div', { class: 'small' }, job.status === 'error' ? `✕ ${job.message}` : `⏳ ${job.message}${pct}`,
+        job.status === 'error' ? h('button', { class: 'btn tiny', style: 'margin-left:8px', onclick: async () => { LOCAL.compat = null; await api('/api/local/compat/install', { body: {} }); } }, 'Try again') : null);
+      if (c.installed) return h('div', { class: 'small' }, c.running ? `✓ Runs on the compatibility runner (Ollama ${c.version}, port ${c.port})` : `Compatibility runner (Ollama ${c.version}) ready — starts by itself when needed`);
+      return h('div', { class: 'small' }, h('span', { class: 'pill warn' }, 'needs the compatibility runner'), ` Newer Ollama cannot run Llama 3.2 Vision; the app runs Ollama ${c.version || '0.24.0'} next to it, only for this model (download ≈1–2 GB once). `,
+        h('button', { class: 'btn tiny primary', onclick: async () => { const r = await api('/api/local/compat/install', { body: {} }); if (r.error) toast(r.error, true); else { LOCAL.compat = { status: 'downloading', message: 'Downloading…', completed: 0, total: 0 }; renderLocalCard(); } } }, 'Set up'));
+    };
+    // installed models
+    const rows = (st.models || []).map((m) => {
+      const on = h('input', { type: 'checkbox' }); on.checked = enabled.has(m.name);
+      on.onchange = () => setEnabled(on.checked ? [...enabled, m.name] : [...enabled].filter((n) => n !== m.name), st.defaultModel === m.name || !enabled.size ? m.name : undefined);
+      const caps = (m.caps || []).filter((c) => c !== 'completion');
+      return h('div', { class: 'item' },
+        h('label', { class: 'toggle', title: 'Show in the chat model menu' }, on),
+        h('div', { class: 'grow' }, h('b', {}, m.name), st.defaultModel === m.name ? h('span', { class: 'pill ok', style: 'margin-left:8px' }, 'default (offline)') : null,
+          h('div', { class: 'meta' }, [m.params, m.quant, m.sizeLabel, caps.length ? caps.join(' · ') : '', m.maxContext ? `max ${Math.round(m.maxContext / 1024)}K context` : ''].filter(Boolean).join(' · ')),
+          m.compat ? compatLine(st.compat || {}) : null),
+        st.defaultModel !== m.name ? h('button', { class: 'btn tiny', onclick: () => setEnabled([...new Set([...enabled, m.name])], m.name) }, 'Make default') : null,
+        h('button', { class: 'btn tiny', onclick: async () => { out.textContent = `Testing ${m.name}… (the first answer can take a minute while it loads into the GPU)`; const r = await api('/api/local/test', { body: { model: m.name } }); out.textContent = r.ok ? `✓ ${m.name} answered "${r.reply}" in ${r.seconds} s` : `✕ ${r.error}`; } }, 'Test'),
+        h('button', { class: 'btn tiny', onclick: async () => { if (!confirm(`Delete ${m.name} from this PC (${m.sizeLabel})?`)) return; const r = await api('/api/local/models', { method: 'DELETE', body: { name: m.name } }); if (r.error) toast(r.error, true); S.models.api = []; renderLocalCard(); } }, 'Delete'));
+    });
+
+    // download
+    const dl = h('input', { list: 'localSuggest', placeholder: 'model name, e.g. muse-glimmer', value: LOCAL.dlText != null ? LOCAL.dlText : (st.recommended && !(st.models || []).some((m) => m.name === st.recommended.name) ? st.recommended.name : '') });
+    dl.oninput = () => { LOCAL.dlText = dl.value; };
+    const dlist = h('datalist', { id: 'localSuggest' }, ...(st.suggested || []).map((x) => h('option', { value: x.name }, `${x.size} — ${x.about}`)));
+    const pulls = { ...Object.fromEntries((st.pulls || []).map((p) => [p.name, p])), ...LOCAL.pulls };
+    const pullRows = Object.values(pulls).filter((p) => p && !['done'].includes(p.status) || (p && p.error)).map((p) => {
+      const pct = p.total ? Math.floor((p.completed / p.total) * 100) : 0;
+      return h('div', { class: 'item' }, h('div', { class: 'grow' }, h('b', {}, p.name), h('div', { class: 'meta' }, p.error ? `✕ ${p.error}` : `${p.status}${p.total ? ` — ${gb(p.completed)} of ${gb(p.total)} (${pct} %)` : ''}`),
+        p.total && !p.error ? h('div', { class: 'local-bar' }, h('i', { style: `width:${pct}%` })) : null),
+        !p.error && !['cancelled', 'error'].includes(p.status) ? h('button', { class: 'btn tiny', onclick: async () => { await api('/api/local/pull', { method: 'DELETE', body: { name: p.name } }); } }, 'Cancel') : h('button', { class: 'btn tiny', onclick: () => { delete LOCAL.pulls[p.name]; renderLocalCard(); } }, 'OK'));
+    });
+
+    const ctx = h('select', {}, ...[16384, 32768, 65536, 131072].map((n) => h('option', { value: n, selected: Number(st.context) === n }, `${n / 1024}K tokens${n === 32768 ? ' (recommended)' : n >= 65536 ? ' (needs more GPU memory)' : ''}`)));
+    ctx.onchange = () => save({ localContext: Number(ctx.value) });
+    const fb = h('input', { type: 'checkbox' }); fb.checked = st.fallback !== false;
+    fb.onchange = () => save({ localFallback: fb.checked });
+    const base = h('input', { value: st.base });
+    // Eyes: which model looks at photos (robot camera, attachments) for chats with a model that cannot see
+    const visionLocal = (st.models || []).filter((m) => (m.caps || []).includes('vision') && enabled.has(m.name));
+    const eyes = h('select', {}, h('option', { value: 'auto' }, 'Automatic — the chat model if it sees; a local vision model for local chats or offline; otherwise Muse Spark'),
+      ...visionLocal.map((m) => h('option', { value: `local:${m.name}` }, `${m.name} — on this PC`)), h('option', { value: 'muse-spark-1.3' }, 'muse-spark-1.3 — Meta cloud'));
+    eyes.value = S.settings.visionModel || 'auto';
+    if (eyes.value !== (S.settings.visionModel || 'auto')) eyes.value = 'auto';
+    eyes.onchange = () => save({ visionModel: eyes.value });
+
+    const box = $('#localCard');
+    if (!box) return;
+    box.innerHTML = '';
+    box.append(...[h('h3', {}, 'Local models (Ollama) — work offline'),
+      h('p', { class: 'muted small' }, 'Run Meta\'s open-weight models on this PC: private, free per message and working without internet. Pick them in the chat model menu ("on this PC"). Muse Glimmer (30B) is the best; Llama 3.1 8B / 3.2 3B are fast on smaller GPUs. Cloud-only tools (web search, Muse Image, SAM, voice) need the internet.'),
+      ...head,
+      st.running ? h('div', {}, h('h4', { style: 'margin:12px 0 4px' }, 'Models on this PC'), rows.length ? h('div', { class: 'list' }, ...rows) : h('p', { class: 'small muted' }, 'No models yet — download one below.')) : null,
+      st.running ? h('div', {}, h('h4', { style: 'margin:12px 0 4px' }, 'Download a model'), h('div', { class: 'row' }, dl, dlist,
+        h('button', { class: 'btn primary', onclick: async () => { const n = dl.value.trim(); if (!n) return; const r = await api('/api/local/pull', { body: { name: n } }); if (r.error) toast(r.error, true); else { LOCAL.pulls[n] = { name: n, status: 'starting', completed: 0, total: 0 }; renderLocalCard(); } } }, '⬇ Download')),
+        st.gpu ? h('p', { class: 'small' }, st.gpu.vram ? `Your GPU: ${st.gpu.name} (${st.gpu.vram} GB). ` : 'No NVIDIA GPU found — models run on the CPU. ', st.recommended ? h('span', {}, 'Recommended: ', h('code', {}, st.recommended.name), ` — ${st.recommended.why}.`) : null) : null,
+        h('div', { class: 'small muted' }, ...(st.suggested || []).map((x) => h('div', {}, h('a', { href: '#', title: 'Put this name in the box', onclick: (ev) => { ev.preventDefault(); dl.value = LOCAL.dlText = x.name; dl.focus(); } }, h('code', {}, x.name)), ` ${x.size} — ${x.about}`)))) : null,
+      pullRows.length ? h('div', { class: 'list' }, ...pullRows) : null,
+      st.running ? field('Eyes for photos (robot camera, pictures)', eyes, visionLocal.length ? 'Llama 3.1 8B cannot see: this model looks at each photo and tells it what is there. Works offline.' : 'Download llama3.2-vision:11b (7.8 GB, Meta) so photos and the room map also work offline.') : null,
+      field('Context window for local models', ctx, 'How much the model reads at once (instructions, tools, chat). More needs more GPU memory.'),
+      h('label', { class: 'inline toggle' }, fb, ' Work offline: when Meta\'s cloud cannot be reached, continue the chat with the default local model'),
+      h('details', { class: 'small' }, h('summary', {}, 'Advanced: another local server (LM Studio, llama.cpp)'),
+        field('OpenAI-compatible server address', base, 'Ollama: http://127.0.0.1:11434/v1 · LM Studio: http://127.0.0.1:1234/v1 · llama.cpp: http://127.0.0.1:8080/v1'),
+        h('button', { class: 'btn tiny', onclick: async () => { await save({ localBase: base.value.trim() }); renderLocalCard(); } }, 'Save address')),
+      out].filter(Boolean));
+  }
+  window.MClocal = { onEvent(ev, d) {
+    if (ev === 'local:pull') { LOCAL.pulls[d.name] = d; if (d.status === 'done') { delete LOCAL.pulls[d.name]; toast(`${d.name} is ready — pick it in the model menu`); S.models.api = []; } }
+    if (ev === 'local:install') LOCAL.install = d;
+    if (ev === 'local:compat') { LOCAL.compat = d; if (d.status === 'done') { setTimeout(() => { LOCAL.compat = null; renderLocalCard(); }, 3000); } }
+    if (ev === 'local:status') S.models.api = [];
+    // throttle (not debounce): progress arrives every ~400 ms, a debounce would never fire until the download ended
+    if (S.view === 'settings') {
+      const busy = (ev === 'local:pull' || ev === 'local:compat') && !['done', 'error', 'cancelled'].includes(d.status);
+      if (!busy) { clearTimeout(window.MClocal._t); window.MClocal._t = null; renderLocalCard(); }
+      else if (!window.MClocal._t) window.MClocal._t = setTimeout(() => { window.MClocal._t = null; renderLocalCard(); }, 700);
+    }
+  } };
+
+  // ---- Settings tabs: one tab per area of work. Cards are placed by their title (new cards land in the right tab).
+  const SETTINGS_TABS = [
+    { id: 'models', label: '🧠 AI models', intro: 'Meta cloud models (Meta account or API key), local open-weight models on this PC, and how the agent uses tools and models.', match: /^(Sign in to Meta|Local models|Tools & models)/ },
+    { id: 'agent', label: '🤖 Agent', intro: 'How the agent works for you: approval mode, workspace folder, steps, self-check, tool loading and your custom instructions.', match: /^(Defaults)/ },
+    { id: 'devices', label: '📱 Devices & robots', intro: 'Robots, phones and Meta Quest on your Wi-Fi, and WhatsApp remote control.', match: /^(Robots|Phone & Quest|WhatsApp)/ },
+    { id: 'integrations', label: '🔌 Integrations', intro: 'Remote servers (SSH), GitHub and MCP servers that give the agent more tools.', match: /^(Remote servers|MCP servers)/ },
+    { id: 'app', label: '⬆ App', intro: 'Updates and information about this app.', match: /^(Updates|About)/ },
+  ];
+  const tabOf = (card) => {
+    if (card.dataset.tab) return card.dataset.tab;
+    const t = (card.querySelector('h3') && card.querySelector('h3').textContent || '').trim();
+    const tab = (SETTINGS_TABS.find((x) => x.match.test(t)) || SETTINGS_TABS[SETTINGS_TABS.length - 1]).id;
+    card.dataset.tab = tab;
+    return tab;
+  };
+  function settingsTab(id) {
+    if (!SETTINGS_TABS.some((t) => t.id === id)) id = 'models';
+    S.settingsTab = id;
+    try { localStorage.setItem('mc.settingsTab', id); } catch {}
+    const bar = $('#settingsTabs');
+    if (bar && !bar.children.length) for (const t of SETTINGS_TABS) bar.append(h('button', { role: 'tab', 'data-tab': t.id, onclick: () => settingsTab(t.id) }, t.label));
+    $$('#settingsTabs button').forEach((b) => { b.classList.toggle('on', b.dataset.tab === id); b.setAttribute('aria-selected', b.dataset.tab === id ? 'true' : 'false'); });
+    const tab = SETTINGS_TABS.find((t) => t.id === id);
+    $('#settingsIntro').textContent = tab ? tab.intro : '';
+    $$('#settingsBody > .card').forEach((c) => { c.hidden = tabOf(c) !== id; });
+  }
+  // Open Settings on a tab (and optionally scroll to a card), e.g. from "Connect to Meta →".
+  function openSettings(tab, cardId) {
+    S.settingsTab = tab;
+    show('settings');
+    if (cardId) setTimeout(() => { const c = $(`#${cardId}`); if (c) c.scrollIntoView({ behavior: 'smooth' }); }, 400);
+  }
+  {
+    try { S.settingsTab = localStorage.getItem('mc.settingsTab') || 'models'; } catch { S.settingsTab = 'models'; }
+    const sb = $('#settingsBody');
+    if (sb) new MutationObserver((list) => {
+      for (const m of list) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList.contains('card')) n.hidden = tabOf(n) !== S.settingsTab;
+    }).observe(sb, { childList: true });
+  }
+
+  // Robot setup card (Robot page → Setup tab): address, calibration, firmware.
+  function buildRobotCard(s) {
+    const r = s.robot || {};
+    const ip = h('input', { value: r.carIp || '', placeholder: 'e.g. 192.168.1.50 (empty = not set)' });
+    const cam = h('input', { value: r.cameraUrl || '', placeholder: 'optional, e.g. http://192.168.1.60:81/stream' });
+    const t360 = h('input', { type: 'number', min: 600, max: 5000, step: 50, value: r.turnMs360 || 2400 });
+    const tsp = h('input', { type: 'number', min: 40, max: 100, value: r.turnSpeed || 70 });
+    const dsp = h('input', { type: 'number', min: 30, max: 100, value: r.driveSpeed || 60 });
+    const cps = h('input', { type: 'number', min: 5, max: 200, value: r.cmPerSec || 40 });
+    const info = h('span', { class: 'small muted' });
+    const fwOut = h('pre', { class: 'shield-cmds', hidden: true });
+    window.MCfirmware = (t) => { fwOut.hidden = false; fwOut.textContent = `⏳ ${t}`; };
+    const find = h('button', { class: 'btn', onclick: async () => {
+      find.disabled = true; info.textContent = 'Searching your network (≈10 s)…';
+      try {
+        const f = await api('/api/robot/find', { body: {} });
+        if (!f.found.length) info.textContent = 'No car found. Is it on and set up on your Wi-Fi (http://192.168.4.1/setup from its hotspot)?';
+        else if (f.found.length === 1) { ip.value = f.carIp; info.textContent = `Found Baby Carpathron at ${f.carIp} ✓ (saved)`; }
+        else info.textContent = `Found ${f.found.length}: ${f.found.map((x) => x.ip).join(', ')} — type the one you want.`;
+      } catch (e) { info.textContent = e.message; } finally { find.disabled = false; }
+    } }, '🔍 Find my car');
+    return h('div', { class: 'card', id: 'robotCard' }, h('h3', {}, 'Baby Carpathron — setup & calibration'),
+      h('p', { class: 'small muted' }, 'The car and its camera on your Wi-Fi. The agent drives it with the robot tools; the Control tab has the live controls.'),
+      h('label', {}, 'Car address (IP)', ip),
+      h('label', {}, 'Camera stream URL', cam),
+      h('div', { class: 'row' }, h('label', { class: 'inline' }, 'Full turn (ms) ', t360), h('label', { class: 'inline' }, 'Turn speed (%) ', tsp)),
+      h('div', { class: 'row' }, h('label', { class: 'inline' }, 'Drive speed (%) ', dsp), h('label', { class: 'inline' }, 'Distance per second (cm) ', cps)),
+      h('p', { class: 'small muted' }, 'Calibration for "go to": press Test 1 s drive and measure how far the car went (cm) → Distance per second. Press Test 360° turn: if it turns too little, raise Full turn (ms); too much, lower it. Save after each change. For distances: put a box or a shoe exactly 50 cm in front of the car and press Calibrate distance.'),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn', onclick: async () => { const r = await api('/api/robot/forward', { body: { seconds: 1 } }); info.textContent = r.error ? `✕ ${r.error}` : `Drove 1 s at ${r.speed}% — measure the distance in cm.`; } }, '▶ Test 1 s drive'),
+        h('button', { class: 'btn', title: 'The car turns in short steps and photographs until it sees the start view again', onclick: async () => { info.textContent = 'Calibrating the turn… (the car spins for about 7 s, about 2 circles)'; const r = await api('/api/robot/calibrate-turn', { body: {} }); info.textContent = r.error ? `✕ ${r.error}` : `✓ Turn calibrated: a full circle takes ${r.turnMs360} ms (${r.matches} photo matches). Press Test 360° turn to check.`; t360.value = r.turnMs360; } }, '🔄 Auto-calibrate turn'),
+        h('button', { class: 'btn', onclick: async () => { const r = await api('/api/robot/turn', { body: { degrees: 360 } }); info.textContent = r.error ? `✕ ${r.error}` : 'Turned "360°" — did it end facing the same way?'; } }, '↻ Test 360° turn'),
+        h('button', { class: 'btn', title: 'Car connected to this PC with the USB-C cable', onclick: async (ev) => {
+          const b = ev.currentTarget; b.disabled = true; fwOut.textContent = 'Updating the car firmware… (first time: installs the ESP32 tools, several minutes)'; fwOut.hidden = false;
+          const r = await api('/api/robot/firmware', { body: { action: 'update' } }); b.disabled = false;
+          fwOut.textContent = r.error ? `✕ ${r.error}` : r.text; } }, '⬆ Update car firmware (USB)'),
+        h('button', { class: 'btn', onclick: async () => { fwOut.hidden = false; fwOut.textContent = 'Checking…'; const r = await api('/api/robot/firmware', { body: { action: 'status' } }); fwOut.textContent = r.error ? `✕ ${r.error}` : r.text; } }, 'Firmware version'),
+        h('button', { class: 'btn', title: 'Put a box or a shoe exactly 50 cm in front of the car first', onclick: async () => { info.textContent = 'Measuring… (the vision model looks where the object touches the floor)'; const r = await api('/api/robot/calibrate-distance', { body: { cm: 50 } }); info.textContent = r.error ? `✕ ${r.error}` : `✓ Distance calibrated: camera tilt ${r.tiltDeg}° (measured by ${String(r.model).replace(/^local:/, '')}).`; } }, '📏 Calibrate distance (object at 50 cm)')),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn primary', onclick: async () => {
+          try { S.settings = await api('/api/settings', { body: { robot: { carIp: ip.value.trim(), cameraUrl: cam.value.trim(), turnMs360: t360.value, turnSpeed: tsp.value, driveSpeed: dsp.value, cmPerSec: cps.value } } }); toast('Robot settings saved'); }
+          catch (e) { toast(e.message, true); }
+        } }, 'Save'),
+        find),
+      info, fwOut);
+  }
+
   async function renderSettings() {
     const rtok = (renderSettings.tok = (renderSettings.tok || 0) + 1);
     const s = S.settings = await api('/api/settings');
@@ -987,6 +1236,7 @@
     const steps = h('input', { type: 'number', min: 5, max: 500, value: s.maxSteps });
     const finishAll = h('input', { type: 'checkbox' }); finishAll.checked = S.settings.finishAllTasks !== false;
     const verifyOn = h('input', { type: 'checkbox' }); verifyOn.checked = S.settings.verifyBeforeFinish !== false;
+    const routeOn = h('input', { type: 'checkbox' }); routeOn.checked = S.settings.toolRouting !== false;
     const sys = h('textarea', { rows: 4, placeholder: 'e.g. Answer in Romanian. I am building a robot startup called Carpathron.' });
     sys.value = s.systemPrompt || '';
     body.append(h('div', { class: 'card' },
@@ -997,9 +1247,10 @@
       field('Steps before a pause (Ask / Plan)', steps, 'Auto and Full keep going until the job is finished (checkpoints every this many steps; they stop only if a whole checkpoint makes no progress, or at 1000 steps).'),
       h('label', { class: 'inline toggle' }, finishAll, ' Finish every task: keep working while the task list has unfinished tasks (also for messages sent while it works)'),
       h('label', { class: 'inline toggle' }, verifyOn, ' Check the work before finishing: one extra pass that verifies every claim with tools (fewer mistakes, slightly slower)'),
+      h('label', { class: 'inline toggle' }, routeOn, ' Send only the tools each chat needs (faster and cheaper; Muse loads more tool groups by itself when needed)'),
       field('Custom instructions (for every chat)', sys),
       h('button', { class: 'btn primary', onclick: async () => {
-        try { S.settings = await api('/api/settings', { body: { mode: mode.value, workspace: ws.value, model: model.value.trim(), maxSteps: Number(steps.value) || 100, systemPrompt: sys.value, finishAllTasks: finishAll.checked, verifyBeforeFinish: verifyOn.checked } }); toast('Saved'); }
+        try { S.settings = await api('/api/settings', { body: { mode: mode.value, workspace: ws.value, model: model.value.trim(), maxSteps: Number(steps.value) || 100, systemPrompt: sys.value, finishAllTasks: finishAll.checked, verifyBeforeFinish: verifyOn.checked, toolRouting: routeOn.checked } }); toast('Saved'); }
         catch (e) { toast(e.message, true); }
       } }, 'Save')));
 
@@ -1008,6 +1259,10 @@
       h('h3', {}, 'Remote servers, SSH keys and GitHub'),
       h('p', { class: 'muted small' }, `${(S.boot.servers || []).length} server(s) saved. Manage servers, terminals and SSH keys on the Remote page; GitHub and other connections on the Plugins page.`),
       h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => show('remote') }, '🌐 Open Remote'), h('button', { class: 'btn', onclick: () => show('plugins') }, '🧩 Open Plugins'))));
+
+    // Local models through Ollama on this PC (Muse Glimmer and other open-weight models) — work offline
+    body.append(h('div', { class: 'card', id: 'localCard' }, h('h3', {}, 'Local models (Ollama) — work offline'), h('div', { class: 'small muted' }, 'Checking Ollama…')));
+    renderLocalCard();
 
     // --- tools & models
     const effSel = h('select', {}, ...['', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].map((e) => h('option', { value: e }, e || 'Model default')));
@@ -1071,6 +1326,11 @@
 
     // --- WhatsApp
     const allowed = h('input', { value: (s.whatsapp.allowed || []).join(', '), placeholder: 'e.g. +40 7xx xxx xxx, +40 7yy yyy yyy' });
+    const waModel = h('select', {}, h('option', { value: '' }, 'Same as the default model'),
+      ...(S.models.api.length ? S.models.api : await Promise.race([loadModels('api'), new Promise((r) => setTimeout(() => r([]), 1500))])).filter((m) => (m.kind || 'chat') === 'chat' && !m.notListed).map((m) => h('option', { value: m.id }, m.label || m.id)));
+    waModel.value = s.whatsapp.model || '';
+    if (waModel.value !== (s.whatsapp.model || '')) waModel.append(h('option', { value: s.whatsapp.model }, s.whatsapp.model)), waModel.value = s.whatsapp.model;
+    if (rtok !== renderSettings.tok) return;
     const personalOn = h('input', { type: 'checkbox' }); personalOn.checked = s.whatsapp.personal.enabled;
     const c = s.whatsapp.cloud;
     const cloudOn = h('input', { type: 'checkbox' }); cloudOn.checked = c.enabled;
@@ -1084,6 +1344,7 @@
       h('h3', {}, 'WhatsApp remote control'),
       h('p', { class: 'muted small' }, 'Control Muse Carpathron from your phone. Only your own "Message yourself" chat and the numbers below can give commands. Send /help on WhatsApp for commands; approvals are answered with yes / no. Keep the app running (it stays in the tray when you close the window).'),
       field('Allowed phone numbers (with country code)', allowed),
+      field('Model for WhatsApp chats', waModel, 'A model "on this PC" keeps the thinking and seeing on your PC (WhatsApp itself still needs internet to deliver messages).'),
       h('b', {}, 'A · Personal WhatsApp (QR code, like WhatsApp Web)'),
       h('p', { class: 'small', style: 'color:var(--warn)' }, 'Unofficial connection (Baileys). WhatsApp may restrict numbers that automate messages — use a spare number if possible.'),
       h('label', { class: 'inline toggle' }, personalOn, ' Enable personal WhatsApp'),
@@ -1099,7 +1360,7 @@
       h('div', { id: 'waCloud' }),
       h('div', { class: 'row' }, testTo, h('button', { class: 'btn', onclick: async () => { const r = await api('/api/wa/cloud/test', { body: { to: testTo.value } }); toast(r.ok ? 'Sent' : r.error, !r.ok); } }, 'Send test')),
       h('button', { class: 'btn primary', onclick: async () => {
-        const w = { allowed: allowed.value.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean), personal: { enabled: personalOn.checked }, cloud: { enabled: cloudOn.checked, phoneNumberId: pid.value.trim(), verifyToken: vtok.value.trim(), cloudflaredPath: cfp.value.trim() } };
+        const w = { model: waModel.value, allowed: allowed.value.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean), personal: { enabled: personalOn.checked }, cloud: { enabled: cloudOn.checked, phoneNumberId: pid.value.trim(), verifyToken: vtok.value.trim(), cloudflaredPath: cfp.value.trim() } };
         if (tok.value.trim()) w.cloud.accessToken = tok.value.trim();
         if (asec.value.trim()) w.cloud.appSecret = asec.value.trim();
         S.settings = await api('/api/settings', { body: { whatsapp: w } });
@@ -1107,6 +1368,11 @@
         renderWaStatus();
       } }, 'Save WhatsApp settings')));
     renderWaStatus();
+
+    // --- robots: the setup lives on the Robot page now (Setup tab)
+    body.append(h('div', { class: 'card', id: 'robotLinkCard' }, h('h3', {}, 'Robots'),
+      h('p', { class: 'small muted' }, 'Robots have their own workspace: Robot page → 🎮 Control (drive, camera, map), ⚙ Setup (address, calibration, firmware), 🔌 Devices (boards on USB and robots on the network) and 🧩 Firmware studio (edit, compile and upload firmware with AI help).'),
+      h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: () => openRobot('setup') }, '⚙ Robot setup →'), h('button', { class: 'btn', onclick: () => openRobot('devices') }, '🔌 Devices →'), h('button', { class: 'btn', onclick: () => openRobot('studio') }, '🧩 Firmware studio →'))));
 
     // --- phone & quest access
     const acc = h('div', {});
@@ -1169,7 +1435,9 @@
         if (!st.enabled) { line.textContent = st.reason || 'Updates are not available in this version.'; btn.style.display = 'none'; autoOn.disabled = true; return; }
         const txt = { idle: 'Not checked yet.', checking: 'Checking qubitpage.com for updates…', current: `You have the latest version (${S.boot.version}).`,
           downloading: `Downloading version ${st.version}… ${st.progress || 0} %`, ready: `Version ${st.version} is ready. It installs when you restart (or the next time you close the app).`,
-          error: `Could not check for updates: ${st.error}` }[st.status] || st.status;
+          nofeed: `You have the latest version (${S.boot.version}). No newer version is published on qubitpage.com yet.`,
+          offline: `Could not reach qubitpage.com (no internet?). The app checks again later.`,
+          error: `Could not check for updates right now (${st.error}). The app tries again later.` }[st.status] || st.status;
         line.textContent = txt;
         inst.style.display = st.status === 'ready' ? '' : 'none';
       };
@@ -1184,6 +1452,7 @@
     // --- about
     body.append(h('div', { class: 'card' }, h('h3', {}, 'About'),
       h('p', { class: 'small muted' }, `Muse Carpathron ${S.boot.version} · ${S.boot.platform} · Data stays on this PC except what is sent to Meta's model for each message (see Activity).`)));
+    settingsTab(S.settingsTab);
   }
   // ------------------------------------------------------------ Remote page
   async function renderRemote() {
@@ -1323,10 +1592,10 @@
     const f = S.boot.features || {};
     const rows = [
       ['🌐', 'Remote servers (SSH)', `${(S.boot.servers || []).length} saved`, () => show('remote'), 'Open'],
-      ['🔌', 'MCP servers', `${Object.keys(S.settings.mcpServers || {}).length} configured`, () => show('settings'), 'Configure'],
+      ['🔌', 'MCP servers', `${Object.keys(S.settings.mcpServers || {}).length} configured`, () => openSettings('integrations'), 'Configure'],
       ['🔧', 'Arduino / ESP32', f.arduinoCli ? `arduino-cli: ${f.arduinoCli}` : 'arduino-cli not found yet — the agent downloads it with arduino_setup', null, null],
-      ['🧠', 'Muse Code (Meta account)', e.muse && e.muse.installed ? `installed ${e.muse.version || ''}${e.muse.sandbox ? ' · sandbox ' + e.muse.sandbox : ''}` : 'not installed', () => show('settings'), 'Settings'],
-      ['💬', 'WhatsApp', S.boot.wa ? `personal: ${S.boot.wa.personal.status}` : '', () => show('settings'), 'Settings'],
+      ['🧠', 'Muse Code (Meta account)', e.muse && e.muse.installed ? `installed ${e.muse.version || ''}${e.muse.sandbox ? ' · sandbox ' + e.muse.sandbox : ''}` : 'not installed', () => openSettings('models'), 'Settings'],
+      ['💬', 'WhatsApp', S.boot.wa ? `personal: ${S.boot.wa.personal.status}` : '', () => openSettings('devices', 'waCard'), 'Settings'],
     ];
     for (const [icon, name, state, go, label] of rows) {
       body.append(h('div', { class: 'card plugin-card' }, h('div', { class: 'head' }, h('span', { class: 'logo' }, icon), h('div', { class: 'grow' }, h('b', {}, name), h('div', { class: 'small muted' }, state)), go ? h('button', { class: 'btn', onclick: go }, label) : null)));
@@ -1490,7 +1759,7 @@
     renderFoot();
     newChat();
     const e = S.boot.engines;
-    if (!e.muse.installed && !e.api.hasKey) { show('settings'); toast('Welcome! First connect to Meta: install Muse Code / sign in, or paste an API key.'); }
+    if (!e.muse.installed && !e.api.hasKey) { openSettings('models'); toast('Welcome! First connect to Meta: install Muse Code / sign in, or paste an API key.'); }
   }
   window.MCapi = api; window.MCtoast = toast;
   boot();

@@ -6,12 +6,19 @@
 'use strict';
 const { clip } = require('../tools');
 
+// Meta's open-weight model run on this PC (Ollama / llama.cpp / LM Studio, OpenAI-compatible). Picked like any other
+// model; requests go to the local server instead of the Meta cloud.
+const LOCAL_MODEL_ID = 'muse-glimmer-local';
+const LOCAL_DEFAULTS = { localBase: 'http://127.0.0.1:11434/v1', localModel: 'muse-glimmer' };
+// 'muse-glimmer-local' = the default local model; 'local:<name>' = any model on the local server
+const isLocalModel = (id) => id === LOCAL_MODEL_ID || String(id || '').startsWith('local:');
 const FALLBACK_MODELS = ['muse-spark-1.3', 'muse-wonder-1.0', 'muse-spark-1.3-contributor', 'muse-spark-1.2', 'muse-spark-1.2-contributor', 'muse-spark-1.1', 'muse-image-1.0', 'sam-3.1', 'muse-voice-transcribe-1.0'];
 
-function friendlyHttpError(status, body) {
+function friendlyHttpError(status, body, local = false) {
   let msg = body;
-  try { const j = JSON.parse(body); msg = j.error?.message || j.message || body; } catch {}
+  try { const j = JSON.parse(body); msg = j.error?.message || j.message || j.error || body; } catch {}
   msg = String(msg).slice(0, 400);
+  if (local) return status === 404 ? `The local model was not found (404). Download it first, e.g.: ollama pull ${LOCAL_DEFAULTS.localModel}. ${msg}` : `Local model error ${status}: ${msg}`;
   if (status === 401 || status === 403) return `Meta API rejected the key (${status}). Check the API key in Settings. ${msg}`;
   if (status === 404) return `Meta API: model or endpoint not found (404). Pick another model. ${msg}`;
   if (status === 429) return `Meta API rate limit or credit limit reached (429). ${msg}`;
@@ -19,13 +26,47 @@ function friendlyHttpError(status, body) {
 }
 
 class ApiEngine {
-  constructor({ getSettings }) { this.getSettings = getSettings; }
+  constructor({ getSettings, local = false }) { this.getSettings = getSettings; this.isLocal = local; }
 
   base() { return String(this.getSettings().apiBase || 'https://api.meta.ai/v1').replace(/\/+$/, ''); }
   headers() {
     const key = this.getSettings().apiKey;
+    if (this.isLocal) return { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) };
     if (!key) throw new Error('No Meta API key. Open Settings → Meta API key, or switch the engine to "Meta account (Muse Code)".');
     return { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` };
+  }
+  // The engine for the open-weight model on this PC (same protocol, local server, Chat Completions, no key needed).
+  localEngine() {
+    if (!this._local) {
+      this._local = new ApiEngine({ local: true, getSettings: () => { const s = this.getSettings(); return { ...s, apiBase: s.localBase || LOCAL_DEFAULTS.localBase, apiKey: s.localKey || '', apiWire: 'chat' }; } });
+    }
+    return this._local;
+  }
+  compatEngine() {
+    if (!this._compat) this._compat = new ApiEngine({ local: true, getSettings: () => ({ ...this.getSettings(), apiBase: this.ollama.compat.base(), apiKey: '', apiWire: 'chat' }) });
+    return this._compat;
+  }
+  localStatus() { const s = this.getSettings(); return { enabled: !!s.localEnabled, base: s.localBase || LOCAL_DEFAULTS.localBase, model: s.localModel || LOCAL_DEFAULTS.localModel }; }
+  // The model name on the local server for a menu id ('muse-glimmer-local' or 'local:<name>').
+  localName(id) { const s = this.getSettings(); return String(id || '').startsWith('local:') ? String(id).slice(6) : (s.localModel || LOCAL_DEFAULTS.localModel); }
+  // Is the local server up, and does it have the model? Then answer one tiny prompt.
+  async testLocal(id = LOCAL_MODEL_ID) {
+    const st = this.localStatus();
+    const name = this.localName(id);
+    const eng = this.localEngine();
+    if (this.ollama) await this.ollama.ensureRunning();
+    let ids = [];
+    try {
+      const r = await fetch(`${st.base}/models`, { headers: eng.headers(), signal: AbortSignal.timeout(8000) });
+      if (r.ok) { const j = await r.json(); ids = (j.data || j.models || []).map((m) => m.id || m.name || m.model).filter(Boolean); }
+    } catch (e) { throw new Error(`No local model server at ${st.base} (${(e.cause && e.cause.code) || e.message}). Install Ollama in Settings → Local models (Ollama), then download ${LOCAL_DEFAULTS.localModel}.`); }
+    const same = (a, b) => a === b || a.replace(/:latest$/, '') === b.replace(/:latest$/, '');
+    if (ids.length && !ids.some((i) => same(i, name))) throw new Error(`The local server is running but does not have "${name}". Models there: ${ids.filter((i) => !/^carpathron-/.test(i)).slice(0, 8).join(', ') || 'none'}. Download it in Settings → Local models.`);
+    const t0 = Date.now();
+    const res = await this.complete({ model: `local:${name}`, messages: [{ role: 'user', content: 'Reply with exactly: OK' }] });
+    const reply = String(res.content || '').trim();
+    if (!reply && !(res.toolCalls || []).length) throw new Error(`${name} loaded but answered with an empty message${res.reasoning ? ' (it only thought)' : ''}. Delete it and download it again, or pick another model.`);
+    return { ok: true, model: name, base: st.base, reply: reply.slice(0, 80), seconds: Math.round((Date.now() - t0) / 100) / 10, models: ids.slice(0, 20) };
   }
 
   async listModels() {
@@ -40,14 +81,43 @@ class ApiEngine {
   }
 
   // One model call. Streams text through onText. Returns { content, reasoning, toolCalls: [{id,name,arguments}] }
-  async complete({ model, messages, tools, signal: outer, onText, onReasoning, effort }) {
+  async complete(args) {
+    if (isLocalModel(args.model) && !this.isLocal) {
+      const name = this.localName(args.model);
+      let run = name, engine = this.localEngine();
+      if (this.ollama) {
+        await this.ollama.ensureRunning();
+        run = await this.ollama.tuned(name).catch(() => name);
+        const compat = this.ollama.compat;
+        if (compat && compat.uses(name)) {
+          // Llama 3.2 Vision: the compatibility runner (Ollama 0.24). One model on the GPU at a time.
+          if (!(await compat.ensureRunning())) throw new Error(`${name} needs the compatibility runner (newer Ollama versions cannot run Llama 3.2 Vision). Set it up in Settings → AI models → Local models.`);
+          await this.ollama.unloadAll();
+          engine = this.compatEngine(); run = name;
+        } else if (compat && compat.models.size) await compat.unloadAll();
+      }
+      const r = await engine.complete({ ...args, model: run });
+      // Small open models (e.g. Llama 3.1 8B) often write the tool call as JSON text instead of a real call.
+      if (!r.toolCalls.length && args.tools && args.tools.length) {
+        const found = textToolCalls(r.content, args.tools);
+        if (found.calls.length) { r.toolCalls = found.calls; r.content = found.rest; }
+      }
+      return r;
+    }
+    return this._completeTimed(args);
+  }
+
+  async _completeTimed({ model, messages, tools, signal: outer, onText, onReasoning, effort }) {
+    const who = this.isLocal ? `The local model (${this.base()})` : 'Meta API';
     // Our own abort: user Stop, or no answer from Meta in time.
     const ctl = new AbortController();
     let timedOut = '';
     const onOuter = () => ctl.abort();
     if (outer) { if (outer.aborted) ctl.abort(); else outer.addEventListener('abort', onOuter, { once: true }); }
-    let timer = setTimeout(() => { timedOut = 'Meta API did not answer within 90 seconds.'; ctl.abort(); }, 90000);
-    const idle = () => { clearTimeout(timer); timer = setTimeout(() => { timedOut = 'Meta API stopped sending data for 120 seconds.'; ctl.abort(); }, 120000); };
+    // a local model may need minutes to load into the GPU on its first request
+    const firstMs = this.isLocal ? 600000 : 90000;
+    let timer = setTimeout(() => { timedOut = `${who} did not answer within ${firstMs / 1000} seconds.`; ctl.abort(); }, firstMs);
+    const idle = () => { clearTimeout(timer); timer = setTimeout(() => { timedOut = `${who} stopped sending data for 120 seconds.`; ctl.abort(); }, 120000); };
     try {
       try {
         return await this._complete({ model, messages, tools, signal: ctl.signal, onText, onReasoning, idle, effort });
@@ -56,8 +126,8 @@ class ApiEngine {
         throw e;
       }
     } catch (e) {
-      if (timedOut && !(outer && outer.aborted)) throw new Error(`${timedOut} Check your internet connection and try again.`);
-      if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN/i.test(String(e.message) + String(e.cause && e.cause.code))) throw new Error(`Cannot reach the Meta API at ${this.base()} (${(e.cause && e.cause.code) || e.message}). Check your internet connection.`);
+      if (timedOut && !(outer && outer.aborted)) throw new Error(`${timedOut} ${this.isLocal ? 'Check that Ollama (or your local server) is running.' : 'Check your internet connection and try again.'}`);
+      if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN/i.test(String(e.message) + String(e.cause && e.cause.code))) throw new Error(this.isLocal ? `Cannot reach the local model at ${this.base()} (${(e.cause && e.cause.code) || e.message}). Ollama is not running or not installed: open Settings → Local models (Ollama) to install or start it.` : `Cannot reach the Meta API at ${this.base()} (${(e.cause && e.cause.code) || e.message}). Check your internet connection.`);
       throw e;
     } finally {
       clearTimeout(timer);
@@ -101,11 +171,11 @@ class ApiEngine {
     if (!res.ok && res.status === 400) { // maybe this model takes no reasoning options: once more without them
       const txt = await res.text();
       if (/reason|summary|effort/i.test(txt)) { delete body.reasoning; res = await send(body); }
-      else { const e = new Error(friendlyHttpError(400, txt)); e.wireRefused = true; throw e; }
+      else { const e = new Error(friendlyHttpError(400, txt, this.isLocal)); e.wireRefused = true; throw e; }
     }
     if (!res.ok) {
       const txt = await res.text();
-      const e = new Error(friendlyHttpError(res.status, txt));
+      const e = new Error(friendlyHttpError(res.status, txt, this.isLocal));
       e.wireRefused = [400, 404, 405, 415, 422, 501].includes(res.status);
       throw e;
     }
@@ -209,8 +279,8 @@ class ApiEngine {
       if (res.status === 400 && /stream/i.test(txt)) {
         body.stream = false;
         res = await fetch(`${this.base()}/chat/completions`, { method: 'POST', headers: this.headers(), body: JSON.stringify(body), signal });
-        if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.text()));
-      } else throw new Error(friendlyHttpError(res.status, txt));
+        if (!res.ok) throw new Error(friendlyHttpError(res.status, await res.text(), this.isLocal));
+      } else throw new Error(friendlyHttpError(res.status, txt, this.isLocal));
     }
     idle();
     const type = res.headers.get('content-type') || '';
@@ -260,6 +330,35 @@ class ApiEngine {
     }
     return { content, reasoning, toolCalls: calls.filter(Boolean).map((c, i) => ({ ...c, id: c.id || `call_${Date.now()}_${i}` })) };
   }
+}
+
+// Find tool calls written as text: {"name": "run_command", "parameters": {...}} (also "arguments"), possibly in ```json fences
+// or after <|python_tag|>. Only names of offered tools count. Returns { calls, rest } (rest = the text without them).
+function textToolCalls(content, tools) {
+  const text = String(content || '');
+  const names = new Set((tools || []).map((t) => t.name || (t.function && t.function.name)).filter(Boolean));
+  const calls = []; const cut = [];
+  for (let i = text.indexOf('{'); i >= 0 && i < text.length; i = text.indexOf('{', i + 1)) {
+    let depth = 0, inStr = false, esc = false, end = -1;
+    for (let k = i; k < text.length; k++) {
+      const ch = text[k];
+      if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+      if (ch === '"') inStr = true; else if (ch === '{') depth++; else if (ch === '}') { depth--; if (depth === 0) { end = k; break; } }
+    }
+    if (end < 0) break;
+    let j = null; try { j = JSON.parse(text.slice(i, end + 1)); } catch {}
+    const name = j && (j.name || (j.function && j.function.name));
+    const params = j && (j.parameters ?? j.arguments ?? (j.function && (j.function.arguments ?? j.function.parameters)));
+    if (name && names.has(name) && params !== undefined) {
+      calls.push({ id: `call_${Date.now()}_${calls.length}`, name, arguments: typeof params === 'string' ? params : JSON.stringify(params) });
+      cut.push([i, end + 1]);
+      i = end;
+    }
+  }
+  let rest = text;
+  for (const [a, b] of cut.reverse()) rest = rest.slice(0, a) + rest.slice(b);
+  rest = rest.replace(/<\|python_tag\|>/g, '').replace(/```(?:json)?\s*```/g, '').trim();
+  return { calls, rest };
 }
 
 // Chat Completions history -> Responses API input items.
@@ -362,4 +461,4 @@ function repairToolPairs(llm) {
   }
 }
 
-module.exports = { ApiEngine, compactHistory, estTokens, toResponsesInput, fromResponsesOutput, FALLBACK_MODELS, clip };
+module.exports = { textToolCalls, ApiEngine, LOCAL_MODEL_ID, LOCAL_DEFAULTS, isLocalModel, compactHistory, estTokens, toResponsesInput, fromResponsesOutput, FALLBACK_MODELS, clip };

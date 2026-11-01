@@ -1,7 +1,7 @@
 {
   "name": "muse-carpathron",
   "productName": "Muse Carpathron",
-  "version": "1.7.3",
+  "version": "1.9.2",
   "description": "Muse Carpathron: an AI agent for Windows powered by Meta Muse models (open-source hackathon edition). Coding, servers, GitHub, MCP, computer use and robot control.",
   "main": "main.js",
   "author": {
@@ -72,7 +72,10 @@
       "!**/*.d.mts",
       "public/guide.md"
     ],
-    "asarUnpack": [],
+    "asarUnpack": [
+      "node_modules/jszip/**",
+      "node_modules/ssh2/**"
+    ],
     "afterPack": "build/afterPack.js",
     "win": {
       "target": [
@@ -110,7 +113,16 @@
         "channel": "muse"
       }
     ],
-    "compression": "maximum"
+    "compression": "maximum",
+    "extraResources": [
+      {
+        "from": "../../firmware",
+        "to": "firmware",
+        "filter": [
+          "carpathron_car/**"
+        ]
+      }
+    ]
   },
   "repository": {
     "type": "git",

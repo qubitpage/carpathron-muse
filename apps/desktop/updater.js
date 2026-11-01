@@ -19,6 +19,14 @@ function publish() {
 
 function set(patch) { Object.assign(state, patch); publish(); }
 
+// Turns updater errors into something a user can act on. "No feed yet" (404) and being offline are normal, not errors.
+function failed(e) {
+  const m = String(e && e.message || e);
+  if (/HttpError: 404|Cannot find channel|404 Not Found/i.test(m)) return set({ status: 'nofeed', error: '' });
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|net::ERR_|socket hang up|getaddrinfo/i.test(m)) return set({ status: 'offline', error: '' });
+  set({ status: 'error', error: m.split('\n')[0].replace(/\s*Headers:.*$/i, '').slice(0, 160) });
+}
+
 function supported() {
   if (process.windowsStore) return 'Microsoft Store version: the Store installs updates.';
   if (!app.isPackaged) return 'Development run: no updates.';
@@ -35,7 +43,7 @@ async function check(manual = false) {
   try {
     await updater.checkForUpdates();
   } catch (e) {
-    set({ status: 'error', error: String(e && e.message || e).split('\n')[0].slice(0, 200) });
+    failed(e);
     logFn(`update check failed: ${e && e.message}`);
   }
   state.checkedAt = Date.now();
@@ -71,9 +79,9 @@ function setup({ ipcMain, log, autoEnabled }) {
   updater.on('update-available', (i) => set({ status: 'downloading', version: i && i.version || '', progress: 0 }));
   updater.on('download-progress', (p) => set({ status: 'downloading', progress: Math.round(p && p.percent || 0) }));
   updater.on('update-downloaded', (i) => { set({ status: 'ready', version: i && i.version || state.version, progress: 100 }); logFn(`update ${state.version} downloaded`); });
-  updater.on('error', (e) => set({ status: 'error', error: String(e && e.message || e).split('\n')[0].slice(0, 200) }));
+  updater.on('error', (e) => failed(e));
   setTimeout(() => check(false), 20 * 1000);       // first check shortly after start
   setInterval(() => check(false), SIX_HOURS).unref();
 }
 
-module.exports = { setup, check, state };
+module.exports = { setup, check, state, failed };

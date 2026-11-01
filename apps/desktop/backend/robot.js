@@ -92,7 +92,28 @@ class Robot {
     }
   }
 
-  status() { return { state: this.state, ip: this.ip, firmware: this.firmware || null, motors: this.current, camera: !!(this.info && this.info.camera), rssi: this.info ? this.info.rssi : null }; }
+  status() { return { state: this.state, ip: this.ip, firmware: this.firmware || null, version: (this.info && this.info.fw) || null, motors: this.current, camera: !!(this.info && this.info.camera), rssi: this.info ? this.info.rssi : null, sensors: (this.info && this.info.sensors) || null }; }
+
+  // Fresh sensor values from the car (distance mm, gyro heading, turning…), or null without sensors / our firmware.
+  async sensors() {
+    if (this.firmware !== 'carpathron' || !this.ip) return null;
+    try { const j = JSON.parse(await carGet(this.ip, '/status', 1500)); this.info = j; return j.sensors || null; } catch { return null; }
+  }
+  // Exact turn with the car's gyro (firmware 2.0 + MPU-6050). Resolves when done; null when the car cannot.
+  async gyroTurn(deg, speed = 70) {
+    const s = await this.sensors();
+    if (!s || !s.imu) return null;
+    this.cancelPlan('gyro turn');
+    const start = await carGet(this.ip, `/turn?deg=${Math.round(deg)}&speed=${Math.round(speed)}`, 2000).then((b) => JSON.parse(b)).catch(() => null);
+    if (!start || !start.ok) return null;
+    const t0 = Date.now();
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 120));
+      const now = await this.sensors();
+      if (now && !now.turning) return { turned: deg, result: now.turnResult === 1 ? 'reached' : now.turnResult === 2 ? 'timeout' : 'cancelled', yaw: now.yaw };
+      if (Date.now() - t0 > 10000) { carGet(this.ip, '/stop', 1500).catch(() => {}); return { turned: deg, result: 'timeout' }; }
+    }
+  }
 
   manualDrive(left, right, by = 'pc') {
     left = clamp(left, -MAX_SPEED, MAX_SPEED); right = clamp(right, -MAX_SPEED, MAX_SPEED);

@@ -563,3 +563,8 @@ button.chip { cursor: pointer; }
 .vlogs { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; max-height: 160px; overflow: auto; font-size: 12.5px; }
 .vlog b { color: var(--muted); font-weight: 600; }
 #voiceCard .row input:not([type]) { flex: 1; min-width: 0; }
+
+/* ---- Robot → 3D plan view */
+.plan3d { grid-column: 1 / -1; }
+.p3d-view { width: 100%; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: #0d0f12; touch-action: none; }
+.p3d-view canvas { display: block; }

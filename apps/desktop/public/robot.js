@@ -358,7 +358,7 @@
       if (ev === 'robot:status') onStatus(d);
       else if (ev === 'robot:motors') onMotors(d);
       else if (ev === 'robot:scan') { $('#scanInfo').textContent = d.text; if (d.error || /ready/.test(d.text)) $('#btnScan').disabled = false; }
-      else if (ev === 'robot:map') { showMap(d.id); $('#btnScan').disabled = false; }
+      else if (ev === 'robot:map') { showMap(d.id); $('#btnScan').disabled = false; const p3 = document.getElementById('plan3dCard'); if (window.MC3d && p3) window.MC3d.render(p3); }
     },
   };
   // pause keyboard driving when leaving the robot page

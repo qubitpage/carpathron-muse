@@ -405,7 +405,7 @@ async function execBuiltin(name, args, ctx) {
       const C = require('./carsettings');
       const ip = ctx.robot.ip || ctx.robot.getIp();
       if (!ip) throw new Error('No car connected.');
-      if (args.wheels) ctx.robot.stop('health check');
+      if (args.wheels) { ctx.robot.stop('health check'); await new Promise((r) => setTimeout(r, 400)); }
       const h = C.health(await C.runDiag(ip, { motors: !!args.wheels }));
       return `Overall: ${h.summary}\n` + h.items.map((x) => `[${x.status}] ${x.title}${x.detail ? ` — ${x.detail}` : ''}${x.fix ? ` → ${x.fix}` : ''}`).join('\n');
     }

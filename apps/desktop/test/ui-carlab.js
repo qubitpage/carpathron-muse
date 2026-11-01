@@ -70,8 +70,20 @@ const { chromium } = require(process.env.PW || 'playwright');
   await p.screenshot({ path: `${out}/0-control.png`, fullPage: true });
   await p.locator('#liveCard').screenshot({ path: `${out}/0b-hud.png` }).catch(() => {});
   await p.locator('#voiceCard').screenshot({ path: `${out}/0c-voice.png` });
+  await p.waitForSelector('#plan3dCard .p3d-view canvas', { timeout: 10000 });
+  await p.evaluate(async (t) => { await fetch('/api/robot/scan', { method: 'POST', headers: { 'x-mc-token': t, 'Content-Type': 'application/json' }, body: JSON.stringify({ steps: 4 }) }); }, srv.token);
+  for (let i = 0; i < 80; i++) { await p.waitForTimeout(500); const m = await p.evaluate(async (t) => (await (await fetch('/api/robot/maps', { headers: { 'x-mc-token': t } })).json()).length, srv.token); if (m) break; }
+  await p.waitForTimeout(1500);
+  await p.locator('#plan3dCard canvas').scrollIntoViewIfNeeded();
+  const cbox = await p.locator('#plan3dCard canvas').boundingBox();
+  await p.mouse.click(cbox.x + cbox.width * 0.55, cbox.y + cbox.height * 0.7);
+  await p.waitForTimeout(500);
+  const pickText = await p.locator('#plan3dCard .p3d-pick').textContent();
+  const mapText = await p.locator('#plan3dCard .p3d-map').textContent();
+  await p.locator('#plan3dCard').screenshot({ path: `${out}/0d-plan3d.png` });
+  console.log(JSON.stringify({ pickText, mapText }));
   const moved = Math.hypot(pose1.x - pose0.x, pose1.y - pose0.y);
-  const ctlOk = moved > 10 && /cm|clear/.test(hudText) && /Hold to talk/.test(voiceOk) && /Hello test/.test(voiceOk);
+  const ctlOk = /Point:/.test(pickText) && /laser outline/.test(mapText) && moved > 10 && /cm|clear/.test(hudText) && /Hold to talk/.test(voiceOk) && /Hello test/.test(voiceOk);
   console.log(JSON.stringify({ moved, hud: hudText.replace(/\s+/g, ' ').slice(-80), ctlOk }));
 
   // Board & parts

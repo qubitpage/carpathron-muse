@@ -60,8 +60,8 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
     if ((st.l || st.r) && !st.turn && now - st.lastCmd > v().failMs) drive(0, 0);
     if (st.turn) {
       const left = st.turn.target - (yaw() - st.turn.from);
-      if (Math.abs(left) < 2 || now - st.turn.t0 > 8000) { drive(0, 0); st.turnResult = Math.abs(left) < 2 ? 1 : 2; st.turn = null; }
-      else { const sp = Math.max(45, Math.min(v().turnSpd, Math.abs(left) * 2)); drive(Math.sign(left) * sp, -Math.sign(left) * sp); }
+      if (Math.abs(left) < 2 || now - st.turn.t0 > 15000) { drive(0, 0); st.turnResult = Math.abs(left) < 2 ? 1 : 2; st.turn = null; }
+      else { const sp = Math.max(45, Math.min(st.turn.speed || v().turnSpd, Math.abs(left) * 2)); drive(Math.sign(left) * sp, -Math.sign(left) * sp); }
     }
     // swapped sides: the firmware's swap setting undoes a physical swap
     let cl = st.l, cr = st.r;
@@ -158,7 +158,7 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
       case '/capture': if (st.faults.noCamera) { res.writeHead(500); return res.end('camera not available'); } res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(VIEW);
       case '/turn': {
         if (!imuOk()) return json(res, { ok: false, error: 'no gyro' });
-        const deg = Number(q.get('deg')) || 0; st.turn = { target: deg, from: yaw(), t0: Date.now() }; st.turnResult = 0;
+        const deg = Number(q.get('deg')) || 0; st.turn = { target: deg, from: yaw(), t0: Date.now(), speed: Number(q.get('speed')) || 0 }; st.turnResult = 0;
         return json(res, { ok: true, deg });
       }
       case '/safety': if (q.has('mm')) st.values.stopMm = st.saved.stopMm = Math.max(0, Math.min(1000, Number(q.get('mm')) || 0)); return json(res, { ok: true, stopMm: v().stopMm });

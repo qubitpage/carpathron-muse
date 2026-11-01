@@ -282,6 +282,41 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
     assert.ok(robot, 'robot status still works');
     const st = await api('/api/robot/car/practice');
     assert.ok(st.running && st.pose && st.room.w === 360);
+  });
+  await step('mapping on the practice car: laser sweep in the room scan, map v2 with landmarks, go to a point', async () => {
+    await api('/api/robot/car/practice', { stop: true });
+    await api('/api/robot/car/practice', {});
+    for (let i = 0; i < 30 && (await api('/api/robot')).state !== 'online'; i++) await sleep(200);
+    await api('/api/robot/pose', { reset: true });
+    await api('/api/robot/scan', { steps: 4 });
+    let maps = [];
+    for (let i = 0; i < 120 && !maps.length; i++) { await sleep(500); maps = await api('/api/robot/maps'); }
+    assert.ok(maps.length, 'a map was made');
+    const map = await api(`/api/robot/maps/${maps[0].id}/map.json`);
+    assert.strictEqual(map.version, 2);
+    assert.ok(map.sweep && map.sweep.length >= 40, `sweep points: ${map.sweep && map.sweep.length}`);
+    const ahead = map.sweep.find((q) => q.deg === 0);
+    assert.ok(ahead && ahead.m && Math.abs(ahead.m - 1.30) < 0.12, `box 1.30 m ahead, laser says ${JSON.stringify(ahead)}`);
+    const at = (d) => map.sweep.find((q) => q.deg === d) || map.sweep.find((q) => q.deg === d + 5) || map.sweep.find((q) => q.deg === d - 5);
+    const left = at(270), right = at(90); // left: the room wall 1.40 m away; right: the edge of a box 0.60 m away
+    assert.ok(left && left.m && Math.abs(left.m - 1.40) < 0.15, `left wall ${JSON.stringify(left)}`);
+    assert.ok(right && right.m && Math.abs(right.m - 0.62) < 0.12, `box on the right ${JSON.stringify(right)}`);
+    const svg = await fetch(`https://localhost:${PORT}/api/robot/maps/${maps[0].id}/map.svg`, { headers: { 'x-mc-token': srv.token } }).then((r) => r.text());
+    assert.ok(/laser outline/.test(svg) && /#ff8a3d/.test(svg));
+    // landmarks from a vision analysis are placed with the laser distance
+    const { Mapper } = require('../backend/mapper');
+    const lm = Mapper.landmarks({ pose: { x: 0, y: 0, heading: 0 }, sweep: map.sweep, analysis: { views: [{ heading: 0, objects: [{ name: 'red box', bearing: 0, distance_m: 1.6 }] }] } });
+    assert.ok(lm[0].from === 'laser' && Math.abs(lm[0].distance_m - 1.30) < 0.12 && Math.abs(lm[0].y - lm[0].distance_m) < 0.01, JSON.stringify(lm));
+    // go to a point 0.5 m ahead and 0.4 m right (with the speed the calibration measures on this practice car)
+    await api('/api/settings', { robot: { cmPerSec: 27 } });
+    await api('/api/robot/pose', { reset: true });
+    const before = (await api('/api/robot/car/practice')).pose;
+    const g = await api('/api/robot/goto-point', { x: 0.4, y: 0.5 });
+    assert.ok(!g.error, g.error);
+    const after = (await api('/api/robot/car/practice')).pose;
+    const moved = Math.hypot(after.x - before.x, after.y - before.y);
+    assert.ok(moved > 50 && moved < 80, `moved ${moved} cm: ${JSON.stringify(g)}`);
+    assert.ok(after.y > before.y + 15, `went right (sim +y): ${JSON.stringify([before, after])}`);
     const parts = await api('/api/robot/parts');
     assert.ok(parts.boards.length === 6 && parts.parts.length >= 18);
     const plan = await api('/api/robot/parts/plan', { board: 'esp32devkit', part: 'hcsr04', used: {} });

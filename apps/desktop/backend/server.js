@@ -106,7 +106,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     emit('log', { text, ts: Date.now() });
   };
 
-  const robot = new Robot({ getIp: () => store.settings.robot.carIp, emit: (e, d) => (e === 'log' ? logFn(d) : emit(e, d)) });
+  const robot = new Robot({ getCfg: () => store.settings.robot || {}, getIp: () => store.settings.robot.carIp, emit: (e, d) => (e === 'log' ? logFn(d) : emit(e, d)) });
   const mcp = new McpManager({ log: logFn, dataDir });
   // First run with this version: set up the built-in MCP servers (they need nothing installed).
   if (!store.settings.mcpBuiltinsSeeded) {
@@ -876,7 +876,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       if (what === 'practice' && m === 'POST') { // start / stop the practice car (simulator)
         const b = await readJson(req);
         if (b.stop) { if (practice) { practice.close(); practice = null; } return send(res, 200, { ok: true, running: false }); }
-        if (!practice) practice = await require('./simcar').start({ faults: b.faults || {} });
+        if (!practice) { practice = await require('./simcar').start({ faults: b.faults || {} }); robot.resetPose(); } // the map's (0, 0) = where the practice car starts
         else if (b.faults) practice.setFaults(b.faults);
         if (b.use !== false) { store.updateSettings({ robot: { ...store.settings.robot, carIp: practice.host } }); robot.connect(); emit('settings:update', store.publicSettings()); }
         logFn(`Practice car running at ${practice.host}`);
@@ -910,7 +910,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
           if (calibrating) return send(res, 200, { error: 'A calibration step is already running.' });
           calibrating = true;
           try {
-            robot.stop('calibration');
+            robot.stop('calibration'); await new Promise((r) => setTimeout(r, 400));
             const { Calibrator } = require('./calibrate');
             const cal = new Calibrator(ip, { appRobot: () => store.settings.robot || {}, setAppRobot: (x) => { store.updateSettings({ robot: { ...store.settings.robot, ...x } }); emit('settings:update', store.publicSettings()); }, log: logFn });
             const r = await cal.run(String(b.step || ''), b.input || {});
@@ -920,7 +920,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         }
         if (what === 'diag' && m === 'POST') {
           const b = await readJson(req);
-          if (b.motors) robot.stop('health check');
+          if (b.motors) { robot.stop('health check'); await new Promise((r) => setTimeout(r, 400)); } // the stop reaches the car before the wheel test
           const d = await carsettings.runDiag(ip, { motors: !!b.motors });
           const h = carsettings.health(d);
           carHistory.add({ kind: 'health', summary: h.summary, problems: h.items.filter((x) => x.status === 'bad' || x.status === 'warn').map((x) => x.title) });
@@ -958,6 +958,11 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       return send(res, 200, { ok: true, started: true });
     }
     if (p === '/api/robot/maps' && m === 'GET') return send(res, 200, mapper.list());
+    if (p === '/api/robot/goto-point' && m === 'POST') {
+      const b = await readJson(req);
+      try { robot.stop('go there'); return send(res, 200, await mapper.gotoPoint(Number(b.x), Number(b.y), { source: 'plan view' })); } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    if (p === '/api/robot/pose' && m === 'POST') { const b = await readJson(req); if (b.reset) robot.resetPose(); return send(res, 200, { ok: true, pose: robot.pose }); }
     if (p === '/api/avatar/decide' && m === 'POST') {
       const b = await readJson(req);
       const l = avatarLinks.get(String(b.id || ''));
@@ -972,7 +977,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (mf && m === 'GET') {
       const f = mapper.file(mf[1], mf[2]);
       if (!f) return send(res, 404, { error: 'not found' });
-      return sendFile(res, f, f.endsWith('.svg') ? 'image/svg+xml' : f.endsWith('.png') ? 'image/png' : 'image/jpeg');
+      return sendFile(res, f, f.endsWith('.svg') ? 'image/svg+xml' : f.endsWith('.png') ? 'image/png' : f.endsWith('.json') ? 'application/json' : 'image/jpeg');
     }
     if (p === '/api/wa/personal/test' && m === 'POST') { try { await wa.sendSelfTest(); return send(res, 200, { ok: true }); } catch (e) { return send(res, 200, { ok: false, error: e.message }); } }
 

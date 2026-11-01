@@ -39,6 +39,28 @@ class Mapper {
     return { metres: m, ms };
   }
 
+  // Drive to a point of the map (metres, x = right, y = ahead at the start): turn towards it, then short hops; the laser
+  // stops the car before obstacles. Uses the dead-reckoned pose, so it is right to about 10 % of the distance.
+  async gotoPoint(x, y, { source = 'ai', stopAt = 0 } = {}) {
+    this.needCar();
+    const p = this.robot.pose;
+    const dx = Number(x) - p.x, dy = Number(y) - p.y, dist = Math.hypot(dx, dy);
+    if (dist < 0.08) return { metres: 0, text: 'Already there.' };
+    if (dist > 6) throw new Error('That point is more than 6 m away: pick a closer one.');
+    const want = (Math.atan2(dx, dy) * 180) / Math.PI;
+    let turn = ((want - p.heading) % 360 + 540) % 360 - 180;
+    if (Math.abs(turn) > 4) await this.turn(Math.round(turn), source);
+    let left = dist - stopAt, driven = 0, blocked = false;
+    while (left > 0.05) {
+      const hop = Math.min(0.5, left);
+      const s = await this.robot.sensors().catch(() => null);
+      if (s && s.tof && s.dist > 0 && s.dist / 1000 < hop + 0.12) { blocked = true; break; }
+      await this.forward(hop, source);
+      driven += hop; left -= hop;
+    }
+    return { metres: Math.round(driven * 100) / 100, turned: Math.round(turn), blocked, text: blocked ? `Stopped after ${driven.toFixed(1)} m: something is in the way.` : `Arrived (${driven.toFixed(1)} m).` };
+  }
+
   needCar() {
     if (this.robot.status().state !== 'online') throw new Error('The car is not connected (Robot page → Find my car). Turning and scanning need the real car.');
   }
@@ -138,6 +160,34 @@ class Mapper {
   }
 
   // ------------------------------------------------------------------ room scan
+  // Laser sweep: with the laser + gyro the car turns once slowly on the spot while reading the distance ~15 times a second,
+  // giving the outline of the room around it (walls, furniture) in 5° steps. null when the car has no laser + gyro.
+  async sweep(progress = () => {}) {
+    const s = await this.robot.sensors();
+    if (!s || !s.tof || !s.imu || !this.robot.gyroTurn) return null;
+    progress('Laser sweep: the car turns once slowly and measures all around…');
+    const y0 = Number(s.yaw), raw = [];
+    let done = false;
+    const turning = this.robot.gyroTurn(360, 50).catch(() => null).finally(() => { done = true; });
+    const t0 = Date.now();
+    while (!done && Date.now() - t0 < 20000) {
+      const v = await this.robot.sensors();
+      if (v && v.imu) raw.push({ deg: ((Number(v.yaw) - y0) % 360 + 360) % 360, mm: Number(v.dist) });
+      await sleep(25);
+    }
+    await turning;
+    const bins = {};
+    for (const r of raw) { const b = Math.round(r.deg / 5) * 5 % 360; (bins[b] = bins[b] || []).push(r.mm); }
+    const out = [];
+    for (let b = 0; b < 360; b += 5) {
+      const v = (bins[b] || []).filter((x) => x > 0).sort((a, c) => a - c);
+      const none = (bins[b] || []).length && !v.length;
+      if (v.length) out.push({ deg: b, m: Math.round(v[Math.floor(v.length / 2)] / 10) / 100 });
+      else if (none) out.push({ deg: b, m: null }); // free beyond 2 m
+    }
+    return out.length >= 12 ? out : null;
+  }
+
   async scan({ steps = 8, source = 'ai', onProgress } = {}) {
     if (this.busy) throw new Error('A room scan is already running.');
     this.needCar();
@@ -158,9 +208,12 @@ class Mapper {
         photos.push({ heading, file, buffer: ph.buffer });
         await this.turn(360 / steps, source); // the last turn brings the car back to the start direction
       }
+      const sweep = await this.sweep(progress).catch((e) => { this.log(`laser sweep failed: ${e.message}`); return null; });
       progress('Looking at the photos…');
       const analysis = await this.analyze(photos).catch((e) => { this.log(`room scan: analysis failed: ${e.message}`); return null; });
-      const map = { createdAt: Date.now(), steps, turnMs360: this.cfg().turnMs360, views: photos.map((p) => ({ heading: p.heading, file: path.basename(p.file) })), analysis };
+      const pose = this.robot.pose ? { x: this.robot.pose.x, y: this.robot.pose.y, heading: this.robot.pose.heading } : { x: 0, y: 0, heading: 0 };
+      const map = { version: 2, createdAt: Date.now(), steps, turnMs360: this.cfg().turnMs360, pose, views: photos.map((p) => ({ heading: p.heading, file: path.basename(p.file) })), analysis, sweep };
+      map.landmarks = Mapper.landmarks(map);
       const svg = Mapper.renderSvg(map);
       fs.writeFileSync(path.join(dir, 'map.svg'), svg);
       fs.writeFileSync(path.join(dir, 'map.json'), JSON.stringify(map, null, 2));
@@ -390,6 +443,24 @@ class Mapper {
     return best.side;
   }
 
+  // Objects the camera named, placed in metres around the scan spot (x = right, y = ahead at the start). With a laser
+  // sweep the distance comes from the laser at that angle when it sees something there (more exact than the photo).
+  static landmarks(map) {
+    const out = [];
+    const a = map.analysis || { views: [] };
+    for (const v of a.views || []) for (const o of v.objects || []) {
+      const deg = ((v.heading + (Number(o.bearing) || 0)) % 360 + 360) % 360;
+      let dist = Number(o.distance_m) || 1, src = 'camera';
+      if (map.sweep) {
+        const near = map.sweep.filter((p) => p.m && Math.min(Math.abs(p.deg - deg), 360 - Math.abs(p.deg - deg)) <= 7.5).map((p) => p.m).sort((x, y) => x - y);
+        if (near.length && Math.abs(near[0] - dist) < Math.max(0.6, dist * 0.6)) { dist = near[0]; src = 'laser'; }
+      }
+      const r = (deg * Math.PI) / 180, ph = ((map.pose && map.pose.heading) || 0) * Math.PI / 180;
+      out.push({ name: o.name, deg, distance_m: Math.round(dist * 100) / 100, from: src, x: Math.round(((map.pose ? map.pose.x : 0) + Math.sin(r + ph) * dist) * 100) / 100, y: Math.round(((map.pose ? map.pose.y : 0) + Math.cos(r + ph) * dist) * 100) / 100 });
+    }
+    return out;
+  }
+
   static summaryText(map) {
     const a = map.analysis;
     if (!a) return `🗺️ Scanned ${map.steps} directions (photos saved). To name what is around the car, add the Meta API key or download a vision model (Settings → AI models → Local models, e.g. llama3.2-vision:11b).`;
@@ -408,7 +479,14 @@ class Mapper {
     const pt = (deg, m) => [cx + Math.sin((deg * Math.PI) / 180) * m * px, cy - Math.cos((deg * Math.PI) / 180) * m * px];
     const a = map.analysis || { views: [] };
     const step = 360 / (map.steps || 8);
-    let wedges = '', objs = '', ticks = '';
+    let wedges = '', objs = '', ticks = '', outline = '';
+    if (map.sweep && map.sweep.length) { // laser outline of the room: points joined where they are close
+      const pts = map.sweep.filter((q) => q.m).map((q) => pt(q.deg, Math.min(3.4, q.m)));
+      outline = pts.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" fill="#ff8a3d"/>`).join('');
+      const seg = []; const sw = map.sweep;
+      for (let i = 0; i < sw.length; i++) { const p1 = sw[i], p2 = sw[(i + 1) % sw.length]; if (p1.m && p2.m && Math.abs(p1.m - p2.m) < 0.35 && (p2.deg - p1.deg + 360) % 360 <= 10) { const [x1, y1] = pt(p1.deg, Math.min(3.4, p1.m)), [x2, y2] = pt(p2.deg, Math.min(3.4, p2.m)); seg.push(`M${x1.toFixed(1)},${y1.toFixed(1)} L${x2.toFixed(1)},${y2.toFixed(1)}`); } }
+      outline = `<path d="${seg.join(' ')}" stroke="#ff8a3d" stroke-width="2.5" fill="none" stroke-linecap="round"/>${outline}`;
+    }
     for (const v of a.views || []) {
       const r = Math.min(3.2, v.free_m || 0);
       if (r > 0) {
@@ -428,7 +506,7 @@ class Mapper {
     const car = `<g transform="translate(${cx},${cy})"><rect x="-11" y="-15" width="22" height="30" rx="5" fill="#4f8cff"/><path d="M0,-28 L8,-17 L-8,-17 Z" fill="#4f8cff"/></g>`;
     const title = esc(`Room map · ${new Date(map.createdAt).toLocaleString()}`);
     const sub = esc(a.room || (map.analysis ? '' : 'photos only — add the Meta API key for object detection'));
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Arial, sans-serif"><rect width="${W}" height="${H}" fill="#0d0f12"/>${rings}${wedges}${ticks}${objs}${car}<text x="20" y="${H - 44}" fill="#e8eaed" font-size="16" font-weight="600">${title}</text><text x="20" y="${H - 22}" fill="#9aa0a6" font-size="13">${sub} · green = free space · 0° = start direction</text></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="Segoe UI, Arial, sans-serif"><rect width="${W}" height="${H}" fill="#0d0f12"/>${rings}${wedges}${outline}${ticks}${objs}${car}<text x="20" y="${H - 44}" fill="#e8eaed" font-size="16" font-weight="600">${title}</text><text x="20" y="${H - 22}" fill="#9aa0a6" font-size="13">${sub} · green = free space${map.sweep ? ' · orange = laser outline' : ''} · 0° = start direction</text></svg>`;
   }
 
   static collageHtml(photos) {
@@ -448,7 +526,7 @@ class Mapper {
   }
 
   file(id, name) {
-    if (!/^[\w-]+$/.test(id) || !/^(map\.svg|map\.png|collage\.jpg|view-\d{3}\.jpg)$/.test(name)) return null;
+    if (!/^[\w-]+$/.test(id) || !/^(map\.svg|map\.png|map\.json|collage\.jpg|view-\d{3}\.jpg)$/.test(name)) return null;
     const f = path.join(this.getSettings().workspace, 'maps', id, name);
     return fs.existsSync(f) ? f : null;
   }

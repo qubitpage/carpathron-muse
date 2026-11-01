@@ -33,7 +33,8 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > with **undo**, a **practice car** (simulator) to try everything without hardware, the **robot passport** (what changed and
 > what the checks found), a 🎯 **calibration wizard** (gyro, motor dead zone, straight driving, real speed, laser, turns,
 > camera), 🔧 **Board & parts** (pins of 6 boards, parts library, wiring, starter code), smooth keyboard / controller
-> driving with a driving display, 🗣 **voice control and the robot's own voice**, Quest mini-map and haptics, and the AI
+> driving with a driving display, 🗣 **voice control and the robot's own voice**, a 🧊 **3D plan view** with laser room
+> outlines and *Go there*, Quest mini-map and haptics, and the AI
 > tools robot_settings, robot_diagnose, board_pins and robot_say (sections 3.4.2 – 3.4.7).
 >
 > **Muse Carpathron** is the open-source edition of this app (Meta AI hackathon). The same app is on the Microsoft
@@ -341,6 +342,19 @@ Voice Transcribe (the Meta API key). Space and STOP always stop at once.
 the phone), offline; pick the voice, speed and pitch. Every device with **This device is the robot's speaker** on speaks:
 open Muse Carpathron on a phone fixed on the car and the phone becomes the robot's **mouth** — with Hands-free on the
 phone, also its **ears**. The face next to the button moves its mouth while the robot talks.
+
+**🧊 3D plan view** (Control tab) — the room as the car knows it: a floor grid in 1 m squares, the **laser outline** of the
+last room scan as low orange walls, the objects the camera named (orange pins = distance measured by the laser, purple =
+estimated from the photo) and the car where it is now with its path. Drag to turn the view, scroll to zoom. **Click the
+floor, then 🚗 Go there**: the car turns towards the point and drives there in short hops (the laser stops it before
+obstacles). The car's position comes from its wheels (calibrated speed) and its gyro, so it is right to about a tenth of
+the distance — **⌖ Car is here** puts it back to the centre. With the practice car the true virtual room is drawn faintly,
+so you can compare what the car mapped with reality.
+
+**Room scan with the laser** — with the laser + gyro on the car, *Scan the room* also turns once slowly while measuring all
+around (every 5°): the map gets the room's outline (orange on the 2D map, walls in 3D) and the objects get their distance
+from the laser. Each scan is saved in `<workspace>\maps\<date>\map.json` (version 2: where the car stood, the laser
+outline, the named objects with their position in metres, the photos).
 
 **Meta Quest** — the robot-eyes view now also shows the distance ahead, the heading and a round **mini-map** (your path in
 green, laser hits as orange dots, 4 m across), and the controllers **buzz** as an obstacle gets close while you drive

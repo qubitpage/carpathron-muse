@@ -27,8 +27,11 @@ function carGet(host, pathAndQuery, timeout = 1500) {
 }
 
 class Robot {
-  constructor({ getIp, emit }) {
+  constructor({ getIp, emit, getCfg }) {
     this.getIp = getIp;
+    this.getCfg = getCfg || (() => ({}));
+    // where the car is, from the wheel commands (distance) and the gyro (heading); metres, 0° = where it faced at the start
+    this.pose = { x: 0, y: 0, heading: 0, at: Date.now() };
     this.emit = emit; // (event, data)
     this.state = 'simulated';
     this.ip = '';
@@ -47,6 +50,25 @@ class Robot {
   }
 
   host() { return this.ip; }
+
+  // Dead reckoning: speed from the calibrated cm per second at the drive speed, heading from the gyro when the car has
+  // one (else from the calibrated turn rate). Good for a few metres; each room scan starts from it.
+  _odometry(m) {
+    const now = Date.now(), dt = Math.min(0.5, (now - this.pose.at) / 1000);
+    this.pose.at = now;
+    if (!m.left && !m.right) return;
+    const c = this.getCfg() || {};
+    const drive = Number(c.driveSpeed) || 60, cms = Number(c.cmPerSec) || 40;
+    const sn = this.info && this.info.sensors;
+    if (sn && sn.imu && this.state === 'online') { if (this._yaw0 == null) this._yaw0 = Number(sn.yaw) - this.pose.heading; this.pose.heading = Number(sn.yaw) - this._yaw0; }
+    else { const turnRate = 360 / ((Number(c.turnMs360) || 2400) / 1000) / ((Number(c.turnSpeed) || 70) / 100); this.pose.heading += ((m.left - m.right) / 200) * turnRate * dt; }
+    if (m.left * m.right > 0 || (m.left && m.right && Math.sign(m.left) === Math.sign(m.right))) {
+      const v = ((m.left + m.right) / 2 / drive) * (cms / 100); // m/s
+      const a = (this.pose.heading * Math.PI) / 180;
+      this.pose.x += Math.sin(a) * v * dt; this.pose.y += Math.cos(a) * v * dt; // y = forward at the start
+    }
+  }
+  resetPose() { this.pose = { x: 0, y: 0, heading: 0, at: Date.now() }; this._yaw0 = null; }
 
   connect() {
     this.ip = (this.getIp() || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -93,7 +115,7 @@ class Robot {
     }
   }
 
-  status() { return { state: this.state, ip: this.ip, firmware: this.firmware || null, version: (this.info && this.info.fw) || null, motors: this.current, camera: !!(this.info && this.info.camera), rssi: this.info ? this.info.rssi : null, sensors: (this.info && this.info.sensors) || null }; }
+  status() { return { state: this.state, ip: this.ip, firmware: this.firmware || null, version: (this.info && this.info.fw) || null, motors: this.current, camera: !!(this.info && this.info.camera), rssi: this.info ? this.info.rssi : null, sensors: (this.info && this.info.sensors) || null, pose: { x: Math.round(this.pose.x * 100) / 100, y: Math.round(this.pose.y * 100) / 100, heading: Math.round(this.pose.heading) } }; }
 
   // Fresh sensor values from the car (distance mm, gyro heading, turning…), or null without sensors / our firmware.
   async sensors() {
@@ -171,6 +193,7 @@ class Robot {
     } else if (this.auto) next = { ...this.auto };
     else next = { left: 0, right: 0, source: 'idle' };
     this._send(Math.round(next.left), Math.round(next.right));
+    this._odometry(next);
     const c = this.current;
     this.current = next;
     if (next.left !== c.left || next.right !== c.right || next.source !== c.source) this.emit('robot:motors', next);

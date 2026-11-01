@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SSH terminal</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="vendor/xterm.css"></head>
+<body class="ssh">
+<aside class="slist">
+  <div class="shead"><b>SSH connections</b><button id="new" class="primary small">+ New</button></div>
+  <div id="conns" class="conns"></div>
+  <p class="muted small">Passwords and keys are saved encrypted on this PC. Double-click a connection to open a terminal.</p>
+</aside>
+<section class="sterm">
+  <div id="tabs" class="tabs"></div>
+  <div id="terms" class="terms"><div id="empty" class="empty"><div class="card"><h2>SSH terminal</h2><p class="muted">Connect to your Linux servers, VPS or Raspberry Pi like with PuTTY. Click <b>+ New</b>, fill in the server, user and password (or a private key), then <b>Save &amp; connect</b>.</p></div></div></div>
+</section>
+<div id="modal" class="modal" hidden></div>
+<script src="vendor/xterm.js"></script><script src="vendor/addon-fit.js"></script><script src="ssh.js"></script>
+</body></html>

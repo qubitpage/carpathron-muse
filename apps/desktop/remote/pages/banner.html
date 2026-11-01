@@ -1,0 +1,25 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Remote session</title><link rel="stylesheet" href="style.css"></head>
+<body class="banner">
+<div class="bbar"><span class="dot"></span><span class="txt" id="txt">Remote session</span>
+  <button id="toggle" title="Chat, voice call, files">Chat · Call · Files <span id="badge" class="badge" hidden>0</span></button><button id="end" class="danger">Disconnect</button></div>
+<div id="side" class="bside" hidden>
+  <section class="sbox">
+    <label class="switch small" id="ctlwrap"><input type="checkbox" id="ctl"> <span>Let them control my mouse and keyboard (off = they can only watch)</span></label>
+  </section>
+  <section class="sbox">
+    <div class="shead"><b>Voice call</b><span id="callstate" class="muted small">Not in a call</span></div>
+    <div class="row tight"><button id="callbtn" class="primary">Start call</button><button id="mutebtn" hidden>Mute</button><span id="mic" class="mic" hidden><i></i></span></div>
+  </section>
+  <section class="sbox grow2">
+    <div class="shead"><b>Chat</b></div>
+    <div id="chatlog" class="chatlog"></div>
+    <form id="chatf" class="row tight"><input type="text" id="chatin" placeholder="Write a message…" autocomplete="off" style="flex:1"><button class="primary">Send</button></form>
+  </section>
+  <section class="sbox">
+    <div class="shead"><b>Files</b><button id="opendl" class="link small">Open folder</button></div>
+    <div id="dropzone" class="dropzone">Drop files here to copy them to the other computer, or <a href="#" id="pick">choose files</a>.<input type="file" id="filein" multiple hidden></div>
+    <div id="files" class="files"></div>
+  </section>
+</div>
+<script src="common.js"></script><script src="panelui.js"></script><script src="banner.js"></script></body></html>

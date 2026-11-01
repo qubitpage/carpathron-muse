@@ -1,0 +1,51 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Carpathron Remote</title><link rel="stylesheet" href="style.css"></head>
+<body class="viewer">
+<header id="bar">
+  <span class="brand">Carpathron Remote</span>
+  <span id="who" class="who"></span>
+  <span id="status" class="pill warn">Connecting</span>
+  <span id="viewonly" class="pill warn" hidden title="The person at that computer allowed viewing only (presentation)">View only</span>
+  <span id="stats" class="muted small"></span>
+  <span id="limit" class="pill warn" hidden style="cursor:pointer"></span>
+  <span class="grow"></span>
+  <label hidden title="Which screen of the remote computer"><select id="screen"></select></label>
+  <label title="Picture quality"><select id="quality"><option value="auto">Quality: auto</option><option value="high">Quality: high</option><option value="low">Quality: low</option></select></label>
+  <select id="keys" title="Send a key combination">
+    <option value="">Keys…</option><option value="win">Windows key</option><option value="alttab">Alt+Tab</option><option value="ctrlesc">Ctrl+Esc (Start)</option>
+    <option value="winr">Win+R (Run)</option><option value="wind">Win+D (Desktop)</option><option value="ctrlshiftesc">Ctrl+Shift+Esc (Task Manager)</option>
+    <option value="winl">Win+L (Lock)</option><option value="printscreen">Print Screen</option>
+  </select>
+  <button id="paste" title="Type the text from your clipboard on the remote computer">Paste text</button>
+  <button id="rec" title="Record this session to a video file (Videos\Carpathron Remote)">● Record</button>
+  <button id="sidebtn" title="Chat, voice call and file transfer">Chat · Call · Files <span id="badge" class="badge" hidden>0</span></button>
+  <button id="full" title="Full screen (move the mouse to the top edge to see this bar)">Full screen</button>
+  <button id="end" class="danger">Disconnect</button>
+</header>
+<div id="main">
+  <main id="stage" tabindex="0">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas" hidden></canvas>
+    <div id="drop" hidden><div>Drop files to copy them to the remote computer</div></div>
+    <div id="overlay" hidden></div>
+  </main>
+  <aside id="side" hidden>
+    <section class="sbox">
+      <div class="shead"><b>Voice call</b><span id="callstate" class="muted small">Not in a call</span></div>
+      <div class="row tight"><button id="callbtn" class="primary">Start call</button><button id="mutebtn" hidden>Mute</button><span id="mic" class="mic" hidden><i></i></span></div>
+    </section>
+    <section class="sbox grow2">
+      <div class="shead"><b>Chat</b></div>
+      <div id="chatlog" class="chatlog"></div>
+      <form id="chatf" class="row tight"><input type="text" id="chatin" placeholder="Write a message…" autocomplete="off" style="flex:1"><button class="primary">Send</button></form>
+    </section>
+    <section class="sbox">
+      <div class="shead"><b>Files</b><button id="opendl" class="link small">Open folder</button></div>
+      <div id="dropzone" class="dropzone">Drop files here (or anywhere on the screen) to copy them to the remote computer, or <a href="#" id="pick">choose files</a>.<input type="file" id="filein" multiple hidden></div>
+      <div id="files" class="files"></div>
+      <label class="switch small"><input type="checkbox" id="clipsync" checked> <span>Share the clipboard (copy here, paste there)</span></label>
+    </section>
+  </aside>
+</div>
+<script src="common.js"></script><script src="panelui.js"></script><script src="viewer.js"></script>
+</body></html>

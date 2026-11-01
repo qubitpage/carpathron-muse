@@ -333,6 +333,20 @@ function leakyApp() {
     assert.ok(sk.includes('secure-publish'));
   });
 
+  await step('1.9.3 fixes: public ports include UDP / own-IP listeners (TURN); SSH keys always valid; terminal escape codes removed', async () => {
+    const { publicPortList } = require('../backend/devtools');
+    assert.deepStrictEqual(publicPortList(['tcp 0.0.0.0:22', 'tcp 127.0.0.1:8790', 'udp 51.38.1.2:3478', 'tcp [::]:443 users:(("nginx"))', 'udp 127.0.0.53%lo:53', 'tcp [::1]:6379', 'tcp 51.38.1.2:5349', 'tcp *:80']), [22, 80, 443, 3478, 5349]);
+    const { Remote, keyProblem } = require('../backend/remote');
+    const { utils } = require('ssh2');
+    const st = { settings: {}, saveSettings() {} };
+    const rem = new Remote({ store: st, secrets: { encrypt: (s) => s, decrypt: (s) => s }, log() {}, emit() {} });
+    for (let i = 0; i < 600; i++) rem.generateKey({ name: `k${i}` });
+    assert.strictEqual(st.settings.sshKeys.filter((k) => keyProblem(k.private, '', k.public)).length, 0, 'every generated key parses');
+    let broken = null;
+    for (let i = 0; i < 5000 && !broken; i++) { const kp = utils.generateKeyPairSync('ed25519'); if (keyProblem(kp.private, '', kp.public)) broken = kp; }
+    assert.ok(broken, 'ssh2 still makes the occasional bad key, and it is detected');
+  });
+
   site.close();
   await srv.close();
   const failed = results.filter((r) => r[0] === 'FAIL');

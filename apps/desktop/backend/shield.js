@@ -15,7 +15,7 @@ const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
-const { SERVER_CHECK, analyseServer, securityCheck } = require('./devtools');
+const { SERVER_CHECK, analyseServer, securityCheck, publicPortList } = require('./devtools');
 
 const obj = (properties, required = []) => ({ type: 'object', properties, required });
 const SEV_ORDER = { critical: 0, warning: 1, info: 2, ok: 3 };
@@ -325,7 +325,7 @@ function analyseShield(out) {
   if ((sec.ENVPERM || []).length) findings.push({ id: 'env-perms', severity: 'warning', title: `${sec.ENVPERM.length} .env file${sec.ENVPERM.length === 1 ? ' is' : 's are'} readable by every user`, detail: sec.ENVPERM.slice(0, 5).join(', '), fix: { text: 'chmod o-r on them (the app user still reads them)', id: 'env-perms' } });
   const ng = (sec.NGINX || [])[0];
   if (ng && ng !== 'none' && Number(ng) === 0) findings.push({ id: 'nginx-dotfiles', severity: 'warning', title: 'nginx does not block hidden files (/.env, /.git)', fix: { text: 'add to every server block: location ~ /\\.(?!well-known) { deny all; }' } });
-  const publicPorts = [...new Set(((base.listen || '').split('\n')).filter((l) => /(^|\s)(0\.0\.0\.0|\*|\[::\]|::):\d+/.test(l)).map((l) => Number((l.match(/:(\d+)\s/) || [])[1])).filter(Boolean))].sort((a, b) => a - b);
+  const publicPorts = publicPortList((base.listen || '').split('\n'));
   return { findings, os: base.os, env, publicPorts };
 }
 
@@ -438,7 +438,7 @@ const FIXES = {
   updates: {
     title: 'Install pending updates now', lockout: false, caution: 'Services may restart; a reboot may be needed afterwards.',
     plan: (e) => {
-      if (e.pkg === 'apt') return { commands: ['export DEBIAN_FRONTEND=noninteractive; apt-get update -q && apt-get -y -q -o Dpkg::Options::=--force-confold upgrade', '[ -f /var/run/reboot-required ] && echo "reboot required" || echo "no reboot needed"'], files: [] };
+      if (e.pkg === 'apt') return { commands: ['export DEBIAN_FRONTEND=noninteractive; apt-get update -q && apt-get -y -q -o Dpkg::Options::=--force-confold upgrade --with-new-pkgs', '[ -f /var/run/reboot-required ] && echo "reboot required" || echo "no reboot needed"'], files: [] };
       if (e.pkg === 'dnf' || e.pkg === 'yum') return { commands: [`${e.pkg} -y upgrade --security || ${e.pkg} -y upgrade`], files: [] };
       throw new Error('Unknown package manager on this server.');
     },
@@ -481,7 +481,7 @@ const FIX_IDS = Object.keys(FIXES);
 
 // ---------------------------------------------------------------- monitor
 const MONITOR_CHECK = (min) => String.raw`
-echo "== PORTS"; (ss -tlnH 2>/dev/null || netstat -tln 2>/dev/null | tail -n +3) | awk '{for(i=1;i<=NF;i++) if ($i ~ /:[0-9]+$/) {print $i; break}}' | grep -E '^(0\.0\.0\.0|\*|\[::\]|::):[0-9]+$' | sed -E 's/.*:([0-9]+)$/\1/' | sort -un
+echo "== PORTS"; (ss -tulnH 2>/dev/null || netstat -tuln 2>/dev/null | tail -n +3) | awk '{for(i=1;i<=NF;i++) if ($i ~ /:[0-9]+$/) {print $i; break}}' | grep -vE '^(127\.|\[?::1\]?:|\[?::ffff:127\.)|%lo:' | sed -E 's/.*:([0-9]+)$/\1/' | sort -un
 echo "== AUTHFAIL"; ( (sudo -n journalctl -q -u ssh -u sshd --since "-${min}min" --no-pager 2>/dev/null || journalctl -q -u ssh -u sshd --since "-${min}min" --no-pager 2>/dev/null) | grep -cE 'Failed password|Invalid user|authentication failure' )
 echo "== BANNED"; (sudo -n fail2ban-client status sshd 2>/dev/null || fail2ban-client status sshd 2>/dev/null) | awk -F: '/Total banned/{gsub(/[ \t]/,"",$2);print $2}'
 echo "== LOAD"; cut -d' ' -f1 /proc/loadavg; nproc
@@ -696,11 +696,12 @@ class Shield {
       const sec = sections(out);
       // open ports vs. the baseline
       const ports = (sec.PORTS || []).map(Number).filter(Boolean);
+      if (m.baselineV !== 2) { m.baseline = null; m.baselineV = 2; } // ports now include UDP and specific-IP listeners
       if (!m.baseline) { m.baseline = ports; this.store.saveSettings(); ev('info', `Baseline saved: public ports ${ports.join(', ') || 'none'}`); }
       else {
         const added = ports.filter((p) => !m.baseline.includes(p));
         const gone = m.baseline.filter((p) => !ports.includes(p));
-        for (const p of added) ev(RISKY_PORTS[p] ? 'critical' : 'warning', `New public port ${p}${RISKY_PORTS[p] ? ` (${RISKY_PORTS[p]})` : ''} opened on ${s.name}`, 'If you did not open it, check what listens there: ss -tlnp');
+        for (const p of added) ev(RISKY_PORTS[p] ? 'critical' : 'warning', `New public port ${p}${RISKY_PORTS[p] ? ` (${RISKY_PORTS[p]})` : ''} opened on ${s.name}`, 'If you did not open it, check what listens there: sudo ss -tulpn');
         for (const p of gone) ev('info', `Port ${p} is no longer open on ${s.name}`);
         if (added.length || gone.length) { m.baseline = ports; this.store.saveSettings(); }
       }

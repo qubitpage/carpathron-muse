@@ -5,6 +5,9 @@ const fs = require('fs');
 const { app, BrowserWindow, shell, Menu, ipcMain, dialog, Tray, nativeImage, session } = require('electron');
 const { startServer } = require('./backend/server');
 const updates = require('./updater');
+// Carpathron Remote plugin (remote desktop, chat/voice/files, SSH terminal): same relay and licenses as the standalone app
+const remoteDesktop = require('./remote/main-rd');
+remoteDesktop.preReady();
 
 let win = null;
 let tray = null;
@@ -51,6 +54,9 @@ else {
   ipcMain.handle('open-external', (_e, u) => { if (/^https?:\/\//.test(String(u))) shell.openExternal(String(u)); });
   ipcMain.handle('app-version', () => app.getVersion());
   updates.setup({ ipcMain, log, autoEnabled: () => !srv || srv.store.settings.autoUpdate !== false });
+  ipcMain.handle('remote-desktop', (_e, what) => { if (!remoteDesktop.pluginEnabled()) return false; if (what === 'ssh') remoteDesktop.openSsh(); else remoteDesktop.openHome(); return true; });
+  ipcMain.handle('remote-desktop-state', () => remoteDesktop.pluginState());
+  ipcMain.handle('remote-desktop-enable', (_e, on) => remoteDesktop.setPlugin(!!on));
   ipcMain.handle('focus-window', () => { const w = BrowserWindow.getAllWindows()[0]; if (w) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); } });
 
   async function createWindow() {
@@ -65,6 +71,7 @@ else {
       app.quit();
       return;
     }
+    try { remoteDesktop.init({ log, appName: 'Muse Carpathron', icon: path.join(__dirname, 'public', 'icon.png'), hostDefault: false }); } catch (e) { log(`remote desktop: ${e.stack || e.message}`); }
     // Trust exactly our own local certificate for the window (pages, API and the live WebSocket).
     try {
       const norm = (x) => String(x || '').replace(/\r/g, '').trim();
@@ -97,7 +104,7 @@ else {
     });
     // Closing the window keeps WhatsApp + robot running in the tray when WhatsApp is enabled.
     win.on('close', (e) => {
-      const keep = srv && (srv.store.settings.whatsapp.personal.enabled || srv.store.settings.whatsapp.cloud.enabled);
+      const keep = (srv && (srv.store.settings.whatsapp.personal.enabled || srv.store.settings.whatsapp.cloud.enabled)) || remoteDesktop.isHosting();
       if (!quitting && keep) { e.preventDefault(); win.hide(); }
     });
     try {
@@ -105,6 +112,7 @@ else {
       tray.setToolTip('Muse Carpathron');
       tray.setContextMenu(Menu.buildFromTemplate([
         { label: 'Open Muse Carpathron', click: () => { win.show(); win.focus(); } },
+        { label: 'Remote desktop', click: () => { if (remoteDesktop.pluginEnabled()) remoteDesktop.openHome(); } },
         { type: 'separator' },
         { label: 'Quit', click: () => { quitting = true; app.quit(); } },
       ]));

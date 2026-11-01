@@ -46,7 +46,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const conv = async (extra = {}) => { const c = await api('/api/convs', { ...extra }); return c; };
   const sendMsg = async (c, text, extra = {}) => { await api(`/api/convs/${c.id}/send`, { text, ...extra }); await waitIdle(c.id); return api(`/api/convs/${c.id}`); };
 
-  console.log('Carpathron Robotics & Coding backend tests');
+  console.log('Muse Carpathron backend tests');
 
   await step('security: API and WebSocket refuse requests without the access token', async () => {
     const r = await fetch(base + '/api/bootstrap');
@@ -70,7 +70,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.strictEqual(r.status, 200, 'paired device can use the app');
     assert.strictEqual((await post(acc.pin)).status, 403, 'PIN is single use');
     const page = await fetch(`${base}/pair`);
-    assert.ok(/Pair with Carpathron Robotics/.test(await page.text()));
+    assert.ok(/Pair with Muse Carpathron/.test(await page.text()));
   });
 
   await step('bootstrap + models list from Meta API', async () => {

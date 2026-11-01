@@ -307,7 +307,15 @@ class Remote {
     const stream = await new Promise((resolve, reject) => e.client.shell({ term: 'xterm-256color', cols, rows }, (err, st) => (err ? reject(err) : resolve(st))));
     const id = `sh-${crypto.randomBytes(3).toString('hex')}`;
     const sh = { id, serverId: s.id, server: s.name, stream, buf: '', closed: false, at: Date.now() };
-    const strip = (t) => t.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b\][^\x07]*\x07/g, '').replace(/\r(?!\n)/g, '');
+    // remove terminal control sequences: CSI (colours, cursor), OSC (titles, systemd's "]3008;" context markers,
+    // ended by BEL or ESC \), other ESC codes; a sequence cut between two packets is kept until the rest arrives
+    let pend = '';
+    const strip = (t) => {
+      t = pend + t; pend = '';
+      const cut = t.search(/\x1b(?:\[[0-9;?]*[ -\/]*|\][^\x07\x1b]*(?:\x1b)?|[ -\/]*)?$/);
+      if (cut >= 0 && t.length - cut < 4096) { pend = t.slice(cut); t = t.slice(0, cut); } else if (t.endsWith('\r')) { pend = '\r'; t = t.slice(0, -1); }
+      return t.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b[ -\/]*[0-~]/g, '').replace(/\r(?!\n)/g, '');
+    };
     stream.on('data', (d) => { sh.buf += strip(d.toString('utf8')); if (sh.buf.length > 400000) sh.buf = sh.buf.slice(-200000); });
     stream.stderr?.on('data', (d) => { sh.buf += strip(d.toString('utf8')); });
     stream.on('close', () => { sh.closed = true; });
@@ -370,7 +378,15 @@ class Remote {
     name = String(name || `muse-${os.hostname()}-${new Date().toISOString().slice(0, 10)}`).replace(/[^\w.@-]/g, '-').slice(0, 60);
     const opts = { comment: comment || `${name}@muse-carpathron` };
     if (passphrase) Object.assign(opts, { passphrase, cipher: 'aes256-ctr' });
-    const kp = type === 'rsa' ? sshUtils.generateKeyPairSync('rsa', { bits: 4096, ...opts }) : sshUtils.generateKeyPairSync('ed25519', opts);
+    // ssh2's ed25519 generator drops a public key's leading 0x00 byte (about 1 key in 256 comes out unusable:
+    // "Malformed OpenSSH private key"), so every new key is parsed back and made again if it does not check out
+    let kp;
+    for (let i = 0; i < 20; i++) {
+      kp = type === 'rsa' ? sshUtils.generateKeyPairSync('rsa', { bits: 4096, ...opts }) : sshUtils.generateKeyPairSync('ed25519', opts);
+      if (!keyProblem(kp.private, passphrase, kp.public)) break;
+      kp = null;
+    }
+    if (!kp) throw new Error('Could not make a valid key, try again');
     const k = { id: crypto.randomUUID(), name, type: type === 'rsa' ? 'ssh-rsa' : 'ssh-ed25519', public: kp.public.trim(), private: this.secrets.encrypt(kp.private), passphrase: passphrase ? this.secrets.encrypt(passphrase) : undefined, fingerprint: fingerprintOf(kp.public), created: Date.now() };
     this.keys().push(k);
     this.store.saveSettings();
@@ -406,6 +422,11 @@ class Remote {
     const s = this.need(serverRef);
     const k = this.keyList().find((x) => x.id === keyId);
     if (!k) throw new Error('Unknown key');
+    if (k.source === 'app') {
+      const own = this.keys().find((x) => x.id === k.id);
+      const bad = keyProblem(this.secrets.decrypt(own.private), own.passphrase ? this.secrets.decrypt(own.passphrase) : '', own.public);
+      if (bad) throw new Error(`The key "${k.name}" is damaged (${bad}); an older version of the app could make such keys. Delete it and click Generate key to make a new one.`);
+    }
     const e = await this.connect(s);
     const pub = k.public.trim();
     let out;
@@ -436,8 +457,18 @@ class Remote {
   }
 }
 
+// Why a private key cannot be used ('' when it is fine): it must parse, and an ed25519 public key must be 32 bytes.
+function keyProblem(privText, passphrase, pubLine) {
+  const parsed = sshUtils.parseKey(privText, passphrase || undefined);
+  if (parsed instanceof Error) return parsed.message;
+  const key = Array.isArray(parsed) ? parsed[0] : parsed;
+  const blob = key.getPublicSSH();
+  if (key.type === 'ssh-ed25519' && (blob.length < 19 || blob.readUInt32BE(15) !== 32)) return 'bad ed25519 public key';
+  if (pubLine && String(pubLine).trim().split(/\s+/)[1] !== blob.toString('base64')) return 'public key does not match';
+  return '';
+}
 function fingerprintOf(pub) {
   try { const k = sshUtils.parseKey(String(pub).trim()); const key = Array.isArray(k) ? k[0] : k; return 'SHA256:' + crypto.createHash('sha256').update(key.getPublicSSH()).digest('base64').replace(/=+$/, ''); } catch { return ''; }
 }
 
-module.exports = { Remote, shq, psq, fingerprintOf };
+module.exports = { Remote, shq, psq, fingerprintOf, keyProblem };

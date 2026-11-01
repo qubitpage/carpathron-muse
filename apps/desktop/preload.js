@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld('desktop', {
   openExternal: (u) => ipcRenderer.invoke('open-external', u),
   version: () => ipcRenderer.invoke('app-version'),
   focus: () => ipcRenderer.invoke('focus-window'),
+  remoteDesktop: (what) => ipcRenderer.invoke('remote-desktop', what),
+  remoteDesktopState: () => ipcRenderer.invoke('remote-desktop-state'),
+  remoteDesktopEnable: (on) => ipcRenderer.invoke('remote-desktop-enable', on),
   update: {
     state: () => ipcRenderer.invoke('update-state'),
     check: () => ipcRenderer.invoke('update-check'),

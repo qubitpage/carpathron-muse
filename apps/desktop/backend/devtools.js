@@ -215,6 +215,15 @@ echo "== WEBROOT"; for d in /var/www /usr/share/nginx/html /srv/www; do [ -d "$d
 echo "== DISK"; df -h / | tail -1
 echo "== REBOOT"; [ -f /var/run/reboot-required ] && echo required || echo no
 `;
+// Public listening ports from `ss -tulpn` lines ("tcp 0.0.0.0:22 users:…", "udp 51.38.1.2:3478"): every address except
+// loopback counts (services such as coturn listen on the server's own IP, not on 0.0.0.0). Lines may be trimmed.
+function isLoopback(addr) { return /^(127\.|\[?::1\]?:|\[?::ffff:127\.)|%lo\b/.test(addr); }
+function publicListen(lines) {
+  return (lines || []).filter((l) => { const a = String(l).trim().split(/\s+/).find((t) => /:(\d+|\*)$/.test(t) && /:\d+$/.test(t)); return a && !isLoopback(a); });
+}
+function publicPortList(lines) {
+  return [...new Set(publicListen(lines).map((l) => Number(String(l).trim().split(/\s+/).find((t) => /:\d+$/.test(t)).match(/:(\d+)$/)[1])).filter(Boolean))].sort((a, b) => a - b);
+}
 function analyseServer(out) {
   const sec = {};
   let cur = null;
@@ -222,10 +231,10 @@ function analyseServer(out) {
   const f = [];
   const add = (lvl, msg, fix) => f.push(`${lvl} ${msg}${fix ? `\n   → ${fix}` : ''}`);
   const listen = (sec.LISTENING || []).join('\n');
-  const pub = (sec.LISTENING || []).filter((l) => /(^|\s)(0\.0\.0\.0|\*|\[::\]|::):\d+/.test(l));
+  const pub = publicListen(sec.LISTENING);
   const risky = { 3306: 'MySQL', 5432: 'PostgreSQL', 6379: 'Redis', 27017: 'MongoDB', 9200: 'Elasticsearch', 11211: 'Memcached', 5984: 'CouchDB', 2375: 'Docker API (unencrypted!)', 8080: 'HTTP alt / admin', 9000: 'admin panel / PHP-FPM', 5000: 'dev server', 3000: 'dev server' };
   for (const [port, name] of Object.entries(risky)) if (pub.some((l) => new RegExp(`:${port}\\b`).test(l))) add(Number(port) === 2375 || Number(port) === 6379 || Number(port) === 27017 ? '✗' : '⚠', `${name} listens on all interfaces (port ${port})`, 'bind it to 127.0.0.1 or block the port in the firewall unless it must be public');
-  if (pub.length) add('ℹ', `Public listening ports: ${[...new Set(pub.map((l) => (l.match(/:(\d+)\s/) || [])[1]).filter(Boolean))].sort((a, b) => a - b).join(', ')}`);
+  if (pub.length) add('ℹ', `Public listening ports: ${publicPortList(pub).join(', ')}`);
   const fw = (sec.FIREWALL || []).join('\n');
   if (!fw || /Status: inactive/i.test(fw) || (/not running/i.test(fw) && !/-A /.test(fw))) add('✗', 'No active firewall found (ufw / firewalld / iptables)', 'e.g. ufw allow OpenSSH && ufw allow 80,443/tcp && ufw enable');
   else add('✓', 'Firewall is active');
@@ -344,4 +353,4 @@ async function execDev(name, args, ctx) {
   }
 }
 
-module.exports = { DEV_TOOLS, DEV_NAMES, execDev, analyseServer, SERVER_CHECK, securityCheck };
+module.exports = { DEV_TOOLS, DEV_NAMES, execDev, analyseServer, SERVER_CHECK, securityCheck, publicPortList };

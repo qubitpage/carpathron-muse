@@ -167,7 +167,7 @@
     S.view = view;
     $$('.view').forEach((v) => (v.hidden = v.id !== `view-${view}`));
     document.body.dataset.view = view;
-    $$('#nav button').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
+    $$('#nav button[data-view]').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
     $('#sidebar').classList.remove('open');
     if (view === 'projects') renderProjects();
     if (view === 'memory') renderMemory();
@@ -183,7 +183,9 @@
     if (view === 'shield') window.MCShield && window.MCShield.show();
     renderChatList();
   }
-  $$('#nav button').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
+  $$('#nav button[data-view]').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
+  // Remote desktop (Carpathron Remote plugin): its own window, only in the desktop app
+  { const rb = $('#btnRemoteDesktop'); if (rb) { if (window.desktop && window.desktop.remoteDesktop) { rb.addEventListener('click', () => window.desktop.remoteDesktop()); window.desktop.remoteDesktopState().then((st) => { rb.hidden = !st.enabled; }).catch(() => {}); } else rb.remove(); } }
   $('#btnOpenSide').onclick = () => $('#sidebar').classList.add('open');
   $('#btnMenuAll').onclick = () => $('#sidebar').classList.add('open');
   $('#btnCloseSide').onclick = () => $('#sidebar').classList.remove('open');
@@ -1588,6 +1590,27 @@
         } }, tok.value ? 'Connect' : 'Save'),
         gh.connected ? h('button', { class: 'btn', onclick: async () => { if (confirm('Disconnect GitHub and delete the saved token?')) { await api('/api/github', { method: 'DELETE' }); renderPlugins(); } } }, 'Disconnect') : null,
         gh.connected ? h('button', { class: 'btn', onclick: () => { newChat(); setTimeout(() => { $('#input').value = '/github-publish '; autoGrow(); $('#input').focus(); }, 50); } }, 'Publish a folder…') : null)));
+    // Carpathron Remote plugin (remote desktop + chat/voice/files + SSH terminal; same relay and licenses as the standalone app)
+    if (window.desktop && window.desktop.remoteDesktopState) {
+      const rs = await window.desktop.remoteDesktopState().catch(() => null);
+      if (rs) {
+        const mins = (ms) => Math.round((ms || 0) / 60000);
+        const plan = rs.plan === 'max' ? 'Max license — unlimited computers' : rs.plan === 'pro' ? `Pro license — ${rs.hosts} of ${rs.hostLimit} computers` : rs.plan === 'free' ? `Free (personal use) — ${mins(rs.leftToday)} of ${mins(rs.dayLimit)} minutes left today` : 'License: checking…';
+        const host = !rs.enabled ? 'Plugin off' : rs.hosting ? (rs.state === 'ready' ? `Accepting connections · ID ${rs.id}` : `Accepting connections · ${rs.state}`) : 'Not accepting connections (turn it on in the Remote desktop window)';
+        const toggle = h('input', { type: 'checkbox' }); toggle.checked = rs.enabled;
+        toggle.onchange = async () => { const st = await window.desktop.remoteDesktopEnable(toggle.checked); const rb = $('#btnRemoteDesktop'); if (rb) rb.hidden = !st.enabled; toast(st.enabled ? 'Carpathron Remote is on' : 'Carpathron Remote is off (this PC no longer accepts connections)'); renderPlugins(); };
+        body.append(h('div', { class: 'card plugin-card', id: 'plugin-remote' },
+          h('div', { class: 'head' }, h('span', { class: 'logo' }, '🖥'), h('div', { class: 'grow' }, h('h3', { style: 'margin:0' }, 'Carpathron Remote'),
+            h('div', { class: 'small muted' }, 'Remote desktop like TeamViewer: control other PCs or get help (full control or view only), chat, voice call, drag-and-drop files, clipboard, recording, and an SSH terminal like PuTTY. End-to-end encrypted, same relay (relay.qubitpage.com) and licenses as the Carpathron Remote app.')),
+            h('label', { class: 'small', style: 'display:flex;gap:6px;align-items:center' }, toggle, 'On')),
+          h('div', { class: 'small' }, `${host} · ${plan}${rs.sessions ? ` · ${rs.sessions} session(s) now` : ''}`),
+          h('div', { class: 'row' },
+            h('button', { class: 'btn primary', disabled: !rs.enabled, onclick: () => window.desktop.remoteDesktop() }, '🖥 Remote desktop'),
+            h('button', { class: 'btn', disabled: !rs.enabled, onclick: () => window.desktop.remoteDesktop('ssh') }, `⌨ SSH terminal${rs.ssh ? ` (${rs.ssh})` : ''}`),
+            rs.plan !== 'max' ? h('button', { class: 'btn', onclick: () => window.desktop.openExternal(rs.buyUrl) }, rs.plan === 'pro' ? 'Upgrade to Max' : 'Get a license') : null),
+          h('div', { class: 'small muted' }, `Free: sessions up to 20 minutes, 2 hours per day. ${rs.price}. Being helped never needs a license.`)));
+      }
+    }
     const e = S.boot.engines || {};
     const f = S.boot.features || {};
     const rows = [

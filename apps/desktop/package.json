@@ -1,7 +1,7 @@
 {
   "name": "muse-carpathron",
   "productName": "Muse Carpathron",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "description": "Muse Carpathron: an AI agent for Windows powered by Meta Muse models (open-source hackathon edition). Coding, servers, GitHub, MCP, computer use and robot control.",
   "main": "main.js",
   "author": {
@@ -59,6 +59,7 @@
       "updater.js",
       "preload.js",
       "backend/**/*",
+      "remote/**/*",
       "public/**/*",
       "package.json",
       "!node_modules/sharp/**",

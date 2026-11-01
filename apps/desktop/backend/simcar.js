@@ -191,6 +191,18 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
         return json(res, settingsJson());
       }
       case '/diag': return json(res, await diag(q.get('motors') === '1'));
+      case '/pin': {
+        const g = Number(q.get('gpio')), mode = q.get('mode') || 'read', vv = v();
+        let why = null;
+        if (![1, 2, 3, 12, 13, 14, 15, 33].includes(g)) why = 'not a free pin of the ESP32-CAM (free: 1 2 3 12 13 14 15 33)';
+        else if ([vv.rEn, vv.rFwd, vv.rBack, vv.lEn, vv.lFwd, vv.lBack].includes(g)) why = 'used by the motors (change it in Car settings first)';
+        else if (st.sensorMode !== 'off' && [vv.sda, vv.scl].includes(g)) why = 'used by the sensors now (sensor mode none frees it)';
+        if (why) return json(res, { ok: false, error: `GPIO ${g} is ${why}` });
+        st.pins = st.pins || {};
+        if (mode === 'high' || mode === 'low') st.pins[g] = mode === 'high' ? 1 : 0;
+        const level = mode === 'read' ? (st.faults.pinLow === g ? 0 : 1) : mode === 'blink' ? 0 : st.pins[g];
+        return json(res, { ok: true, gpio: g, mode, level });
+      }
       case '/ota': {
         const keyOk = st.otaKey && req.headers['x-ota-key'] === st.otaKey;
         const info = () => ({ fw: st.fw, ota: true, keySet: !!st.otaKey, running: { label: st.slots.running, valid: true }, other: st.slots.other ? { label: st.slots.running === 'app0' ? 'app1' : 'app0', valid: true, built: st.slots.other.built } : null });

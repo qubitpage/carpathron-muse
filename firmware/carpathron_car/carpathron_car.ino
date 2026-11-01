@@ -720,6 +720,33 @@ static esp_err_t ota_handler(httpd_req_t* req) {
   return ESP_OK;
 }
 
+// ---------------------------------------------------------------- /pin: test a free pin (a part's wiring)
+// /pin?gpio=13&mode=read   → its level (with the internal pull-up: 1 = nothing pulls it down)
+// /pin?gpio=13&mode=high|low → drive it for 3 s, then it is released (input again)
+// /pin?gpio=13&mode=blink  → 6 blinks (an LED or a buzzer on it shows the wire is right)
+// Only the free pins of the ESP32-CAM, and not the ones the motors or the sensors use now.
+static long pinReleaseAt[40];
+static esp_err_t pin_handler(httpd_req_t* req) {
+  int g = queryInt(req, "gpio", -1);
+  char q[64], mode[8] = "read";
+  if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) httpd_query_key_value(q, "mode", mode, sizeof(mode));
+  const char* why = nullptr;
+  if (g < 0 || g > 39 || !freePin(g)) why = "not a free pin of the ESP32-CAM (free: 1 2 3 12 13 14 15 33)";
+  else if (g == R_EN || g == R_FWD || g == R_BACK || g == L_EN || g == L_FWD || g == L_BACK) why = "used by the motors (change it in Car settings first)";
+  else if ((wireOn || irOk) && (g == I2C_SDA || g == I2C_SCL)) why = "used by the sensors now (sensor mode none frees it)";
+  if (why) { String e = String("{\"ok\":false,\"error\":\"GPIO ") + g + " is " + why + "\"}"; return send_text(req, "application/json", e.c_str()); }
+  if (!strcmp(mode, "high") || !strcmp(mode, "low")) {
+    pinMode(g, OUTPUT); digitalWrite(g, !strcmp(mode, "high") ? HIGH : LOW); pinReleaseAt[g] = millis() + 3000;
+  } else if (!strcmp(mode, "blink")) {
+    pinMode(g, OUTPUT);
+    for (int i = 0; i < 12; i++) { digitalWrite(g, i % 2 ? LOW : HIGH); delay(100); }
+    pinMode(g, INPUT);
+  } else { pinMode(g, INPUT_PULLUP); delay(2); }
+  int level = digitalRead(g);
+  char b[96]; snprintf(b, sizeof(b), "{\"ok\":true,\"gpio\":%d,\"mode\":\"%s\",\"level\":%d}", g, mode, level);
+  return send_text(req, "application/json", b);
+}
+
 static esp_err_t diag_handler(httpd_req_t* req) {
   bool motors = queryInt(req, "motors", 0) == 1;
   String j = "{\"fw\":\"" FW_VERSION "\",\"uptime\":" + String(millis() / 1000);
@@ -1003,6 +1030,7 @@ void startServers() {
     { "/settings", HTTP_GET, settings_handler, NULL },
     { "/diag", HTTP_GET, diag_handler, NULL },
     { "/ota", HTTP_GET, ota_handler, NULL },
+    { "/pin", HTTP_GET, pin_handler, NULL },
     { "/ota", HTTP_POST, ota_handler, NULL },
   };
   if (httpd_start(&web_httpd, &config) == ESP_OK) {
@@ -1179,6 +1207,7 @@ void setup() {
 
 void loop() {
   handleSerial();
+  for (int g = 0; g < 40; g++) if (pinReleaseAt[g] && (long)(millis() - pinReleaseAt[g]) > 0) { pinMode(g, INPUT); pinReleaseAt[g] = 0; }
   if ((curL || curR) && millis() - lastDrive > FAILSAFE_MS) {
     drive(0, 0);
     Serial.printf("[failsafe] no command for %lu ms (Wi-Fi too weak or app closed), stopped. Signal %d dBm\n", millis() - lastDrive, WiFi.RSSI());

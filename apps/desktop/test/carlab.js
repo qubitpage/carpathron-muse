@@ -57,6 +57,23 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
     assert.deepStrictEqual(C.check(v, 'trim', 5), { errors: [], warnings: [] });
   });
 
+  await step('parts: planner on every board, default I2C pins, shared bus, no pin twice, starter code', () => {
+    const PT = require('../backend/parts');
+    for (const b of Object.keys(boards.BOARDS)) for (const part of PT.PARTS) {
+      const r = PT.plan(b, part.id, {});
+      const g = Object.values(r.assign);
+      assert.strictEqual(new Set(g).size, g.length, `${b} ${part.id}: a pin twice`);
+      for (const x of g) assert.notStrictEqual(boards.BOARDS[b].pins.find((p) => p.gpio === x).level, 'error', `${b} ${part.id}: reserved pin ${x}`);
+    }
+    assert.deepStrictEqual(PT.plan('esp32devkit', 'oled', {}).assign, { SDA: 21, SCL: 22 });
+    assert.deepStrictEqual(PT.plan('uno', 'mpu6050', {}, { i2c: { sda: 18, scl: 19 } }).assign, { SDA: 18, SCL: 19 });
+    const used = { 13: 'x', 14: 'y' };
+    assert.ok(!Object.values(PT.plan('esp32cam', 'sg90', used).assign).some((g) => used[g]));
+    assert.strictEqual(PT.plan('esp32cam', 'tb6612', { 1: 'a', 2: 'b', 3: 'c', 12: 'd', 13: 'e', 14: 'f', 15: 'g', 33: 'h' }).ok, false);
+    const code = PT.starterCode('pico', [{ id: 'oled', part: 'oled', assign: { SDA: 4, SCL: 5 } }, { id: 'servo', part: 'sg90', assign: { signal: 15 } }]);
+    assert.ok(/Wire.setSDA\(OLED_SDA\)/.test(code) && /#define SERVO_SIGNAL 15/.test(code) && /pinMode\(SERVO_SIGNAL, OUTPUT\)/.test(code));
+  });
+
   const car = await sim.start();
   await step('practice car: settings read, live change, restart change, pin swap, factory reset', async () => {
     const s = await C.getSettings(car.host);
@@ -217,6 +234,18 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
     await assert.rejects(cal.run('straight'), /gyro/);
     c3.close();
   });
+  await step('pin test on the car: motor and sensor pins refused, free pins answer', async () => {
+    let r = await C.carJson(car.host, '/pin?gpio=13&mode=read');
+    assert.ok(!r.ok && /motors/.test(r.error));
+    r = await C.carJson(car.host, '/pin?gpio=5&mode=read');
+    assert.ok(!r.ok && /not a free pin/.test(r.error));
+    r = await C.carJson(car.host, '/pin?gpio=3&mode=read');
+    assert.ok(!r.ok && /sensors/.test(r.error));
+    await fetch(`http://${car.host}/config?sensors=off`); await sleep(100);
+    r = await C.carJson(car.host, '/pin?gpio=3&mode=high');
+    assert.ok(r.ok && r.level === 1, JSON.stringify(r));
+    await fetch(`http://${car.host}/config?sensors=auto`); await sleep(100);
+  });
   car.close();
 
   // ---- the app routes
@@ -253,6 +282,14 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
     assert.ok(robot, 'robot status still works');
     const st = await api('/api/robot/car/practice');
     assert.ok(st.running && st.pose && st.room.w === 360);
+    const parts = await api('/api/robot/parts');
+    assert.ok(parts.boards.length === 6 && parts.parts.length >= 18);
+    const plan = await api('/api/robot/parts/plan', { board: 'esp32devkit', part: 'hcsr04', used: {} });
+    assert.ok(plan.ok && plan.assign.TRIG != null);
+    assert.ok((await api('/api/robot/build', { board: 'uno', parts: [{ id: 'servo', part: 'sg90', assign: { signal: 9 } }] })).ok);
+    assert.strictEqual((await api('/api/robot/build')).uno.parts[0].assign.signal, 9);
+    const chk = await api('/api/robot/parts/check', { board: 'esp32cam', assign: { a: 16 } });
+    assert.ok(chk.problems.some((x) => x.level === 'error'));
     assert.ok((await api('/api/robot/car/practice', { stop: true })).ok);
   });
   await srv.close();

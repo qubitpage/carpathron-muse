@@ -180,4 +180,9 @@ function checkPins(board, assign, { needs = {} } = {}) {
   return out;
 }
 
+// default I2C pins (Wire without arguments)
+Object.assign(BOARDS.esp32devkit, { i2c: { sda: 21, scl: 22 } }); Object.assign(BOARDS.xiaoesp32s3, { i2c: { sda: 5, scl: 6 } });
+Object.assign(BOARDS.uno, { i2c: { sda: 18, scl: 19 } }); Object.assign(BOARDS.mega2560, { i2c: { sda: 20, scl: 21 } }); Object.assign(BOARDS.pico, { i2c: { sda: 4, scl: 5 } });
+Object.assign(BOARDS.esp32cam, { i2c: { sda: 3, scl: 1 } });
+
 module.exports = { BOARDS, byFqbn, pinOf, checkPins };

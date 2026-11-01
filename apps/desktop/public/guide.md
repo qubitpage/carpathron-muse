@@ -195,7 +195,8 @@ robot tools. Llama 3.1 8B cannot see, so a **vision model** looks at every photo
   Wi-Fi, undo — section 3.4.3), sensor mode and live sensor values.
 - **🛠 Car settings** — every setting of the car in groups (Motors, Driving and safety, Camera, Sensors, Light, Name and
   hotspot), each with a plain explanation, its range and default (section 3.4.4).
-- **🩺 Health** — the car tests itself and Muse explains the result (section 3.4.5).
+- **🩺 Health & calibration** — the car tests itself and Muse explains the result; the calibration wizard (section 3.4.5).
+- **🔧 Board & parts** — what every pin of a board can do, your robot's parts with their wiring, starter code (section 3.4.6).
 - **🔌 Devices** — what is connected, found by itself: boards on USB by their chip (ESP32 / ESP32-CAM with CH340 or CP210x,
   Arduino Uno / Nano / Mega / R4, Raspberry Pi Pico — also in BOOTSEL or MicroPython —, STM32, Teensy, Jetson on USB) and
   robots on the network (the car, saved SSH servers that are Raspberry Pi / Jetson boards, raspberrypi.local, jetson.local,
@@ -297,6 +298,25 @@ robot passport and can be changed back in Car settings.
 The agent has the same: *"check the car"* (robot_diagnose), *"make the car slower"* / *"the left wheels go backward"*
 (robot_settings, checked like the screen does) and *"where can I connect a servo on the ESP32-CAM?"* (board_pins: what every
 pin of the ESP32-CAM, ESP32 DevKit, XIAO ESP32S3, Uno, Mega and Pico can do, and a check of a planned wiring).
+
+### 3.4.6 Board & parts — pins, parts, wiring
+
+Robot → **🔧 Board & parts**. Pick a board — AI-Thinker ESP32-CAM (the car), ESP32 DevKitC, Seeed XIAO ESP32S3, Arduino Uno,
+Arduino Mega 2560, Raspberry Pi Pico — to see a drawing of its pins: green = used by your robot, red = power or a pin used
+twice, an amber ring = a boot pin (usable with care), grey = taken by the board itself (camera, memory, flash). Click a pin
+for what it can do (input, output, PWM, analog, I2C, interrupt…) and what uses it. Pins inside the board are listed under
+the drawing.
+
+**＋ Add a part** — pick it from the library (motor drivers, servos, distance sensors, gyro, line and IR sensors, wheel
+encoders, climate, battery monitor, extra analog inputs, OLED display, 16-servo driver, I2S speaker and microphone, RGB
+LEDs, buzzer, GPS). Muse picks free pins that can do the job (plain pins before boot pins, I2C parts share the I2C bus at
+their own address), shows the power it needs, tips, how to test it and what to search for on eMAG. You can change any pin;
+the choice is checked at once. **🔌 Wiring** draws every wire from the board to each part (red power, grey ground, blue
+I2C, purple PWM, green signal — hover a part to follow its wires). **📋 Starter code** writes the pin definitions and the
+setup lines for your board; **🤖 Ask Muse to write the firmware** hands the wiring to the agent. On the ESP32-CAM the car's
+own wiring (from Car settings) is already in, and a free pin can be **tested on the car**: Read (a button or sensor output
+changes the level), HIGH / LOW for 3 s, Blink (an LED or buzzer on it shows the wire is right). Pins used by the motors or
+the sensors are refused.
 
 ### 3.5 Faster agent: only the tools a chat needs
 

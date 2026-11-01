@@ -488,3 +488,35 @@ body[data-view="chat"] .mobile-menu { display: none !important; }
 .cal-card .cal-res { margin-top: 4px; }
 .cal-card .pill { font-size: 11px; padding: 1px 8px; margin-left: 4px; font-weight: 400; }
 .cal-card input.num { width: 90px; }
+
+/* ---- Robot → Board & parts */
+.parts-top { margin: 10px 4px; align-items: center; gap: 12px; }
+.parts-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.parts-grid > div { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.board-svg .pin.sel circle { stroke: #fff; stroke-width: 3; }
+.limits { margin: 4px 0 8px 18px; padding: 0; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chip { font-size: 11.5px; padding: 2px 9px; border-radius: 99px; background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text); font-family: inherit; cursor: default; }
+button.chip { cursor: pointer; }
+.wizard:empty { display: none; }
+.wizard { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.wizard .kind { margin: 8px 0 4px; text-transform: uppercase; letter-spacing: .05em; font-size: 11px; }
+.part-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; }
+.part-btn { text-align: left; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 3px; font: inherit; }
+.part-btn:hover, .part-btn:focus-visible { border-color: var(--accent); }
+.part-btn .small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sig-rows .row { align-items: center; gap: 8px; margin: 3px 0; flex-wrap: wrap; }
+.sig { display: inline-block; min-width: 60px; font-family: var(--mono); font-size: 12px; }
+.schem-svg { width: 100%; display: block; }
+.schem-svg text { font-family: var(--font); letter-spacing: 0; }
+.schem-svg .sch-board { fill: #12324a; stroke: #2b5d82; }
+.schem-svg .sch-box { fill: var(--panel-2); stroke: var(--line-2); }
+.schem-svg .sch-title { fill: var(--text); font-size: 12px; font-weight: 600; }
+.schem-svg .sch-pin { fill: var(--muted); font-size: 11px; }
+.schem-svg .sch-dot { fill: #c9a24a; }
+.schem-svg .wire { fill: none; stroke-width: 2; opacity: .85; }
+.schem-svg .wire.power { stroke: #e0505a; } .schem-svg .wire.gnd { stroke: #8a909c; } .schem-svg .wire.i2c { stroke: #4f8cff; } .schem-svg .wire.pwm { stroke: #b07cff; } .schem-svg .wire.sig { stroke: #3ddc97; }
+.schem-svg:hover .sch-part .wire { opacity: .18; }
+.schem-svg .sch-part:hover .wire, .schem-svg .sch-part:focus .wire { opacity: 1; stroke-width: 3; }
+.schem-svg .sch-part:hover .sch-box, .schem-svg .sch-part:focus .sch-box { stroke: var(--accent); }
+@media (max-width: 980px) { .parts-grid { grid-template-columns: 1fr; } }

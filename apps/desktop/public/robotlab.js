@@ -16,29 +16,72 @@
   const valueOf = (k) => (k in st.edits ? st.edits[k] : current()[k]);
 
   // ------------------------------------------------------------------ the board drawing (pins coloured by use)
-  function boardSvg(board, assign, { onPin } = {}) {
-    const NS = 'http://www.w3.org/2000/svg';
-    const el = (t, a, ...kids) => { const e = document.createElementNS(NS, t); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); kids.forEach((k) => e.append(k)); return e; };
-    const L = board.pins.filter((p) => p.side === 'L'), R = board.pins.filter((p) => p.side === 'R');
-    const rows = Math.max(L.length, R.length), H = 96 + rows * 28, W = 520, PX = { L: 200, R: 320 };
-    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, class: 'board-svg', role: 'img', 'aria-label': `${board.name} pins` });
-    svg.append(el('rect', { x: 186, y: 8, width: 148, height: H - 16, rx: 10, class: 'pcb' }));
-    svg.append(el('rect', { x: 225, y: 18, width: 70, height: 46, rx: 4, class: 'chip' }));
-    svg.append(el('text', { x: 260, y: 45, class: 'chip-t', 'text-anchor': 'middle' }, board.camera ? 'camera' : 'chip'));
-    const byGpio = {}; for (const [k, g] of Object.entries(assign || {})) if (g != null) (byGpio[g] = byGpio[g] || []).push(k);
-    const draw = (list, side) => list.forEach((p) => {
-      const y = 88 + p.pos * 28, x = PX[side], left = side === 'L';
+  const NS = 'http://www.w3.org/2000/svg';
+  const sv = (t, a = {}, ...kids) => { const e = document.createElementNS(NS, t); for (const [k, v] of Object.entries(a)) if (v != null) e.setAttribute(k, v); kids.forEach((k) => e.append(typeof k === 'string' ? document.createTextNode(k) : k)); return e; };
+  // Any board profile: L/R headers as columns, T/B headers as rows, pins inside the board (X/C) listed under it.
+  // assign = { name: gpio } (names shown next to the pin), opts.selected = gpio to highlight
+  function boardSvg(board, assign, { onPin, selected, names = USE_NAME } = {}) {
+    const side = (s) => board.pins.filter((p) => p.side === s).sort((a, b) => a.pos - b.pos);
+    const L = side('L'), R = side('R'), T = side('T'), B = side('B');
+    const rows = Math.max(L.length, R.length), cols = Math.max(T.length, B.length);
+    const STEP = 28, CSTEP = 24, LBLW = 110;
+    const bw = Math.max(150, cols * CSTEP + 40), bh = Math.max(90, rows * STEP + 40) + (T.length ? 60 : 0) + (B.length ? 60 : 0);
+    const ox = LBLW + 10, oy = T.length ? 92 : 14;
+    const W = ox + bw + LBLW + 10, H = oy + bh + (B.length ? 92 : 14);
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, class: 'board-svg', role: 'img', 'aria-label': `${board.name} pins` });
+    svg.append(sv('rect', { x: ox, y: oy, width: bw, height: bh, rx: 10, class: 'pcb' }));
+    svg.append(sv('rect', { x: ox + bw / 2 - 40, y: oy + bh / 2 - 26, width: 80, height: 52, rx: 4, class: 'chip' }));
+    svg.append(sv('text', { x: ox + bw / 2, y: oy + bh / 2 + 4, class: 'chip-t', 'text-anchor': 'middle' }, board.camera ? 'camera' : board.id.startsWith('esp') || board.id.startsWith('xiao') ? 'ESP32' : board.id === 'pico' ? 'RP2040' : 'ATmega'));
+    const byGpio = {}; for (const [k, g] of Object.entries(assign || {})) if (g != null && !Number.isNaN(Number(g))) (byGpio[Number(g)] = byGpio[Number(g)] || []).push(k);
+    const put = (p, x, y, lx, ly, anchor, ux, uy, uanchor, rot, urot) => {
       const used = p.gpio != null ? byGpio[p.gpio] : null;
       const cls = p.use === 'power' ? 'pw' : used ? (used.length > 1 ? 'clash' : 'used') : p.level === 'error' ? 'res' : 'free';
-      const g = el('g', { class: `pin ${cls}${p.level === 'warn' ? ' boot' : ''}`, tabindex: 0 });
-      g.append(el('circle', { cx: x, cy: y, r: 7 }));
-      g.append(el('text', { x: left ? x + 13 : x - 13, y: y + 4, 'text-anchor': left ? 'start' : 'end', class: 'lbl' }, p.label));
-      if (used) g.append(el('text', { x: left ? x - 16 : x + 16, y: y + 4, 'text-anchor': left ? 'end' : 'start', class: 'use' }, used.map((k) => USE_NAME[k] || k).join(' + ')));
-      const tip = el('title', {}); tip.textContent = `${p.label}${p.gpio != null ? ` (GPIO ${p.gpio})` : ''}: ${p.note || p.use || ''}`; g.append(tip);
-      if (onPin) { g.addEventListener('click', () => onPin(p)); g.addEventListener('keydown', (e) => { if (e.key === 'Enter') onPin(p); }); }
+      const g = sv('g', { class: `pin ${cls}${p.level === 'warn' ? ' boot' : ''}${selected != null && p.gpio === selected ? ' sel' : ''}`, tabindex: 0, 'data-gpio': p.gpio });
+      g.append(sv('circle', { cx: x, cy: y, r: 7 }));
+      g.append(sv('text', { x: lx, y: ly, 'text-anchor': anchor, class: 'lbl', transform: rot ? `rotate(${rot} ${lx} ${ly})` : null }, p.label));
+      if (used) g.append(sv('text', { x: ux, y: uy, 'text-anchor': uanchor, class: 'use', transform: urot ? `rotate(${urot} ${ux} ${uy})` : null }, used.map((k) => names[k] || k).join(' + ')));
+      g.append(sv('title', {}, `${p.label}${p.gpio != null ? ` (GPIO ${p.gpio})` : ''}: ${p.note || p.use || 'free'}`));
+      if (onPin) { g.addEventListener('click', () => onPin(p)); g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPin(p); } }); }
       svg.append(g);
+    };
+    const y0 = oy + (T.length ? 60 : 0) + 24;
+    L.forEach((p, i) => { const x = ox + 12, y = y0 + i * STEP; put(p, x, y, x + 13, y + 4, 'start', x - 16, y + 4, 'end'); });
+    R.forEach((p, i) => { const x = ox + bw - 12, y = y0 + i * STEP; put(p, x, y, x - 13, y + 4, 'end', x + 16, y + 4, 'start'); });
+    const x0 = ox + (bw - (cols - 1) * CSTEP) / 2;
+    T.forEach((p, i) => { const x = x0 + i * CSTEP, y = oy + 12; put(p, x, y, x - 4, y + 14, 'start', x + 4, y - 12, 'start', 90, -90); });
+    B.forEach((p, i) => { const x = x0 + i * CSTEP, y = oy + bh - 12; put(p, x, y, x + 4, y - 14, 'start', x - 4, y + 12, 'start', -90, 90); });
+    return svg;
+  }
+
+  // Interactive schematic: the board's used pins on the left, each part as a box on the right, one coloured wire per
+  // connection (power red, ground grey, I2C blue, PWM purple, signal green). Hover a part or a wire to highlight it.
+  function schematicSvg(board, placed, partsById) {
+    const items = placed.map((pl) => ({ pl, part: partsById[pl.part] })).filter((x) => x.part);
+    const conns = [];
+    items.forEach(({ pl, part }, pi) => {
+      const power = part.power === 'battery' ? 'BAT+' : part.power === '5V' ? '5V' : board.logic === '5V' ? '5V' : '3V3';
+      conns.push({ pi, role: part.power === 'battery' ? 'VM' : 'VCC', from: power, kind: 'power' }, { pi, role: 'GND', from: 'GND', kind: 'gnd' });
+      for (const s of part.signals) if (pl.assign && pl.assign[s.role] != null) conns.push({ pi, role: s.role, from: Number(pl.assign[s.role]), kind: part.bus === 'i2c' ? 'i2c' : s.needs.includes('pwm') ? 'pwm' : 'sig' });
     });
-    draw(L, 'L'); draw(R, 'R');
+    const nets = [...new Set(conns.map((c) => String(c.from)))].sort((a, b) => (isNaN(a) ? -1 : Number(a)) - (isNaN(b) ? -1 : Number(b)));
+    const netY = Object.fromEntries(nets.map((n, i) => [n, 40 + i * 26]));
+    const label = (n) => { if (isNaN(n)) return n; const p = board.pins.find((x) => x.gpio === Number(n)); return p ? p.label : `GPIO ${n}`; };
+    let y = 30; const boxes = items.map(({ pl, part }, pi) => { const pins = conns.filter((c) => c.pi === pi); const b = { pi, y, h: 26 + pins.length * 20, pins, name: pl.name || part.name }; y += b.h + 16; return b; });
+    const W = 720, H = Math.max(y + 10, 40 + nets.length * 26 + 20), BX = 20, BW = 130, PX = 500, PW = 200;
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, class: 'schem-svg', role: 'img', 'aria-label': 'Wiring schematic' });
+    svg.append(sv('rect', { x: BX, y: 14, width: BW, height: H - 28, rx: 8, class: 'sch-board' }), sv('text', { x: BX + BW / 2, y: 30, class: 'sch-title', 'text-anchor': 'middle' }, board.name.replace(/\s*\(.*\)/, '')));
+    for (const n of nets) svg.append(sv('text', { x: BX + BW - 8, y: netY[n] + 4, 'text-anchor': 'end', class: 'sch-pin' }, label(n)), sv('circle', { cx: BX + BW, cy: netY[n], r: 3.5, class: 'sch-dot' }));
+    let lane = 0;
+    for (const b of boxes) {
+      const g = sv('g', { class: 'sch-part', tabindex: 0 });
+      g.append(sv('rect', { x: PX, y: b.y, width: PW, height: b.h, rx: 8, class: 'sch-box' }), sv('text', { x: PX + 10, y: b.y + 17, class: 'sch-title' }, b.name));
+      b.pins.forEach((c, i) => {
+        const py = b.y + 36 + i * 20, ly = netY[String(c.from)], lx = BX + BW + 30 + (lane++ % 12) * 22;
+        g.append(sv('path', { d: `M${BX + BW} ${ly} H${lx} V${py} H${PX}`, class: `wire ${c.kind}` }));
+        g.append(sv('circle', { cx: PX, cy: py, r: 3.5, class: 'sch-dot' }), sv('text', { x: PX + 10, y: py + 4, class: 'sch-pin' }, `${c.role} ← ${label(String(c.from))}`));
+      });
+      svg.append(g);
+    }
     return svg;
   }
 
@@ -289,6 +332,140 @@
     });
   }
 
+  // ------------------------------------------------------------------ 🔧 Board & parts
+  const CAR_BUILD = (v = {}) => ([
+    { id: 'motors', name: 'L298N motor driver (car)', part: 'l298n', fixed: true, assign: { ENA: v.rEn ?? 12, IN1: v.rFwd ?? 13, IN2: v.rBack ?? 14, ENB: v.lEn ?? 2, IN3: v.lFwd ?? 15, IN4: v.lBack ?? 33 } },
+    { id: 'sensors', name: 'VL53L0X + MPU-6050 (I2C)', part: 'vl53l0x', fixed: true, assign: { SDA: v.sda ?? 3, SCL: v.scl ?? 1 } },
+    { id: 'headlight', name: 'Headlight LED (on the board)', part: 'buzzer', fixed: true, builtin: true, assign: { signal: 4 } },
+  ]);
+  const pst = { data: null, board: 'esp32cam', builds: {}, sel: null, wizard: null };
+  async function renderParts(el) {
+    const { h, api, toast, askAgent } = ui();
+    el.innerHTML = '';
+    if (!pst.data) pst.data = await api('/api/robot/parts');
+    pst.builds = await api('/api/robot/build').catch(() => ({}));
+    const partsById = Object.fromEntries(pst.data.parts.map((p) => [p.id, p]));
+    const boardsById = Object.fromEntries(pst.data.boards.map((b) => [b.id, b]));
+    let carVals = null;
+    if (pst.board === 'esp32cam') { const cs = await api('/api/robot/car/settings').catch(() => null); if (cs && cs.values) carVals = cs.values; }
+    const placed = () => [...(pst.board === 'esp32cam' ? CAR_BUILD(carVals || {}) : []), ...((pst.builds[pst.board] || {}).parts || [])];
+    const assignOf = () => { const a = {}; for (const pl of placed()) for (const [r, g] of Object.entries(pl.assign || {})) a[`${pl.id}.${r}`] = g; return a; };
+    const names = () => { const n = {}; for (const pl of placed()) for (const r of Object.keys(pl.assign || {})) n[`${pl.id}.${r}`] = `${pl.builtin ? 'headlight' : (partsById[pl.part] || {}).name ? `${pl.id === 'motors' ? 'motor' : pl.id} ${r}` : r}`; return n; };
+    const save = async () => { await api('/api/robot/build', { body: { board: pst.board, parts: (pst.builds[pst.board] || {}).parts || [] } }); };
+
+    const pick = h('select', { 'aria-label': 'Board', onchange: () => { pst.board = pick.value; pst.sel = null; pst.wizard = null; renderParts(el); } },
+      ...pst.data.boards.map((b) => h('option', { value: b.id, selected: b.id === pst.board ? '' : null }, b.name)));
+    const board = boardsById[pst.board];
+    const info = h('div', { class: 'card pin-info' });
+    const drawing = h('div', { class: 'card board-card' });
+    const buildCard = h('div', { class: 'card' });
+    const schem = h('div', { class: 'card' });
+    el.append(h('p', { class: 'small muted settings-intro' }, 'Pick a board to see what every pin can do. Add the parts of your robot: Muse picks free pins that can do the job, warns about boot pins and pins used twice, draws the wiring and writes the starter code. On the Baby Carpathron car (ESP32-CAM) the car\'s own wiring is already in, and you can test a free pin on the real car.'),
+      h('div', { class: 'row parts-top' }, h('label', { class: 'inline' }, 'Board ', pick), h('span', { class: 'small muted' }, board.chip)),
+      h('div', { class: 'parts-grid' }, h('div', {}, drawing, info), h('div', {}, buildCard, schem)));
+
+    function drawBoard() {
+      drawing.innerHTML = '';
+      drawing.append(h('h3', {}, board.name), h('p', { class: 'small muted' }, board.summary),
+        board.limits && board.limits.length ? h('ul', { class: 'small limits' }, ...board.limits.map((l) => h('li', {}, l))) : null,
+        boardSvg(board, assignOf(), { names: names(), selected: pst.sel, onPin: (p) => { pst.sel = p.gpio; drawBoard(); drawInfo(p); } }),
+        h('p', { class: 'small muted' }, 'Green = used by your build · red = used twice or power · amber ring = boot pin (careful) · grey = taken by the board itself. Click a pin.'));
+      const inner = board.pins.filter((p) => p.side === 'C' || p.side === 'X');
+      if (inner.length) drawing.append(h('details', { class: 'small' }, h('summary', {}, `${inner.length} pins inside the board (not on the headers)`), h('div', { class: 'chips' }, ...inner.map((p) => h('button', { class: 'chip', onclick: () => drawInfo(p) }, p.label)))));
+    }
+    const CAP = { in: 'input', out: 'output', pwm: 'PWM (speed / servo / dimming)', adc: 'analog input', adc2: 'analog (not with Wi-Fi on)', touch: 'touch', i2c: 'I2C', uart: 'serial (UART)', spi: 'SPI', dac: 'analog output (DAC)', int: 'interrupt', power: 'power' };
+    function drawInfo(p) {
+      info.innerHTML = '';
+      if (!p) { info.append(h('p', { class: 'small muted' }, 'Click a pin on the board to see what it can do and what uses it.')); return; }
+      const users = placed().flatMap((pl) => Object.entries(pl.assign || {}).filter(([, g]) => Number(g) === p.gpio).map(([r]) => `${pl.name || pl.id}: ${r}`));
+      info.append(h('h3', {}, `${p.label}${p.gpio != null ? ` — GPIO ${p.gpio}` : ''}`),
+        h('div', { class: 'chips' }, ...(p.caps || []).map((c) => h('span', { class: 'chip' }, CAP[c] || c))),
+        p.note ? h('p', { class: `small ${p.level === 'error' ? 'bad-t' : p.level === 'warn' ? 'warn-t' : ''}` }, p.note) : null,
+        h('p', { class: 'small' }, users.length ? `Used by: ${users.join(', ')}` : p.level === 'error' ? 'Not usable for your parts.' : 'Free.'));
+      if (pst.board === 'esp32cam' && p.gpio != null && [1, 2, 3, 12, 13, 14, 15, 33].includes(p.gpio)) {
+        const res = h('span', { class: 'small' });
+        const t = (mode) => h('button', { class: 'btn tiny', onclick: async () => { res.textContent = '…'; const r = await api('/api/robot/car/pin', { body: { gpio: p.gpio, mode } }).catch((e) => ({ error: e.message })); res.textContent = r.error ? `✕ ${r.error}` : r.ok === false ? `✕ ${r.error}` : mode === 'read' ? `level ${r.level} ${r.level ? '(HIGH — nothing pulls it down)' : '(LOW — something connects it to GND)'}` : mode === 'blink' ? 'blinked 6 times' : `${mode.toUpperCase()} for 3 s`; } }, ({ read: '🔍 Read', high: '⬆ HIGH 3 s', low: '⬇ LOW 3 s', blink: '✨ Blink' })[mode]);
+        info.append(h('div', { class: 'row' }, h('span', { class: 'small muted' }, 'Test on the car:'), t('read'), t('high'), t('low'), t('blink'), res),
+          h('p', { class: 'small muted' }, 'Read: a button or a sensor output on this pin changes the level. HIGH / Blink: an LED (with a 220 Ω resistor) or a buzzer on it lights / beeps — the wire is right.'));
+      }
+    }
+    function drawBuild() {
+      buildCard.innerHTML = '';
+      const list = placed();
+      buildCard.append(h('h3', {}, `My robot on the ${board.name.replace(/\s*\(.*\)/, '')}`));
+      buildCard.append(h('div', { class: 'list' }, ...list.map((pl) => {
+        const part = partsById[pl.part] || {};
+        return h('div', { class: 'item' }, h('div', { class: 'grow' }, h('b', {}, pl.name || part.name), h('div', { class: 'meta' }, Object.entries(pl.assign || {}).map(([r, g]) => `${r} → ${(board.pins.find((x) => x.gpio === Number(g)) || {}).label || `GPIO ${g}`}`).join(' · '))),
+          pl.fixed ? h('span', { class: 'pill' }, carVals ? 'from the car' : 'car wiring') : h('button', { class: 'btn tiny ghost', onclick: async () => { pst.builds[pst.board].parts = pst.builds[pst.board].parts.filter((x) => x.id !== pl.id); await save(); renderParts(el); } }, 'Remove'));
+      })));
+      if (!list.length) buildCard.append(h('p', { class: 'small muted' }, 'No parts yet.'));
+      const codeOut = h('pre', { class: 'shield-cmds', hidden: true });
+      buildCard.append(h('div', { class: 'row' },
+        h('button', { class: 'btn primary', onclick: () => { pst.wizard = { step: 1 }; drawWizard(); } }, '＋ Add a part'),
+        h('button', { class: 'btn', onclick: async () => { const r = await api('/api/robot/parts/code', { body: { board: pst.board, placed: list.filter((x) => !x.builtin) } }); codeOut.hidden = false; codeOut.textContent = r.code || r.error; } }, '📋 Starter code'),
+        h('button', { class: 'btn', onclick: () => askAgent(`Write Arduino firmware for my ${board.name} (FQBN ${board.fqbn}) with this wiring:\n${list.map((pl) => `- ${pl.name || (partsById[pl.part] || {}).name}: ${Object.entries(pl.assign || {}).map(([r, g]) => `${r}=GPIO ${g}`).join(', ')}`).join('\n')}\nCheck the pins with board_pins first, then create the project in the Firmware studio folder, compile it and fix every error.`) }, '🤖 Ask Muse to write the firmware')),
+        codeOut, wiz);
+    }
+    const wiz = h('div', { class: 'wizard' });
+    async function drawWizard() {
+      wiz.innerHTML = '';
+      const w = pst.wizard;
+      if (!w) return;
+      if (w.step === 1) {
+        const kinds = [...new Set(pst.data.parts.map((p) => p.kind))];
+        wiz.append(h('h3', {}, 'Add a part — 1. What is it?'),
+          ...kinds.map((k) => h('div', {}, h('div', { class: 'small muted kind' }, k), h('div', { class: 'part-grid' }, ...pst.data.parts.filter((p) => p.kind === k).map((p) => h('button', { class: 'part-btn', onclick: async () => {
+            const used = {}; for (const pl of placed()) for (const g of Object.values(pl.assign || {})) used[g] = pl.id;
+            const busPl = placed().find((pl) => pl.assign && pl.assign.SDA != null);
+            const r = await api('/api/robot/parts/plan', { body: { board: pst.board, part: p.id, used, i2c: busPl ? { sda: busPl.assign.SDA, scl: busPl.assign.SCL } : null } });
+            pst.wizard = { step: 2, part: p, plan: r, assign: { ...(r.assign || {}) }, name: p.name }; drawWizard();
+          } }, h('b', {}, p.name), h('span', { class: 'small muted' }, p.text)))))),
+          h('button', { class: 'btn ghost', onclick: () => { pst.wizard = null; drawWizard(); } }, 'Cancel'));
+        return;
+      }
+      const p = w.part;
+      const free = board.pins.filter((x) => x.gpio != null && x.level !== 'error');
+      const rows = p.signals.map((sg) => h('div', { class: 'row' }, h('span', { class: 'sig' }, sg.role), h('select', { onchange: (e) => { w.assign[sg.role] = Number(e.target.value); check(); } },
+        h('option', { value: '' }, '—'), ...free.map((x) => h('option', { value: x.gpio, selected: Number(w.assign[sg.role]) === x.gpio ? '' : null }, `${x.label}${x.label.includes(String(x.gpio)) ? '' : ` (GPIO ${x.gpio})`}${x.level === 'warn' ? ' ⚠' : ''}`))),
+        sg.note ? h('span', { class: 'small muted' }, sg.note) : null));
+      const checks = h('div', { class: 'small' });
+      async function check() {
+        const a = {}, needs = {};
+        for (const pl of placed()) for (const [r, g] of Object.entries(pl.assign || {})) a[`${pl.id}.${r}`] = g;
+        for (const sg of p.signals) if (w.assign[sg.role] != null) { a[`new.${sg.role}`] = w.assign[sg.role]; needs[`new.${sg.role}`] = sg.needs.find((c) => ['out', 'pwm', 'adc', 'i2c', 'in'].includes(c)); }
+        const r = await api('/api/robot/parts/check', { body: { board: pst.board, assign: a, needs } });
+        const mine = (r.problems || []).filter((x) => x.name.startsWith('new.') && !(p.bus === 'i2c' && /already used/.test(x.message)));
+        w.errors = mine.filter((x) => x.level === 'error').length;
+        checks.innerHTML = '';
+        checks.append(...(w.plan.notes || []).map((n) => h('div', { class: 'warn-t' }, '⚠ ', n)), ...mine.map((x) => h('div', { class: x.level === 'error' ? 'bad-t' : 'warn-t' }, x.level === 'error' ? '⛔ ' : '⚠ ', `${x.name.slice(4)}: ${x.message}`)));
+        if (!mine.length && !(w.plan.notes || []).length) checks.append(h('div', {}, '✓ These pins are fine.'));
+        addBtn.disabled = !!w.errors || p.signals.some((sg) => w.assign[sg.role] == null && !/optional/.test(sg.note || ''));
+      }
+      const nameIn = h('input', { value: w.name, maxlength: 40, oninput: (e) => { w.name = e.target.value; } });
+      const addBtn = h('button', { class: 'btn primary', onclick: async () => {
+        const b = pst.builds[pst.board] = pst.builds[pst.board] || { parts: [] };
+        let id = p.id, n = 2; while (placed().some((x) => x.id === id)) id = `${p.id}${n++}`;
+        b.parts.push({ id, name: w.name || p.name, part: p.id, assign: Object.fromEntries(Object.entries(w.assign).filter(([, g]) => g != null && !Number.isNaN(g))) });
+        await save(); toast(`${w.name || p.name} added`); pst.wizard = null; renderParts(el);
+      } }, '✓ Add to my robot');
+      wiz.append(h('h3', {}, `Add a part — 2. ${p.name}`), h('p', { class: 'small' }, p.text),
+        h('div', { class: 'small muted' }, `Power: ${p.power === 'battery' ? 'motor battery (7–12 V)' : p.power}${p.mA ? `, about ${p.mA} mA` : ''}${p.addr ? ` · I2C address 0x${p.addr.toString(16)}` : ''}${p.lib ? ` · library: ${p.lib}` : ''}${p.buy ? ` · eMAG: "${p.buy}"` : ''}`),
+        ...(p.tips || []).map((t) => h('div', { class: 'small' }, '💡 ', t)),
+        w.plan.ok === false ? h('div', { class: 'small bad-t' }, (w.plan.notes || []).join(' ')) : null,
+        h('label', { class: 'inline small' }, 'Name ', nameIn), h('div', { class: 'sig-rows' }, ...rows), checks,
+        h('div', { class: 'small muted' }, `How to test: ${p.test}`),
+        h('div', { class: 'row' }, addBtn, h('button', { class: 'btn ghost', onclick: () => { pst.wizard = null; drawWizard(); } }, 'Cancel')));
+      check();
+    }
+    function drawSchem() {
+      schem.innerHTML = '';
+      const list = placed().filter((x) => !x.builtin);
+      schem.append(h('h3', {}, '🔌 Wiring'), h('p', { class: 'small muted' }, 'Every wire from the board to each part: red = power, grey = ground, blue = I2C (shared), purple = PWM, green = signal. Hover a part to follow its wires. Connect all grounds together.'),
+        list.length ? schematicSvg(board, list, partsById) : h('p', { class: 'small muted' }, 'Add a part to see its wiring.'));
+    }
+    drawBoard(); drawInfo(pst.sel != null ? board.pins.find((x) => x.gpio === pst.sel) : null); drawBuild(); drawWizard(); drawSchem();
+  }
+
   // ------------------------------------------------------------------ ⬆ Car firmware: build · USB · Wi-Fi · check · undo
   function firmwareCard() {
     const { h, api, toast } = ui();
@@ -325,5 +502,5 @@
       builds, out);
   }
 
-  window.MClab = { renderSettings, renderHealth, boardSvg, firmwareCard };
+  window.MClab = { renderSettings, renderHealth, renderParts, boardSvg, schematicSvg, firmwareCard };
 })();

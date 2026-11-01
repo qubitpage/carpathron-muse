@@ -825,6 +825,24 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         return send(res, 200, { ok: true, mode, restarting: true });
       } catch (e) { return send(res, 200, { error: `The car did not accept it (${e.message}). It needs firmware 2.1 — update it first.` }); }
     }
+    // Board & parts: board profiles, parts library, pin planner, saved builds (one per board), starter code
+    if (p === '/api/robot/parts' && m === 'GET') {
+      const B = require('./boards').BOARDS, PT = require('./parts');
+      return send(res, 200, { boards: Object.values(B), parts: PT.PARTS });
+    }
+    if (p === '/api/robot/parts/plan' && m === 'POST') { const b = await readJson(req); try { const r = require('./parts').plan(b.board, b.part, b.used || {}, { i2c: b.i2c }); return send(res, 200, { ok: r.ok, assign: r.assign, notes: r.notes }); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/robot/parts/check' && m === 'POST') { const b = await readJson(req); const B = require('./boards'); const board = B.BOARDS[b.board]; if (!board) return send(res, 200, { error: 'unknown board' }); return send(res, 200, { problems: B.checkPins(board, b.assign || {}, { needs: b.needs || {} }) }); }
+    if (p === '/api/robot/parts/code' && m === 'POST') { const b = await readJson(req); try { return send(res, 200, { code: require('./parts').starterCode(b.board, b.placed || []) }); } catch (e) { return send(res, 200, { error: e.message }); } }
+    if (p === '/api/robot/build') {
+      const f = path.join(dataDir, 'robot-builds.json');
+      let all = {}; try { all = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
+      if (m === 'GET') return send(res, 200, all);
+      const b = await readJson(req);
+      if (!b.board || !require('./boards').BOARDS[b.board]) return send(res, 200, { error: 'unknown board' });
+      all[b.board] = { parts: (Array.isArray(b.parts) ? b.parts : []).slice(0, 40).map((x) => ({ id: String(x.id || '').slice(0, 24), name: String(x.name || '').slice(0, 60), part: String(x.part || ''), assign: Object.fromEntries(Object.entries(x.assign || {}).map(([k, v]) => [String(k).slice(0, 12), Number(v)])) })), at: Date.now() };
+      fs.writeFileSync(f, JSON.stringify(all, null, 1));
+      return send(res, 200, { ok: true });
+    }
     // Car Settings + Health check (firmware 2.2): explained settings, checked before they are sent; the car's self-test
     if (p.startsWith('/api/robot/car/')) {
       const ip = String((store.settings.robot || {}).carIp || '').trim();
@@ -861,6 +879,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         }
         if (what === 'restart' && m === 'POST') { const r = await carsettings.restart(ip); setTimeout(() => robot.connect(), 6000); return send(res, 200, r); }
         if (what === 'reset' && m === 'POST') { const r = await carsettings.factoryReset(ip); carHistory.add({ kind: 'reset' }); setTimeout(() => robot.connect(), 6000); return send(res, 200, r); }
+        if (what === 'pin' && m === 'POST') { const b = await readJson(req); return send(res, 200, await carsettings.carJson(ip, `/pin?gpio=${Number(b.gpio)}&mode=${encodeURIComponent(['read', 'high', 'low', 'blink'].includes(b.mode) ? b.mode : 'read')}`, 6000)); }
         if (what === 'calibrate' && m === 'GET') return send(res, 200, { steps: require('./calibrate').STEPS });
         if (what === 'calibrate' && m === 'POST') {
           const b = await readJson(req);

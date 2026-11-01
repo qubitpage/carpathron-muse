@@ -437,7 +437,7 @@
   // ---- Robot page tabs: Control (drive) · Setup (calibration, firmware) · Car settings · Health · Devices (discovery) · Firmware studio
   try { S.robotTab = localStorage.getItem('mc.robotTab') || 'control'; } catch { S.robotTab = 'control'; }
   function robotTab(id) {
-    if (!['control', 'setup', 'carset', 'health', 'devices', 'studio'].includes(id)) id = 'control';
+    if (!['control', 'setup', 'carset', 'health', 'parts', 'devices', 'studio'].includes(id)) id = 'control';
     S.robotTab = id;
     try { localStorage.setItem('mc.robotTab', id); } catch {}
     $$('#robotTabs button').forEach((b) => { b.classList.toggle('on', b.dataset.rtab === id); b.setAttribute('aria-selected', b.dataset.rtab === id ? 'true' : 'false'); });
@@ -447,6 +447,7 @@
     if (id === 'studio' && window.MCstudio) window.MCstudio.renderStudio($('#robotStudio'));
     if (id === 'carset' && window.MClab) window.MClab.renderSettings($('#robotCarset'));
     if (id === 'health' && window.MClab) window.MClab.renderHealth($('#robotHealth'));
+    if (id === 'parts' && window.MClab) window.MClab.renderParts($('#robotParts'));
   }
   function openRobot(tab) { S.robotTab = tab; show('robot'); }
   $$('#robotTabs button').forEach((b) => { b.onclick = () => robotTab(b.dataset.rtab); });

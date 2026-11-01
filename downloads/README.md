@@ -2,17 +2,20 @@
 
 Ready-to-install builds of the Carpathron apps.
 
-## 🧠 Muse Carpathron — Windows 10 / 11 / Server 2016+ (v1.6.1)
+## 🧠 Muse Carpathron — Windows 10 / 11 / Server 2016+ (v1.9.5)
 
-**[⬇️ Download Muse-Carpathron-Setup.exe (128 MB)](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe)** — from the [latest release](https://github.com/qubitpage/carpathron-muse/releases/latest) ([v1.5.4](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.6.1)).
+**[⬇️ Download Muse-Carpathron-Setup.exe (124 MB)](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe)** — from the [latest release](https://github.com/qubitpage/carpathron-muse/releases/latest) ([v1.9.5](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.9.5)).
 
 1. Double-click `Muse-Carpathron-Setup.exe`.
 2. If SmartScreen appears: **More info → Run anyway**. The app opens when the install finishes.
+3. Later versions install by themselves (from qubitpage.com; *Settings → Updates*).
 
-*Alternative:* GitHub limits files inside a repository to 100 MB, so [`windows/`](windows) holds the same installer in 5 parts.
+No install rights? Download **Muse-Carpathron-1.9.5-win-x64-portable.zip** from the same release, unzip it and run `Carpathron.exe`.
+
+*Alternative:* GitHub limits files inside a repository to 100 MB, so [`windows/`](windows) holds the same installer in 6 parts.
 Download all files of that folder into one folder and double-click **`Install.bat`**: it joins the parts, checks the SHA-256 and starts the installer.
 
-SHA-256 of `Muse-Carpathron-Setup.exe`: `302e8260f7e2cb430e7c77f5fa97119706ca2c7be934ed651580c9ec13ff8abe`
+SHA-256 of `Muse-Carpathron-Setup.exe`: `5cf4ae4a0da7a6f9a2ff14494eb9e4498b9c0fb74490af177431f41f04f310d1`
 
 ## 🥽 Carpathron Avatar — Meta Quest 3 / 3S / Pro / 2 (v1.1.6)
 

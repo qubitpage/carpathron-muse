@@ -21,6 +21,10 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > models (no more random driving), robot_drive accepts what small models send. **1.9.0:** exact boxes from Qwen3-VL (its own "Detect …"
 > prompts, thinking off), automatic turn calibration with the camera. **1.9.2:** ⬆ Update car firmware (USB) and the
 > robot_firmware tool, car firmware 2.0 with optional laser distance + gyro (section 3.4.3). Robot page with Control / Setup / Devices / Firmware studio (section 3.4.2).
+> **1.9.5:** 🖥 **Remote desktop** plugin — the Carpathron Remote app built in: control your PCs or help others, chat, voice
+> call, drag-and-drop files, presentation mode and an SSH terminal like PuTTY (section 7.7). Shield lists UDP/TURN ports
+> and installs held-back kernel updates; generated SSH keys are always valid; the terminal hides stray escape codes; the
+> version is shown at the bottom of the sidebar.
 >
 > **Muse Carpathron** is the open-source edition of this app (Meta AI hackathon). The same app is on the Microsoft
 > Store as *Carpathron Robotics & Coding*. It is made by **Qubitpage LIMITED** (qubitpage.com).
@@ -532,6 +536,39 @@ bursts of failed SSH logins, new SSH logins, a full disk, high load, the server 
 sidebar and as Windows notifications. *Reset baseline* accepts the current open ports as normal.
 
 Shield server scans, fixes and monitoring support Linux servers; Windows servers get the website checks.
+
+### 7.7 Remote desktop (like TeamViewer) — the Carpathron Remote plugin
+
+Click **🖥 Remote desktop** in the sidebar (or in the tray menu). It can be switched off in **Plugins → Carpathron
+Remote** (the button disappears and nothing listens for connections). One window does both jobs:
+
+- **Let someone control this PC:** tick **Accept connections**. Give them **Your ID** (9 digits) and the
+  **one-time password**. When they connect, Windows asks **Allow / Allow viewing only / Deny**; nothing happens until
+  you choose. A bar at the top of the screen shows who is connected, with **Disconnect**; open it for chat, the voice
+  call, files and the **Let them control my mouse and keyboard** switch. The one-time password changes after every
+  session. While connections are accepted the app keeps running in the tray when you close its window.
+- **Your own PCs, unattended:** set a **personal password** (10+ characters) and tick **Allow connections with my
+  personal password**. Then you can connect to that PC with its ID and that password, without anyone clicking Allow.
+- **Presentation mode:** people who connect can only watch (several at once).
+- **Control another PC:** type its ID and click **Connect**, then enter its password. In the viewer: **Screen** (other
+  monitors), **Quality**, **Keys…** (Windows key, Alt+Tab, Ctrl+Shift+Esc…), **Paste text**, **Full screen**,
+  **Record** (a video in Videos\Carpathron Remote) and the side panel **Chat · Call · Files**: write, talk, and drop
+  files on the remote screen to copy them there (received files go to Downloads\Carpathron Remote). Clipboard sharing
+  can be switched off in Settings.
+- **SSH terminal** (like PuTTY): saved connections, password or private key, host-key check, tabs; right-click pastes.
+- PCs without this app: install **Carpathron Remote** from <https://qubitpage.com/remote/> (same IDs and passwords).
+
+**Licenses:** being helped never needs one. Controlling other PCs is free for personal use (sessions up to 20 minutes,
+2 hours a day). **Pro** ($3 per PC per month or $19.99 per year) removes the limits for up to 3 computers you control;
+**Max** ($5 per month or $49.99 per year) for any number. Paste the key (CRMT-…) in the **License** box and click
+**Activate**; **Remove from this PC** frees it for another PC.
+
+Security: the two PCs find each other through the relay at **relay.qubitpage.com**, prove the password to each other
+(it is never sent) and encrypt everything end to end (AES-256-GCM); the picture goes directly between the two PCs
+whenever the network allows it (**Direct**), otherwise through the relay, still encrypted (**Via relay**). After 5 wrong
+passwords the PC refuses connections for 10 minutes and changes its one-time password. Windows does not let any remote
+tool see its secure screens (UAC prompts, the login screen); to control programs that run as administrator, run this app
+as administrator too.
 
 ## 8. Plugins — GitHub
 

@@ -12,30 +12,48 @@ Built for the **Meta Global AI Developer Hackathon 2026 — Startup track**.
 
 | | What it is | Where |
 |---|---|---|
-| 🧠 **Carpathron Robotics & Coding** (formerly Muse Carpathron) | Windows desktop app: chat + agent on **Meta Muse** (Muse Spark / Wonder via the Meta Model API, or your Meta account via **Muse Code**) with full PC access, **SSH servers**, documents & designed PDFs, web research, **Arduino/ESP32 firmware**, Muse Image, SAM 3.1, MCP, sub-agents, RAG memory, projects, skills, WhatsApp remote, robot control, room mapping, browser VR | [`apps/desktop`](apps/desktop) |
+| 🧠 **Muse Carpathron** | Windows desktop app: chat + agent on **Meta Muse** (Muse Spark / Wonder via the Meta Model API, your Meta account via **Muse Code**, or local models with **Ollama**) with full PC access, **SSH servers**, **Carpathron Shield** security, **remote desktop** (Carpathron Remote plugin), documents & designed PDFs, web research, **Arduino/ESP32 firmware studio**, Muse Image, SAM 3.1, MCP, sub-agents, RAG memory, projects, skills, WhatsApp remote, robot control, room mapping, browser VR | [`apps/desktop`](apps/desktop) |
 | 🥽 **Carpathron Avatar** | Native **Meta Quest** app (OpenXR, Godot): see through the robot's eyes, drive with the controllers, turn your head and the robot turns with you, talk to Muse | [`apps/quest-avatar`](apps/quest-avatar) |
 | 🚗 **Baby Carpathron firmware** | ESP32-CAM car (KUONGSHUN AD174 4WD kit): live video, drive, photo, Wi-Fi setup, RC-style control | [`firmware/carpathron_car`](firmware/carpathron_car) |
 | 🔌 **Carpathron Robot Protocol** | Small open HTTP protocol: any robot that speaks it works with every app | [`protocol/ROBOT-PROTOCOL.md`](protocol/ROBOT-PROTOCOL.md) |
-| 📘 **Complete guide** | From install to every menu, tool, SSH, GitHub, MCP, firmware, robot, WhatsApp, Quest — also built into the app (**📖 Guide & help**) | [`docs/GUIDE.md`](docs/GUIDE.md) |
+| 📘 **Complete guide** | From install to every menu, tool, SSH, Shield, remote desktop, GitHub, MCP, firmware, robot, WhatsApp, Quest — built into the app (**📖 Guide & help**) | [`apps/desktop/public/guide.md`](apps/desktop/public/guide.md) |
+
+Muse Carpathron is the open-source hackathon edition. The same app is on the Microsoft Store as **Carpathron Robotics & Coding**
+by Qubitpage LIMITED ([qubitpage.com/products](https://qubitpage.com/products/)).
 
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Carpathron-Robotics-Coding-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Carpathron--Robotics--Coding--Setup.exe_v1.7.0_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.9.5_(124_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.6.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Carpathron Robotics & Coding** – Windows 10 / 11 / Server 2016+ (v1.7.0) | [**Carpathron-Robotics-Coding-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Carpathron-Robotics-Coding-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. Updating from Muse Carpathron keeps all chats, settings and servers. Microsoft Store version: coming soon. |
-| 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.6) | [**CarpathronAvatar-1.1.6.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. The Meta Horizon Store version is in review. |
-| 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.9.5) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-1.9.5-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-1.9.5-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. Updates install by themselves from qubitpage.com (Settings → Updates). Portable: unzip and run `Carpathron.exe`. |
+| 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.6) | [**CarpathronAvatar-1.1.6.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. |
+| 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) (also built into the app: Robot page → ⬆ Update car firmware) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
+| 🖥 **Carpathron Remote** – the remote desktop app on its own (Windows, Linux) | [qubitpage.com/remote](https://qubitpage.com/remote/) | For PCs you want to reach or help that do not run Muse Carpathron. Same IDs and passwords. |
 
-All files of this version: **[Release v1.7.0](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.7.0)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (5 parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.9.5](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.9.5)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
 
-## What's new in 1.7.0 — Carpathron Robotics & Coding
+## What's new in 1.9.5
 
-- **New name:** Muse Carpathron is now **Carpathron Robotics & Coding** by Qubitpage LIMITED. Updating keeps all chats, settings, servers and keys.
+- **🖥 Remote desktop (Carpathron Remote plugin):** control your own PCs or help someone, like TeamViewer — 9-digit ID + one-time password, *Allow / Allow viewing only / Deny* on the controlled PC, unattended access with a personal password, presentation mode, several screens, special keys, full screen, session recording, side panel with **chat, voice call and drag-and-drop files**, clipboard sharing, and an **SSH terminal like PuTTY** (saved connections, keys, host-key check, tabs). End-to-end encrypted (AES-256-GCM, password never sent), direct connection when possible, otherwise through relay.qubitpage.com. Free for personal use (20-minute sessions, 2 h/day); Pro/Max licenses remove the limits. Switch it off in Plugins.
+- **Carpathron Shield:** public ports now include UDP and services bound to the server's own IP (e.g. TURN 3478/5349); the monitor watches them too; the updates fix also installs held-back kernel packages.
+- **SSH keys:** every generated key is verified (the ssh2 library makes an unusable ed25519 key about 1 time in 256: "Malformed OpenSSH private key"); *Install key* refuses a damaged key with a clear message.
+- **Terminal:** systemd's `]3008;` markers and other escape codes are hidden, also when split across network packets.
+- The app version is shown at the bottom of the sidebar and of the remote desktop windows.
+
+### 1.8.0 – 1.9.2
+
+- **Carpathron Shield** (🛡): project scans before publishing, server and website checks with one-click fixes that cannot lock you out, live monitoring.
+- **Local models with Ollama** (offline), a faster agent that sends only the tools a chat needs, GPU-aware model suggestions.
+- **Robot:** fully offline with small models (local eyes, robot_goto, room map), measured distances and bump detection, automatic turn calibration, Robot page with Control / Setup / Devices / **Firmware studio**, car firmware 2.0 (optional laser distance + gyro) updated over USB from the app.
+
+### 1.7.0
+
+- **Store edition:** the Microsoft Store version is named **Carpathron Robotics & Coding** (Qubitpage LIMITED); Muse Carpathron stays the open-source edition. Updating keeps all chats, settings, servers and keys.
 - **Production security review** (independent audit, all findings fixed and covered by 10 new tests):
   - phones and Quest connect only when you switch on **network access** (off by default); pairing PIN is valid 2 minutes, works once and is cancelled after 10 wrong tries;
   - every paired phone/headset gets **its own revocable key** (Settings → Phone & Quest → Paired devices); turning network access off disconnects them at once; settings that start programs or hold keys can only be changed on the PC;
@@ -155,7 +173,7 @@ All files of this version: **[Release v1.7.0](https://github.com/qubitpage/carpa
 ## Quick start
 
 1. **Car:** assemble the kit, flash [`firmware/carpathron_car`](firmware/carpathron_car) with Arduino IDE (esp32 core **2.0.12**), put it on your Wi-Fi ([CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md)).
-2. **PC:** install Carpathron Robotics & Coding ([Carpathron-Robotics-Coding-Setup.exe](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Carpathron-Robotics-Coding-Setup.exe), or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
+2. **PC:** install Muse Carpathron ([Muse-Carpathron-Setup.exe](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe), or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
 3. **Phone:** Settings → WhatsApp → scan the QR. Send `/help` or a voice note.
 4. **Quest 3S:** sideload [`CarpathronAvatar-1.1.6.apk`](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk) (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
 

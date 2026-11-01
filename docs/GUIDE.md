@@ -1,21 +1,40 @@
-# Carpathron Robotics & Coding — the complete guide
+# Muse Carpathron — the complete guide
 
-Carpathron Robotics & Coding is a Windows app that turns **Meta Muse** models into a working assistant on your PC: it chats,
+Muse Carpathron is a Windows app that turns **Meta Muse** models into a working assistant on your PC: it chats,
 writes and runs code, works on your **remote servers over SSH**, publishes to **GitHub**, writes and flashes
 **Arduino / ESP32 firmware**, reads and designs **PDFs and websites**, does **web research**, and drives the
 **Carpathron robot** from the PC, WhatsApp, a phone or a Meta Quest headset.
 
 This guide starts from zero (installing the app) and then explains every menu, button and tool.
 
-> **New name (1.7.0):** the app was called *Muse Carpathron* before. Updating keeps all your chats, settings,
-> servers and keys (they stay in the same folders). It is made by **Qubitpage LIMITED** (qubitpage.com).
+> **New in 1.8 — Carpathron Shield (🛡 in the sidebar):** scans your projects for secrets before publishing, checks
+> and hardens your servers and websites with one-click fixes that cannot lock you out, and monitors your servers live
+> (section 7.6). 1.8.2 fixed the WhatsApp error "Cannot find module 'call-bind-apply-helpers'". **1.8.4:** local models with Ollama —
+> install, download and use Muse Glimmer offline from Settings (section 3.4) and a faster agent that sends only the tools each chat needs (section 3.5). **1.8.5:** Settings in tabs,
+> a Robots card, GPU-aware model suggestions (quantized Glimmer for 8–16 GB GPUs) and tool calls from small local models fixed.
+> **1.8.6:** the robot works fully offline with small models — local **eyes** (Llama 3.2 Vision) describe photos for Llama 3.1 8B,
+> **robot_goto** ("go to the door", "show me the red chair") finds things with the camera and drives there, the room map works offline,
+> and WhatsApp chats can use a model on this PC (section 3.4.1). **1.8.7:** Llama 3.2 Vision works again (compatibility runner),
+> Qwen3-VL 2B as fallback eyes, obstacle-aware driving and calibration buttons. **1.8.8:** photos reach Llama 3.1 8B as descriptions (it said it could not see them before),
+> pictures sent on WhatsApp are described too, and Settings no longer waits for the cloud model list. **1.8.9:** measured
+> distances (floor geometry), distance budget, bump detection, 35 cm hops, distance calibration, only robot tools for small
+> models (no more random driving), robot_drive accepts what small models send. **1.9.0:** exact boxes from Qwen3-VL (its own "Detect …"
+> prompts, thinking off), automatic turn calibration with the camera. **1.9.2:** ⬆ Update car firmware (USB) and the
+> robot_firmware tool, car firmware 2.0 with optional laser distance + gyro (section 3.4.3). Robot page with Control / Setup / Devices / Firmware studio (section 3.4.2).
+> **1.9.5:** 🖥 **Remote desktop** plugin — the Carpathron Remote app built in: control your PCs or help others, chat, voice
+> call, drag-and-drop files, presentation mode and an SSH terminal like PuTTY (section 7.7). Shield lists UDP/TURN ports
+> and installs held-back kernel updates; generated SSH keys are always valid; the terminal hides stray escape codes; the
+> version is shown at the bottom of the sidebar.
+>
+> **Muse Carpathron** is the open-source edition of this app (Meta AI hackathon). The same app is on the Microsoft
+> Store as *Carpathron Robotics & Coding*. It is made by **Qubitpage LIMITED** (qubitpage.com).
 
 ---
 
 ## 1. Quick start (10 minutes)
 
-1. **Install the app** from the **Microsoft Store** (search *Carpathron Robotics & Coding*) and open it from the Start menu (section 2).
-2. **Connect Meta** — *Settings → Sign in to Meta*. Either paste a **Meta API key** and press *Save & test*, or install
+1. **Install the app**: download **Muse-Carpathron-Setup-<version>.exe** from <https://github.com/qubitpage/carpathron-muse/releases/latest> and double-click it (section 2).
+2. **Connect Meta** — *Settings → AI models → Sign in to Meta*. Either paste a **Meta API key** and press *Save & test*, or install
    **Muse Code** and sign in with your **Meta account** (section 3).
 3. **New chat** (top left) → type what you want, for example *"What can you do on this PC?"*.
 4. Pick the **mode** at the top right: **Ask** while you learn, **Auto** or **Full** when you trust the setup.
@@ -23,7 +42,7 @@ This guide starts from zero (installing the app) and then explains every menu, b
    - **Remote** → add your VPS / dedicated server (section 7).
    - **Plugins → GitHub** → *Sign in with browser* (section 8).
    - **Robot** → *Find my car* (section 12).
-   - **Settings → WhatsApp** to control everything from your phone (section 13).
+   - **Settings → Devices & robots → WhatsApp** to control everything from your phone (section 13).
 
 ---
 
@@ -32,14 +51,16 @@ This guide starts from zero (installing the app) and then explains every menu, b
 **Requirements:** Windows 10 or 11 (64-bit), internet access, a Meta account or a Meta Model API key.
 
 **Install**
-1. Open the **Microsoft Store**, search **Carpathron Robotics & Coding** (or open
-   <https://apps.microsoft.com/detail/9PMSQ8C3P6M3>) and click **Get / Install**.
+1. Download **Muse-Carpathron-Setup-<version>.exe** from <https://github.com/qubitpage/carpathron-muse/releases/latest> and
+   double-click it. If SmartScreen appears: *More info → Run anyway*.
 2. Open it from the Start menu. The first time, Windows may ask whether the app can use your network: allow
    **private networks** if you want to use a phone or the Quest headset with it.
 3. The app also lives in the system tray (bottom right) — closing the window keeps it running for WhatsApp and the
    robot; use *Quit* in the tray menu to exit completely.
 
-**Update:** the Microsoft Store updates the app automatically. **Your chats, settings, saved servers, keys, memory and
+**Update:** the app updates itself. It checks **qubitpage.com** for new versions, downloads them in the background and
+installs them when you restart it (a banner shows *Restart and update*), or the next time you close it. You can switch
+this off or check by hand in *Settings → App → Updates*. **Your chats, settings, saved servers, keys, memory and
 skills are kept.**
 
 **Where your data is**
@@ -47,20 +68,24 @@ skills are kept.**
 | What | Where |
 |---|---|
 | Workspace, photos, room maps, research reports | `%USERPROFILE%\MuseCarpathron` |
-| Chats, settings, servers, keys, memory, skills, log | the app's private folder, managed by Windows (`%LOCALAPPDATA%\Packages\Qubitpage.CarpathronRoboticsCoding_…\LocalCache\Roaming\Muse Carpathron\data`) |
+| Chats, settings, servers, keys, memory, skills, log | `%APPDATA%\Muse Carpathron\data` |
 | Log file (for troubleshooting) | same folder, `muse-carpathron.log` |
 
 Passwords, API keys, SSH keys and the GitHub token are **encrypted with your Windows account** (DPAPI). They never
 appear in the app package, in the browser or on the phone.
 
-**Uninstall:** Windows *Settings → Apps → Carpathron Robotics & Coding → Uninstall* (or right-click it in the Start menu).
-Windows removes the app's private data with it; your workspace folder (`%USERPROFILE%\MuseCarpathron`) stays.
+**Uninstall:** Windows *Settings → Apps → Muse Carpathron → Uninstall* (or right-click it in the Start menu).
+Your chats and settings (`%APPDATA%\Muse Carpathron`) and your workspace folder (`%USERPROFILE%\MuseCarpathron`) stay.
 
 ---
 
+> **Settings is organised in tabs:** 🧠 **AI models** (Sign in to Meta, Local models / offline, Tools & models) ·
+> 🤖 **Agent** (Defaults) · 📱 **Devices & robots** (Robots, Phone & Quest, WhatsApp) · 🔌 **Integrations**
+> (Remote servers, SSH keys, GitHub, MCP servers) · ⬆ **App** (Updates, About). The app remembers the last tab.
+
 ## 3. Connect Meta Muse (the brain)
 
-*Settings → Sign in to Meta* offers two engines. You can use both and switch per chat.
+*Settings → AI models → Sign in to Meta* offers two engines. You can use both and switch per chat.
 
 | Engine | What you need | Best for |
 |---|---|---|
@@ -102,6 +127,114 @@ Pick the model at the top of a chat. Under the chat header, small badges show wh
 Default in *Settings → Tools & models*.
 
 ---
+
+### 3.4 Local models on this PC (Ollama) — work offline
+
+Meta's open-weight models run on your own GPU: private, free per message, and they **work without internet**. They
+use tools like the cloud models (files, commands, robot…). Everything is set up in **Settings → Local models (Ollama)**:
+
+1. **⬇ Install Ollama** (free, from ollama.com, installed with winget). If it is installed but stopped, the button is
+   **▶ Start Ollama** — the app also starts it by itself when a chat needs it.
+2. **Download a model** — the field suggests Meta's models:
+   - `muse-glimmer` (18 GB) — **Muse Glimmer 30B**: tools, vision, reasoning. Best quality; a 24 GB GPU is ideal,
+     a 16 GB GPU works (part of it runs on the CPU, slower).
+   - Smaller (quantized) Glimmer builds for GPUs with less memory — Glimmer is a dense 30B model, so on a small GPU
+     part of it runs on the CPU (works, slower): `hf.co/bartowski/Muse-Glimmer-30B-GGUF:Q3_K_M` (17.8 GB with vision, 12–16 GB GPUs)
+     and `hf.co/bartowski/Muse-Glimmer-30B-GGUF:IQ3_XXS` (15.4 GB with vision, 8–12 GB GPUs; pick a 8K–16K context). The app gives these files Glimmer's official prompt format automatically.
+   - `llama3.1:8b` (4.9 GB) — fits fully on 8 GB GPUs, fastest for everyday work. `llama3.2:3b` (2 GB) — simple tasks.
+   The card shows **your GPU and the recommended model** and puts it in the box; click any suggestion to use it.
+   A progress bar shows the download; you can cancel it.
+3. Each downloaded model has a checkbox **show in the model menu**, **Make default**, **Test** and **Delete**.
+   In a chat, pick a model marked **"— on this PC (offline)"**.
+4. **Work offline** (on by default): if Meta's cloud cannot be reached (no internet), a chat continues with the default
+   local model and tells you so.
+5. **Context window** (32K recommended): how much the model reads at once. The app creates a tuned copy of each
+   model in Ollama with this size (instant, no extra disk space), because Ollama's default is too small for an agent.
+
+Offline, tools that need Meta's cloud (web search, Muse Image, SAM 3.1, voice transcription) are not available;
+everything on your PC (files, commands, Arduino, robot on your Wi-Fi) keeps working. LM Studio or a llama.cpp
+server can be used instead of Ollama (*Advanced* in the same card).
+
+### 3.4.1 The robot with a small local model (offline)
+
+No training is needed: the app gives local models a short robot briefing and, when you talk about the robot, only the
+robot tools. Llama 3.1 8B cannot see, so a **vision model** looks at every photo and tells it what is there:
+
+1. *Settings → AI models → Local models*: download `llama3.2-vision:11b` (7.8 GB, Meta). Newer Ollama versions cannot
+   run it, so the app sets up a **compatibility runner** by itself (Ollama 0.24 on port 11435, sharing the same model
+   folder; ≈1–2 GB once). Also download `qwen3-vl:2b` (1.9 GB) as the fast fallback: **Eyes for photos** on *Automatic*
+   uses Llama 3.2 Vision first and Qwen3-VL 2B when it fails (or pick one yourself). Only one model sits on the GPU at a
+   time: the app unloads the other one first.
+2. Pick `llama3.1:8b — on this PC` in the chat (and in *Settings → Devices & robots → WhatsApp → Model for WhatsApp chats*
+   to drive the robot from your phone with the thinking done on your PC).
+3. Ask: *"go to the door"*, *"find the red ball and show me"*, *"scan the room"*. **robot_goto** looks ahead, checks the
+   last room map, looks around in 60° steps, turns towards the object and drives in short hops with a new photo after each
+   hop (at most 35 cm); the photos come to the chat and WhatsApp.
+   **Distances are measured, not guessed:** the camera sits a known height above the floor, so the row where an object
+   (or the nearest obstacle) touches the floor in the picture gives its distance. Qwen3-VL 2B draws the boxes (it is
+   trained for exact boxes), Llama 3.2 Vision describes. The car never drives further in total than the first measured
+   distance, never further than the free floor ahead (minus 20 cm), stops when the target fills the picture, and when
+   the picture does not change after a drive (it bumped into something) it backs up 10 cm and goes around on the freer
+   side. For centimetre precision add a VL53L1X laser distance sensor to the car (ask the agent for the wiring).
+4. Calibrate once in *Settings → Devices & robots → Robots*: **▶ Test 1 s drive** → measure → **Distance per second (cm)**;
+   **🔄 Auto-calibrate turn** (the car spins continuously for about 7 s while photographing; the time until each view comes
+   back = one full circle → *Full turn (ms)*) and check with **↻ Test 360° turn**; put a box or a shoe exactly
+   **50 cm** in front of the car → **📏 Calibrate distance**. You can take over any time on the
+   Robot page, from the phone or with the Quest (Avatar mode).
+
+### 3.4.2 The Robot page: Control · Setup · Devices · Firmware studio
+
+- **🎮 Control** — drive (pad, W A S D), live video, look around, room map, Quest.
+- **⚙ Setup** — car address, calibration (drive, turn, distance), firmware version / update, sensor mode and live sensor values.
+- **🔌 Devices** — what is connected, found by itself: boards on USB by their chip (ESP32 / ESP32-CAM with CH340 or CP210x,
+  Arduino Uno / Nano / Mega / R4, Raspberry Pi Pico — also in BOOTSEL or MicroPython —, STM32, Teensy, Jetson on USB) and
+  robots on the network (the car, saved SSH servers that are Raspberry Pi / Jetson boards, raspberrypi.local, jetson.local,
+  192.168.55.1). For each: the board (FQBN), whether its Arduino core is installed (**Install** button), and what to do next
+  (open the car firmware, new firmware for this board, serial monitor, MicroPython, SSH).
+- **🧩 Firmware studio** — Arduino projects in `<workspace>\firmware\<name>`: pick the project, **Board** and **Port**, edit
+  the files (Ctrl+S saves; every save keeps the previous version in **History**), **Compile** (errors listed with
+  file:line — click one to jump there, or **Fix the errors with AI**), **Upload**, **Serial** monitor (send lines too).
+  **Ask AI** opens a chat working in the project folder: describe the change, the AI edits, compiles and fixes the code,
+  then you upload here. New projects start from templates (Blink, ESP32 web page, servo sweep, the car firmware).
+
+### 3.4.3 Car firmware and sensors
+
+**Update the car firmware** — connect the car to the PC with its USB-C cable and press *Settings → Devices & robots →
+Robots → ⬆ Update car firmware (USB)*, or just ask in a chat: *"update the car firmware"*. The app ships the firmware: it
+copies it to `<workspace>\firmware\carpathron_car` (an edited copy is kept as a backup), finds the car's USB port (CH340),
+installs the ESP32 tools the first time, compiles for the AI Thinker ESP32-CAM, uploads and checks the car is back on
+Wi-Fi with the new version. *Firmware version* shows what the car runs. To change the firmware, edit the workspace copy
+(or ask the agent to) and flash it with arduino_upload.
+
+**Kit IR modules (no shopping)** — two "Avoid" IR obstacle modules from a sensor kit: VCC → 3V3, GND → GND, OUT → **RXD**
+(front-left) and **TXD** (front-right). Then Robot → Setup → *Sensor mode: IR obstacle modules* (the car restarts): it
+refuses to drive into what they see and *go to* steers round on the free side. Turn each module's knob until its LED lights
+at about 15 cm.
+
+**Optional sensors (≈ 20 lei)** — a **VL53L0X** laser distance sensor (the car refuses to drive forward closer than 15 cm
+to anything, and *go to* uses the real distance) and an **MPU-6050 (GY-521)** gyro (exact turns). Both go on the free
+pins of the ESP32-CAM board's right row:
+
+| Board | VL53L0X | MPU-6050 |
+|---|---|---|
+| 3V3 (first) | VIN | — |
+| 3V3 (second) | — | VCC |
+| GND | GND | GND |
+| RXD (GPIO 3) | SDA | SDA |
+| TXD (GPIO 1) | SCL | SCL |
+
+Mount the distance sensor in the middle of the front, facing forward, 3–5 cm above the floor; the gyro flat and firmly
+in the middle of the chassis. The car finds them when it starts (keep it still for a second — the gyro measures its
+zero). While they are connected the USB Serial Monitor is off (same pins); uploads still work (if one fails, unplug the
+SDA wire during the upload).
+
+### 3.5 Faster agent: only the tools a chat needs
+
+Muse gets a small set of core tools (files, commands, web page fetch, memory, tasks) and loads more groups when the
+chat needs them — servers, GitHub, robot, firmware, documents, images, security, computer use. It can also load a
+group by itself (`load_tools`). Smaller requests answer faster, cost less and help the model pick the right tool.
+You can switch it off in *Settings → Defaults → Send only the tools each chat needs*. The Activity page shows how many
+tools were sent with each request.
 
 ## 4. The screen at a glance
 
@@ -203,7 +336,7 @@ For any job with several steps Muse keeps a **task list**, shown above the messa
 
 ### 5.8 Reliability — no made-up answers
 
-Carpathron Robotics & Coding adds rules and checks so the agent doesn't invent things:
+Muse Carpathron adds rules and checks so the agent doesn't invent things:
 
 - **Honesty rules:** no invented facts, file contents, command output, prices or test results; current facts come from
   web search with sources; it says when it is not sure.
@@ -276,7 +409,7 @@ You never call tools yourself — ask in plain words and the agent picks them. T
 `dev_environment` · `dev_install` · `open_ide` · `micropython` · `pico_flash` · `sd_card_image`
 
 **Security, tasks and other models**
-`security_check` (servers and websites, section 7.5) · `task_update` (the task list) · `ask_model` (second opinion from another Muse model)
+`shield_scan` · `shield_fix` · `shield_monitor` (Carpathron Shield, section 7.6) · `security_check` (quick text check, section 7.5) · `task_update` (the task list) · `ask_model` (second opinion from another Muse model)
 
 **With Muse Code:** these same tools reach Muse Code through the built-in **Carpathron bridge** (an MCP server the
 app starts for each chat). In Muse Code they appear as `mcp__carpathron__…`. Keep *Settings → Tools & models → Give Muse Code the app tools* ticked.
@@ -351,6 +484,91 @@ Ask *"/security-audit my-vps and example.com"* or *"check the security of the se
 Results are marked **✗ critical**, **⚠ warning**, **✓ fine**, with the fix for each. Muse runs it by itself after
 deploying or changing anything public, fixes what it can (keeping your SSH access working), and checks again.
 Only use it on servers and domains you own or manage.
+
+### 7.6 Carpathron Shield — the 🛡 Shield page
+
+Shield protects the apps you build and the servers you publish them to. Open **🛡 Shield** in the sidebar, or ask
+*"/secure-publish my shop to my-vps"* and the agent does the whole flow for you.
+
+**1. Before publishing — scan the project.** Pick the folder and where it is going:
+
+| Choice | What counts as public |
+|---|---|
+| **Before GitHub** | everything git would publish (your `.gitignore` is respected) |
+| **Before server upload** | build folders (`dist`, `build`, `public`…) — and the whole folder when the destination is a web root like `/var/www` |
+| **Review** | build folders and top-level HTML |
+
+It finds API keys and passwords in code (OpenAI, Anthropic, Stripe, AWS, GitHub, Meta/WhatsApp, database URLs,
+Supabase `service_role` keys…), `.env` files, private keys and keystores, database files, public source maps, open
+Firebase rules, Supabase tables without row-level security, and debug mode. Key values are never shown in full.
+
+**Publishing is guarded:** `ssh_upload` and `github_publish` scan first and **stop when Shield finds a critical
+problem** (for example a secret key in a file browsers can download). The agent fixes the code and publishes again;
+it only overrides the block if you explicitly accept the risk.
+
+**2. After publishing — scan the server and the website.**
+- **Server (Linux, over SSH):** everything from 7.5, plus **post-quantum SSH** (does the key exchange use ML-KEM /
+  sntrup761?), password-guessing attempts in the last 24 h, `.env` files readable by every user, and whether nginx
+  blocks hidden files.
+- **Website:** everything from 7.5, plus secret keys inside the JavaScript the site sends to visitors and public
+  source maps. With **Deep check** it also tests whether your **Supabase tables** or **Firebase database** can be read
+  by anyone, using the public key from your own site — at most one row per table, nothing is kept, nothing is written.
+  Tick *I own or manage this site* first.
+
+Each scan gets a **score (0–100) and a grade (A–F)**. Every problem has a suggested fix and a **🤖 Fix with AI** button
+that opens a chat with the problem already described (on the right server or folder) — you read it and press Enter.
+
+**3. One-click fixes (⚡ Fix).** For common server problems Shield has built-in fixes: fail2ban, automatic security
+updates, pending updates, firewall (SSH, 80 and 443 stay open — you choose any other ports to keep), SSH root login
+with keys only, SSH password login off, private `.env` files. Before anything runs you see the exact commands. Then:
+- changed files are **backed up** to `/var/backups/carpathron-shield/` on the server, and most fixes can be
+  **undone** from *Fix history*;
+- **lockout protection:** after a firewall or SSH change the app logs in again over a new connection. If it cannot,
+  the server **undoes the change by itself within 2.5 minutes** — a fix can never lock you out;
+- SSH fixes are refused while the server still logs in with a password (install a key first: Remote → 🔑 Install key).
+
+Fixes need root or passwordless `sudo` on the server.
+
+**4. Live monitoring.** Press **▶ Start** next to a server (every 1–60 minutes). While the app is open it checks
+over SSH — nothing is installed on the server — and raises alerts for: new public ports (databases are critical),
+bursts of failed SSH logins, new SSH logins, a full disk, high load, the server going down and coming back, and
+`/.env` or `/.git` becoming readable on the sites you list. Alerts appear on the Shield page, as a badge on the
+sidebar and as Windows notifications. *Reset baseline* accepts the current open ports as normal.
+
+Shield server scans, fixes and monitoring support Linux servers; Windows servers get the website checks.
+
+### 7.7 Remote desktop (like TeamViewer) — the Carpathron Remote plugin
+
+Click **🖥 Remote desktop** in the sidebar (or in the tray menu). It can be switched off in **Plugins → Carpathron
+Remote** (the button disappears and nothing listens for connections). One window does both jobs:
+
+- **Let someone control this PC:** tick **Accept connections**. Give them **Your ID** (9 digits) and the
+  **one-time password**. When they connect, Windows asks **Allow / Allow viewing only / Deny**; nothing happens until
+  you choose. A bar at the top of the screen shows who is connected, with **Disconnect**; open it for chat, the voice
+  call, files and the **Let them control my mouse and keyboard** switch. The one-time password changes after every
+  session. While connections are accepted the app keeps running in the tray when you close its window.
+- **Your own PCs, unattended:** set a **personal password** (10+ characters) and tick **Allow connections with my
+  personal password**. Then you can connect to that PC with its ID and that password, without anyone clicking Allow.
+- **Presentation mode:** people who connect can only watch (several at once).
+- **Control another PC:** type its ID and click **Connect**, then enter its password. In the viewer: **Screen** (other
+  monitors), **Quality**, **Keys…** (Windows key, Alt+Tab, Ctrl+Shift+Esc…), **Paste text**, **Full screen**,
+  **Record** (a video in Videos\Carpathron Remote) and the side panel **Chat · Call · Files**: write, talk, and drop
+  files on the remote screen to copy them there (received files go to Downloads\Carpathron Remote). Clipboard sharing
+  can be switched off in Settings.
+- **SSH terminal** (like PuTTY): saved connections, password or private key, host-key check, tabs; right-click pastes.
+- PCs without this app: install **Carpathron Remote** from <https://qubitpage.com/remote/> (same IDs and passwords).
+
+**Licenses:** being helped never needs one. Controlling other PCs is free for personal use (sessions up to 20 minutes,
+2 hours a day). **Pro** ($3 per PC per month or $19.99 per year) removes the limits for up to 3 computers you control;
+**Max** ($5 per month or $49.99 per year) for any number. Paste the key (CRMT-…) in the **License** box and click
+**Activate**; **Remove from this PC** frees it for another PC.
+
+Security: the two PCs find each other through the relay at **relay.qubitpage.com**, prove the password to each other
+(it is never sent) and encrypt everything end to end (AES-256-GCM); the picture goes directly between the two PCs
+whenever the network allows it (**Direct**), otherwise through the relay, still encrypted (**Via relay**). After 5 wrong
+passwords the PC refuses connections for 10 minutes and changes its one-time password. Windows does not let any remote
+tool see its secure screens (UAC prompts, the login screen); to control programs that run as administrator, run this app
+as administrator too.
 
 ## 8. Plugins — GitHub
 
@@ -622,7 +840,7 @@ network access) can only be changed on the PC. The Quest app always asks for app
 | Muse keeps working after I asked something small | Your message joined the running work (⚡ Now). Switch to ⏳ Queue, or say "stop" |
 | It stopped with tasks still open | A task is ⛔ blocked (read its note), or it made no progress — answer the question in the note and say "continue" |
 | Computer use: clicks land in the wrong place | Use 100 % / 125 % display scaling on the main monitor; Muse takes a new screenshot first — ask it to "take a screenshot and try again" |
-| Computer use: nothing happens in an admin window | Windows blocks input into programs running as administrator unless Carpathron Robotics & Coding also runs as administrator |
+| Computer use: nothing happens in an admin window | Windows blocks input into programs running as administrator unless Muse Carpathron also runs as administrator |
 | Muse Browser asks to sign in | It has its own sign-ins: sign in yourself in that window once — Muse never types passwords |
 | Something else | Activity page, and the log at `%APPDATA%\Muse Carpathron\muse-carpathron.log` |
 

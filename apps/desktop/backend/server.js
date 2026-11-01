@@ -419,7 +419,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       if (b.whatsapp && b.whatsapp.cloud && b.whatsapp.cloud.enabled && !(b.whatsapp.cloud.appSecret || store.settings.whatsapp.cloud.appSecret)) {
         return send(res, 400, { error: 'WhatsApp Cloud needs the App Secret (Meta app → Settings → Basic) so the app can check that messages really come from Meta.' });
       }
-      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'museSandbox', 'museTrustWorkspace', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel', 'finishAllTasks', 'verifyBeforeFinish', 'toolRouting', 'localEnabled', 'localBase', 'localModel', 'localModels', 'localContext', 'localFallback', 'ollamaBin', 'visionModel', 'maxTotalSteps', 'apiWire', 'contextTokens', 'autoUpdate']) if (k in b) patch[k] = b[k];
+      for (const k of ['engine', 'apiBase', 'model', 'museModel', 'museBin', 'mode', 'maxSteps', 'systemPrompt', 'autoMemory', 'autoSkills', 'effort', 'museBridge', 'museSandbox', 'museTrustWorkspace', 'musePermissionProfile', 'arduinoCli', 'webSearch', 'researchModel', 'finishAllTasks', 'verifyBeforeFinish', 'toolRouting', 'localEnabled', 'localBase', 'localModel', 'localModels', 'localContext', 'localFallback', 'ollamaBin', 'visionModel', 'maxTotalSteps', 'apiWire', 'contextTokens']) if (k in b) patch[k] = b[k];
       if (typeof b.apiKey === 'string' && b.apiKey.trim()) patch.apiKey = b.apiKey.trim();
       if (b.clearApiKey) patch.apiKey = '';
       if (b.workspace) {

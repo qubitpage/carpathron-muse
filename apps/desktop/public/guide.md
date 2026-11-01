@@ -25,6 +25,8 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > call, drag-and-drop files, presentation mode and an SSH terminal like PuTTY (section 7.7). Shield lists UDP/TURN ports
 > and installs held-back kernel updates; generated SSH keys are always valid; the terminal hides stray escape codes; the
 > version is shown at the bottom of the sidebar.
+> **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
+> vulnerabilities in the app's libraries.
 >
 > **Muse Carpathron** is the open-source edition of this app (Meta AI hackathon). The same app is on the Microsoft
 > Store as *Carpathron Robotics & Coding*. It is made by **Qubitpage LIMITED** (qubitpage.com).
@@ -58,10 +60,8 @@ This guide starts from zero (installing the app) and then explains every menu, b
 3. The app also lives in the system tray (bottom right) — closing the window keeps it running for WhatsApp and the
    robot; use *Quit* in the tray menu to exit completely.
 
-**Update:** the app updates itself. It checks **qubitpage.com** for new versions, downloads them in the background and
-installs them when you restart it (a banner shows *Restart and update*), or the next time you close it. You can switch
-this off or check by hand in *Settings → App → Updates*. **Your chats, settings, saved servers, keys, memory and
-skills are kept.**
+**Update:** Muse Carpathron is the Meta AI hackathon edition and does not update itself. To install a newer build,
+run its installer over the old one. **Your chats, settings, saved servers, keys, memory and skills are kept.**
 
 **Where your data is**
 
@@ -81,7 +81,7 @@ Your chats and settings (`%APPDATA%\Muse Carpathron`) and your workspace folder 
 
 > **Settings is organised in tabs:** 🧠 **AI models** (Sign in to Meta, Local models / offline, Tools & models) ·
 > 🤖 **Agent** (Defaults) · 📱 **Devices & robots** (Robots, Phone & Quest, WhatsApp) · 🔌 **Integrations**
-> (Remote servers, SSH keys, GitHub, MCP servers) · ⬆ **App** (Updates, About). The app remembers the last tab.
+> (Remote servers, SSH keys, GitHub, MCP servers) · ℹ **App** (About). The app remembers the last tab.
 
 ## 3. Connect Meta Muse (the brain)
 

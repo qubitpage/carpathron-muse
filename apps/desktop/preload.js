@@ -9,10 +9,4 @@ contextBridge.exposeInMainWorld('desktop', {
   remoteDesktop: (what) => ipcRenderer.invoke('remote-desktop', what),
   remoteDesktopState: () => ipcRenderer.invoke('remote-desktop-state'),
   remoteDesktopEnable: (on) => ipcRenderer.invoke('remote-desktop-enable', on),
-  update: {
-    state: () => ipcRenderer.invoke('update-state'),
-    check: () => ipcRenderer.invoke('update-check'),
-    install: () => ipcRenderer.invoke('update-install'),
-    onChange: (cb) => { const f = (_e, st) => cb(st); ipcRenderer.on('update-state', f); return () => ipcRenderer.removeListener('update-state', f); },
-  },
 });

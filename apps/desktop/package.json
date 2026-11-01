@@ -1,7 +1,7 @@
 {
   "name": "muse-carpathron",
   "productName": "Muse Carpathron",
-  "version": "1.9.5",
+  "version": "1.9.6",
   "description": "Muse Carpathron: an AI agent for Windows powered by Meta Muse models (open-source hackathon edition). Coding, servers, GitHub, MCP, computer use and robot control.",
   "main": "main.js",
   "author": {
@@ -17,7 +17,7 @@
     "test": "node test/run-all.js && node test/v14.js && node test/security.js",
     "dist": "node build/patch-sdk.js && electron-builder --win nsis --x64",
     "postinstall": "node build/patch-sdk.js",
-    "test:electron": "xvfb-run -a electron --no-sandbox test/electron-browser.js /tmp && xvfb-run -a electron --no-sandbox test/electron-audio.js test/audio && xvfb-run -a electron --no-sandbox test/updater-feed.js"
+    "test:electron": "xvfb-run -a electron --no-sandbox test/electron-browser.js /tmp && xvfb-run -a electron --no-sandbox test/electron-audio.js test/audio"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
@@ -27,7 +27,6 @@
     "@muse-code/sdk": "1.4.14",
     "@whiskeysockets/baileys": "6.7.24",
     "dompurify": "3.4.17",
-    "electron-updater": "^6.3.9",
     "exceljs": "4.4.0",
     "jszip": "3.10.1",
     "mammoth": "1.13.0",
@@ -42,13 +41,13 @@
   },
   "devDependencies": {
     "electron": "44.10.0",
-    "electron-builder": "25.1.8",
+    "electron-builder": "^26.18.0",
     "resedit": "2.0.3"
   },
   "build": {
     "appId": "ai.carpathron.muse",
     "productName": "Carpathron",
-    "copyright": "Copyright © 2026 Qubitpage LIMITED",
+    "copyright": "Copyright \u00a9 2026 Qubitpage LIMITED",
     "npmRebuild": false,
     "directories": {
       "buildResources": "build",
@@ -56,7 +55,6 @@
     },
     "files": [
       "main.js",
-      "updater.js",
       "preload.js",
       "backend/**/*",
       "remote/**/*",
@@ -107,13 +105,7 @@
       "deleteAppDataOnUninstall": false,
       "uninstallDisplayName": "Muse Carpathron"
     },
-    "publish": [
-      {
-        "provider": "generic",
-        "url": "https://qubitpage.com/downloads/carpathron",
-        "channel": "muse"
-      }
-    ],
+    "publish": null,
     "compression": "maximum",
     "extraResources": [
       {
@@ -129,5 +121,21 @@
     "type": "git",
     "url": "https://github.com/qubitpage/carpathron-muse"
   },
-  "homepage": "https://github.com/qubitpage/carpathron-muse"
+  "homepage": "https://github.com/qubitpage/carpathron-muse",
+  "overrides": {
+    "@modelcontextprotocol/server-filesystem": {
+      "glob": "^14.0.3",
+      "minimatch": "^11.0.3"
+    },
+    "exceljs": {
+      "uuid": "^11.1.1",
+      "unzipper": "^0.12.3"
+    },
+    "archiver-utils": {
+      "glob": "^14.0.3"
+    },
+    "readdir-glob": {
+      "minimatch": "^11.0.3"
+    }
+  }
 }

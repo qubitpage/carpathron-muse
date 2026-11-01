@@ -1098,7 +1098,7 @@
     { id: 'agent', label: '🤖 Agent', intro: 'How the agent works for you: approval mode, workspace folder, steps, self-check, tool loading and your custom instructions.', match: /^(Defaults)/ },
     { id: 'devices', label: '📱 Devices & robots', intro: 'Robots, phones and Meta Quest on your Wi-Fi, and WhatsApp remote control.', match: /^(Robots|Phone & Quest|WhatsApp)/ },
     { id: 'integrations', label: '🔌 Integrations', intro: 'Remote servers (SSH), GitHub and MCP servers that give the agent more tools.', match: /^(Remote servers|MCP servers)/ },
-    { id: 'app', label: '⬆ App', intro: 'Updates and information about this app.', match: /^(Updates|About)/ },
+    { id: 'app', label: 'ℹ App', intro: 'Information about this app.', match: /^(About)/ },
   ];
   const tabOf = (card) => {
     if (card.dataset.tab) return card.dataset.tab;
@@ -1423,38 +1423,9 @@
     }
     await renderAccess();
 
-    // --- updates (installer version: from qubitpage.com; Microsoft Store version: by the Store)
-    const upd = window.desktop && window.desktop.update;
-    if (upd) {
-      const card = h('div', { class: 'card' }, h('h3', {}, 'Updates'));
-      const autoOn = h('input', { type: 'checkbox' });
-      autoOn.checked = s.autoUpdate !== false;
-      autoOn.onchange = async () => { S.settings = await api('/api/settings', { body: { autoUpdate: autoOn.checked } }); toast(autoOn.checked ? 'Automatic updates on' : 'Automatic updates off'); };
-      const line = h('p', { class: 'small' });
-      const btn = h('button', { class: 'btn small' }, 'Check now');
-      const inst = h('button', { class: 'btn small primary', style: 'display:none' }, 'Restart and update');
-      const draw = (st) => {
-        if (!st) return;
-        if (!st.enabled) { line.textContent = st.reason || 'Updates are not available in this version.'; btn.style.display = 'none'; autoOn.disabled = true; return; }
-        const txt = { idle: 'Not checked yet.', checking: 'Checking qubitpage.com for updates…', current: `You have the latest version (${S.boot.version}).`,
-          downloading: `Downloading version ${st.version}… ${st.progress || 0} %`, ready: `Version ${st.version} is ready. It installs when you restart (or the next time you close the app).`,
-          nofeed: `You have the latest version (${S.boot.version}). No newer version is published on qubitpage.com yet.`,
-          offline: `Could not reach qubitpage.com (no internet?). The app checks again later.`,
-          error: `Could not check for updates right now (${st.error}). The app tries again later.` }[st.status] || st.status;
-        line.textContent = txt;
-        inst.style.display = st.status === 'ready' ? '' : 'none';
-      };
-      btn.onclick = async () => draw(await upd.check());
-      inst.onclick = () => upd.install();
-      upd.onChange(draw);
-      draw(await upd.state());
-      card.append(h('label', { class: 'inline toggle' }, autoOn, ' Download and install updates automatically (from qubitpage.com)'), line, h('div', { class: 'row' }, btn, inst));
-      body.append(card);
-    }
-
     // --- about
     body.append(h('div', { class: 'card' }, h('h3', {}, 'About'),
-      h('p', { class: 'small muted' }, `Muse Carpathron ${S.boot.version} · ${S.boot.platform} · Data stays on this PC except what is sent to Meta's model for each message (see Activity).`)));
+      h('p', { class: 'small muted' }, `Muse Carpathron ${S.boot.version} (Meta AI hackathon edition — no automatic updates) · ${S.boot.platform} · Data stays on this PC except what is sent to Meta's model for each message (see Activity).`)));
     settingsTab(S.settingsTab);
   }
   // ------------------------------------------------------------ Remote page
@@ -1751,24 +1722,6 @@
       wa.cloud.tunnelUrl ? h('span', { class: 'access-url' }, `${wa.cloud.tunnelUrl}${wa.cloud.webhookPath}`) : h('span', { class: 'small muted' }, 'Webhook path: /whatsapp/webhook')));
   }
 
-  // ------------------------------------------------------------ update banner (desktop window only)
-  function updateBanner() {
-    const upd = window.desktop && window.desktop.update;
-    if (!upd) return;
-    let bar = null;
-    const draw = (st) => {
-      if (!st || st.status !== 'ready') { if (bar) { bar.remove(); bar = null; } return; }
-      if (bar) return;
-      bar = h('div', { class: 'update-bar' },
-        h('span', {}, `⬆️ Version ${st.version} is ready.`),
-        h('button', { class: 'btn small primary', onclick: () => upd.install() }, 'Restart and update'),
-        h('button', { class: 'btn small', onclick: () => { bar.remove(); bar = null; toast('It installs the next time you close the app.'); } }, 'Later'));
-      document.body.append(bar);
-    };
-    upd.onChange(draw);
-    upd.state().then(draw).catch(() => {});
-  }
-
   // ------------------------------------------------------------ boot
   async function boot() {
     try { S.boot = await api('/api/bootstrap'); }
@@ -1779,7 +1732,6 @@
     }
     S.settings = S.boot.settings; S.convs = S.boot.convs; S.projects = S.boot.projects; S.skills = S.boot.skills;
     connectWs();
-    updateBanner();
     renderFoot();
     newChat();
     const e = S.boot.engines;

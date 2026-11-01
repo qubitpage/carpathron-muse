@@ -24,20 +24,25 @@ by Qubitpage LIMITED ([qubitpage.com/products](https://qubitpage.com/products/))
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.9.5_(124_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.9.6_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.6.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.9.5) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-1.9.5-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-1.9.5-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. Updates install by themselves from qubitpage.com (Settings → Updates). Portable: unzip and run `Carpathron.exe`. |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.9.6) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. This hackathon edition does not update itself: install a newer build over the old one (chats and settings are kept). Portable: unzip and run `Carpathron.exe`. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.6) | [**CarpathronAvatar-1.1.6.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) (also built into the app: Robot page → ⬆ Update car firmware) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 | 🖥 **Carpathron Remote** – the remote desktop app on its own (Windows, Linux) | [qubitpage.com/remote](https://qubitpage.com/remote/) | For PCs you want to reach or help that do not run Muse Carpathron. Same IDs and passwords. |
 
-All files of this version: **[Release v1.9.5](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.9.5)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.9.6](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.9.6)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
 
-## What's new in 1.9.5
+## What's new in 1.9.6
+
+- **Hackathon edition:** the automatic updater is removed — Muse Carpathron is the version demonstrated for the Meta AI hackathon and no longer updates itself.
+- **Security:** dependencies updated — `npm audit` finds no known vulnerabilities in the app's libraries (electron-updater removed, spreadsheet and file-tool libraries patched); build tools on electron-builder 26.
+
+### 1.9.5
 
 - **🖥 Remote desktop (Carpathron Remote plugin):** control your own PCs or help someone, like TeamViewer — 9-digit ID + one-time password, *Allow / Allow viewing only / Deny* on the controlled PC, unattended access with a personal password, presentation mode, several screens, special keys, full screen, session recording, side panel with **chat, voice call and drag-and-drop files**, clipboard sharing, and an **SSH terminal like PuTTY** (saved connections, keys, host-key check, tabs). End-to-end encrypted (AES-256-GCM, password never sent), direct connection when possible, otherwise through relay.qubitpage.com. Free for personal use (20-minute sessions, 2 h/day); Pro/Max licenses remove the limits. Switch it off in Plugins.
 - **Carpathron Shield:** public ports now include UDP and services bound to the server's own IP (e.g. TURN 3478/5349); the monitor watches them too; the updates fix also installs held-back kernel packages.

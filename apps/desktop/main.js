@@ -4,7 +4,6 @@ const path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow, shell, Menu, ipcMain, dialog, Tray, nativeImage, session } = require('electron');
 const { startServer } = require('./backend/server');
-const updates = require('./updater');
 // Carpathron Remote plugin (remote desktop, chat/voice/files, SSH terminal): same relay and licenses as the standalone app
 const remoteDesktop = require('./remote/main-rd');
 remoteDesktop.preReady();
@@ -53,7 +52,6 @@ else {
   ipcMain.handle('open-path', (_e, p) => shell.openPath(String(p)));
   ipcMain.handle('open-external', (_e, u) => { if (/^https?:\/\//.test(String(u))) shell.openExternal(String(u)); });
   ipcMain.handle('app-version', () => app.getVersion());
-  updates.setup({ ipcMain, log, autoEnabled: () => !srv || srv.store.settings.autoUpdate !== false });
   ipcMain.handle('remote-desktop', (_e, what) => { if (!remoteDesktop.pluginEnabled()) return false; if (what === 'ssh') remoteDesktop.openSsh(); else remoteDesktop.openHome(); return true; });
   ipcMain.handle('remote-desktop-state', () => remoteDesktop.pluginState());
   ipcMain.handle('remote-desktop-enable', (_e, on) => remoteDesktop.setPlugin(!!on));

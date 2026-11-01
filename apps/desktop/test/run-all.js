@@ -402,6 +402,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const vr = await (await fetch(`${base}/avatar/voice`, { method: 'POST', headers: { 'x-avatar-token': ok.token, 'Content-Type': 'audio/wav' }, body: w })).json();
     assert.ok(vr.heard === 'Look left' && vr.command === '/look left' && vr.replies.some((t) => /Looking left/.test(t)), JSON.stringify(vr));
     assert.ok(car.log.includes('/drive?l=-70&r=70') || car.log.some((x) => x === 'ws:-70,70'), 'the car turned to look');
+    // Robot page voice: the same, from the desktop app, with the robot speaking the answer
+    const dv = await (await fetch(`${base}/api/robot/voice?speak=1`, { method: 'POST', headers: { 'x-mc-token': T, 'Content-Type': 'audio/wav' }, body: w })).json();
+    assert.ok(dv.heard === 'Look left' && dv.command === '/look left' && dv.replies.length, JSON.stringify(dv));
+    assert.ok((await api('/api/robot/say', { text: 'Hello from the robot' })).ok);
+    await sleep(300);
+    assert.ok(events.some((e) => e.event === 'robot:say' && e.data.text === 'Hello from the robot') && events.some((e) => e.event === 'robot:say' && /Looking left/.test(e.data.text)), 'robot:say events');
     const pub = await api('/api/settings');
     assert.ok(!JSON.stringify(pub).includes(ok.token) && pub.avatarLinked.length >= 1, 'token never sent to the UI');
     await api('/api/settings', { robot: { carIp: '' } });

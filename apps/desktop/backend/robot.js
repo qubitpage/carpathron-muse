@@ -41,7 +41,8 @@ class Robot {
     this.stopsSent = 2;
     this._tick = setInterval(() => this._push(), CAR_TICK_MS);
     this._status = setInterval(() => this.emit('robot:status', this.status()), 1000);
-    this._probe = setInterval(() => this.probe(), 2000);
+    // every second while our firmware is online (the driving display shows live distance and heading), else every 2 s
+    this._probe = setInterval(() => { this._pt = !this._pt; if (this._pt || (this.state === 'online' && this.firmware === 'carpathron')) this.probe(); }, 1000);
     this.connect();
   }
 
@@ -67,7 +68,7 @@ class Robot {
     let fw = null;
     try {
       const body = await carGet(ip, '/status', 2500);
-      try { const j = JSON.parse(body); if (/carpathron/i.test(j.name || '')) { fw = 'carpathron'; this.info = j; } } catch {}
+      try { const j = JSON.parse(body); if (/carpathron/i.test(j.name || '') || (j.fw && j.sensors)) { fw = 'carpathron'; this.info = j; } } catch {} // firmware 2.2 lets the car be renamed
       if (!fw) fw = this.firmware && this.firmware.startsWith('kit') ? this.firmware : null;
     } catch {}
     if (!fw) {
@@ -288,7 +289,7 @@ class Robot {
         try {
           const body = await carGet(h, '/status', timeout);
           let j = null; try { j = JSON.parse(body); } catch {}
-          if (j && /carpathron/i.test(j.name || '')) found.push({ host: h, ip: j.wifiIp || j.ip || h, mode: j.mode, camera: !!j.camera, wifi: j.wifi || '' });
+          if (j && (/carpathron/i.test(j.name || '') || (j.fw && j.sensors))) found.push({ host: h, ip: j.wifiIp || j.ip || h, mode: j.mode, camera: !!j.camera, wifi: j.wifi || '' });
           else if (h === '192.168.4.1' || /^10\.|^192\.168\./.test(h)) {
             // KUONGSHUN factory program: camera server with /control
             const page = await carGet(h, '/', timeout).catch(() => '');

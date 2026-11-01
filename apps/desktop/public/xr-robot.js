@@ -68,17 +68,49 @@
     const DEAD = 0.15, dz = (v) => (Math.abs(v) < DEAD ? 0 : (v - Math.sign(v) * DEAD) / (1 - DEAD)), cl = (v) => Math.max(-100, Math.min(100, v));
     const say = (t) => { st.info = t; st.infoAt = performance.now(); };
     const action = async (label, fn) => { if (st.busy) return; st.busy = true; say(label + '…'); try { say(await fn()); } catch (e) { say(e.message); } finally { st.busy = false; } };
-    const statusTimer = setInterval(() => api('/api/robot').then((s) => { st.rssi = s.rssi; st.online = s.state === 'online'; }).catch(() => {}), 2000);
+    // live status twice a second: Wi-Fi, distance ahead, heading — for the panel, the mini-map and the haptics
+    const mm = { x: 0, y: 0, pts: [], trail: [], cms: Number(r.cmPerSec) || 40, drive: Number(r.driveSpeed) || 60, lastAt: 0 };
+    const statusTimer = setInterval(() => api('/api/robot').then((s) => {
+      st.rssi = s.rssi; st.online = s.state === 'online';
+      const sn = s.sensors || {};
+      st.dist = sn.tof ? Number(sn.dist) : null; st.blocked = !!sn.blocked; st.yaw = sn.imu ? Number(sn.yaw) : null;
+      // mini-map: dead reckoning from the wheel commands + gyro heading, laser hits as dots
+      const now = performance.now(), dts = mm.lastAt ? Math.min(1, (now - mm.lastAt) / 1000) : 0; mm.lastAt = now;
+      const head = ((st.yaw != null ? st.yaw : 0) * Math.PI) / 180, v = ((st.l + st.r) / 2 / mm.drive) * mm.cms;
+      if (st.l * st.r > 0) { mm.x += Math.sin(head) * v * dts; mm.y -= Math.cos(head) * v * dts; mm.trail.push([mm.x, mm.y]); if (mm.trail.length > 400) mm.trail.shift(); }
+      if (st.dist > 0) { const d = st.dist / 10; mm.pts.push([mm.x + Math.sin(head) * d, mm.y - Math.cos(head) * d]); if (mm.pts.length > 600) mm.pts.shift(); }
+      mm.head = head;
+    }).catch(() => {}), 500);
 
+    function drawMiniMap(x0, y0, size) {
+      const c = size / 2, sc = size / 400; // 4 m across
+      pctx.save(); pctx.beginPath(); pctx.arc(x0 + c, y0 + c, c, 0, Math.PI * 2); pctx.clip();
+      pctx.fillStyle = '#10202e'; pctx.fillRect(x0, y0, size, size);
+      pctx.strokeStyle = 'rgba(79,140,255,.25)'; for (const rr of [50, 100, 150, 200]) { pctx.beginPath(); pctx.arc(x0 + c, y0 + c, rr * sc, 0, Math.PI * 2); pctx.stroke(); }
+      const P2 = ([x, y]) => [x0 + c + (x - mm.x) * sc, y0 + c + (y - mm.y) * sc];
+      pctx.strokeStyle = '#3ddc97'; pctx.beginPath(); mm.trail.forEach((pt, i) => { const [a, b] = P2(pt); if (i) pctx.lineTo(a, b); else pctx.moveTo(a, b); }); pctx.stroke();
+      pctx.fillStyle = '#ffb347'; for (const pt of mm.pts) { const [a, b] = P2(pt); pctx.fillRect(a - 2, b - 2, 4, 4); }
+      pctx.translate(x0 + c, y0 + c); pctx.rotate(mm.head || 0);
+      pctx.fillStyle = '#4fd1ff'; pctx.beginPath(); pctx.moveTo(0, -12); pctx.lineTo(8, 9); pctx.lineTo(-8, 9); pctx.closePath(); pctx.fill();
+      pctx.restore();
+      pctx.strokeStyle = '#2b5d82'; pctx.lineWidth = 3; pctx.beginPath(); pctx.arc(x0 + c, y0 + c, c - 1, 0, Math.PI * 2); pctx.stroke(); pctx.lineWidth = 1;
+    }
     function drawPanel() {
       pctx.fillStyle = '#0d0f12'; pctx.fillRect(0, 0, 1024, 256);
-      pctx.fillStyle = '#e8eaed'; pctx.font = '600 38px Segoe UI, Arial'; pctx.fillText('Baby Carpathron · robot eyes', 28, 52);
+      drawMiniMap(1024 - 244, 6, 244);
+      // distance ahead bar + heading
+      const d = st.dist;
+      pctx.font = '600 30px Segoe UI, Arial';
+      pctx.fillStyle = st.blocked ? '#ff5b6b' : d > 0 && d < 300 ? '#ff5b6b' : d > 0 && d < 700 ? '#ffb347' : '#3ddc97';
+      pctx.fillText(st.blocked ? '⛔ blocked ahead' : d == null ? '' : d < 0 ? 'clear > 2 m' : `${Math.round(d / 10)} cm ahead`, 560, 52);
+      if (st.yaw != null) { pctx.fillStyle = '#e8eaed'; pctx.fillText(`${Math.round(((st.yaw % 360) + 360) % 360)}°`, 560 + 0, 100 + 0 * 0); }
+      pctx.fillStyle = '#e8eaed'; pctx.font = '600 38px Segoe UI, Arial'; pctx.fillText('Baby Carpathron · eyes', 28, 52);
       pctx.font = '30px Segoe UI, Arial'; pctx.fillStyle = st.online === false ? '#ff5b6b' : '#3fb37f';
-      pctx.fillText(`${st.online === false ? 'car offline' : 'car online'}${st.rssi ? ` · Wi-Fi ${st.rssi} dBm` : ''} · wheels L ${Math.round(st.l)} / R ${Math.round(st.r)} · head steering ${st.headSteer ? 'ON' : 'off'}`, 28, 100);
+      pctx.fillText(`${st.online === false ? 'car offline' : 'car online'}${st.rssi ? ` · ${st.rssi} dBm` : ''} · L ${Math.round(st.l)} / R ${Math.round(st.r)} · head ${st.headSteer ? 'ON' : 'off'}`, 28, 100);
       pctx.fillStyle = '#ffb347'; pctx.fillText(performance.now() - st.infoAt < 6000 ? st.info : '', 28, 150);
       pctx.fillStyle = '#9aa0a6'; pctx.font = '24px Segoe UI, Arial';
-      pctx.fillText(`${mode === 'tank' ? 'Sticks: left/right wheels' : 'Right stick drives'} · A/X STOP · B photo · Y head steering · trigger turbo`, 28, 200);
-      pctx.fillText('Left grip: look behind · both grips: scan the room · turn your head to turn the car', 28, 236);
+      pctx.fillText(`${mode === 'tank' ? 'Sticks: wheels' : 'Right stick drives'} · A/X STOP · B photo · Y head · trigger turbo`, 28, 200);
+      pctx.fillText('Left grip: look behind · both grips: scan · turn your head to turn', 28, 236);
       gl.bindTexture(gl.TEXTURE_2D, panelTex);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, panel);
     }
@@ -133,6 +165,12 @@
       }
       left = cl(left); right = cl(right);
       st.l = left; st.r = right;
+      // haptics: the controllers buzz as an obstacle gets close while driving forward, strongly when blocked
+      if (left > 0 && right > 0 && (st.blocked || (st.dist > 0 && st.dist < 450)) && t - (st.hapAt || 0) > 280) {
+        st.hapAt = t;
+        const k = st.blocked ? 1 : Math.max(0.15, 1 - (st.dist - 120) / 330);
+        for (const src of session.inputSources) { const hp = src.gamepad && src.gamepad.hapticActuators && src.gamepad.hapticActuators[0]; if (hp && hp.pulse) hp.pulse(Math.min(1, k), 60); }
+      }
       if (stop) { if (!st.stopped) { send({ type: 'stop', by: 'quest' }); st.stopped = true; say('STOP'); } }
       else {
         st.stopped = false;

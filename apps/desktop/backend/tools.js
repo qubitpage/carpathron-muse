@@ -93,6 +93,11 @@ const BUILTIN = [
     parameters: { type: 'object', properties: { target: { type: 'string', description: 'what to go to, in simple words, e.g. "door", "red chair", "black bag"' }, stop_at_m: { type: 'number', description: 'stop this far from it in metres (default 0.45)' } }, required: ['target'] },
   },
   {
+    name: 'robot_say', risk: 'read',
+    description: 'Say something out loud through the robot: the devices set as the robot\'s speaker (the PC, or a phone on the car) speak it with a robot voice. Use it to greet people, announce what the robot does or answer someone near the robot. One or two short sentences.',
+    parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+  },
+  {
     name: 'robot_settings', risk: 'robot',
     description: 'Read or change the Baby Carpathron car settings (firmware 2.2+): motor pins, wheels reversed (invL / invR), sides swapped (swap), lowest moving power (minDuty), top speed (maxPct), straight trim (trim, -25..25, + = more power left), stop distance (stopMm), failsafe (failMs), gyro turn speed (turnSpd), camera (frame 0-4, sQual, pQual, vflip, hmirror, bright, contr, satur, wb, ae), I2C pins (sda, scl), laser time/offset (tofBud, tofOff), gyro scale (gScale), headlight limit (ledMax), name. action "get" lists every setting with its value, range and meaning. action "set" with changes {key: value}: checked first (free pins, no pin used twice, ranges); pins and the hotspot start working after action "restart".',
     parameters: { type: 'object', properties: { action: { type: 'string', enum: ['get', 'set', 'restart'] }, changes: { type: 'object', description: 'for set, e.g. {"invL":1,"maxPct":60}' } }, required: ['action'] },
@@ -371,6 +376,12 @@ async function execBuiltin(name, args, ctx) {
     }
     case 'robot_status':
       return JSON.stringify(ctx.robot.status());
+    case 'robot_say': {
+      const text = String(args.text || '').trim().slice(0, 400);
+      if (!text) throw new Error('text is empty');
+      if (ctx.emit) ctx.emit('robot:say', { text, by: 'muse' });
+      return `Said through the robot: "${text}"`;
+    }
     case 'robot_settings': {
       const C = require('./carsettings');
       const ip = ctx.robot.ip || ctx.robot.getIp();

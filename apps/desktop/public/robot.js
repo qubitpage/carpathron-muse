@@ -12,30 +12,69 @@
   try { const v = localStorage.getItem('mc.speed'); if (v) speed.value = v; } catch (_) {}
   $('#speedOut').textContent = speed.value;
   speed.oninput = () => { $('#speedOut').textContent = speed.value; try { localStorage.setItem('mc.speed', speed.value); } catch (_) {} };
-  const keyDir = () => {
-    const up = keys.has('w') || keys.has('arrowup'), dn = keys.has('s') || keys.has('arrowdown');
-    const lf = keys.has('a') || keys.has('arrowleft'), rt = keys.has('d') || keys.has('arrowright');
-    if (up && lf) return 'fl'; if (up && rt) return 'fr'; if (dn && lf) return 'bl'; if (dn && rt) return 'br';
-    if (up) return 'f'; if (dn) return 'b'; if (lf) return 'l'; if (rt) return 'r'; return null;
-  };
+  // Smooth driving: keys and a game controller set a target throttle / steering; the car follows it with a short ramp
+  // (no jerks, no wheelies), steering while driving makes a curve (both sides keep turning), on the spot it pivots.
+  // W/S or ↑/↓ = forward / back · A/D or ←/→ = steer · Q/E = spin on the spot · Shift = full speed · 1–5 = speed 20–100 %
+  // Space = stop. Controller: left stick (or triggers) to drive, B / circle = stop.
+  const ctl = { thr: 0, steer: 0, src: '' };
+  const clamp1 = (v) => Math.max(-1, Math.min(1, v));
+  const toward = (v, t, up, down, dt) => { const rate = Math.abs(t) > Math.abs(v) && Math.sign(t) !== -Math.sign(v) ? up : down; const d = t - v; return Math.abs(d) <= rate * dt ? t : v + Math.sign(d) * rate * dt; };
+  function padInput() {
+    const gp = (navigator.getGamepads ? [...navigator.getGamepads()] : []).find((g) => g && g.connected && g.axes.length >= 2);
+    if (!gp) return null;
+    const dz = (v) => (Math.abs(v) < 0.12 ? 0 : (v - Math.sign(v) * 0.12) / 0.88);
+    const rt = gp.buttons[7] ? gp.buttons[7].value : 0, lt = gp.buttons[6] ? gp.buttons[6].value : 0;
+    const thr = rt || lt ? rt - lt : -dz(gp.axes[1]);
+    const steer = dz(gp.axes[0]);
+    const stop = gp.buttons[1] && gp.buttons[1].pressed;
+    if (stop) return { stop: true };
+    return thr || steer ? { thr, steer, boost: gp.buttons[0] && gp.buttons[0].pressed } : { idle: true };
+  }
+  let lastT = performance.now(), padStop = false;
   setInterval(() => {
-    const dir = padDir || (visible ? keyDir() : null);
-    if (dir) { const s = Number(speed.value); send({ type: 'drive', left: DIRS[dir][0] * s, right: DIRS[dir][1] * s }); wasDriving = true; }
-    else if (wasDriving) { send({ type: 'drive', left: 0, right: 0 }); wasDriving = false; }
-    document.querySelectorAll('#pad button[data-dir]').forEach((b) => b.classList.toggle('active', b.dataset.dir === dir));
+    const now = performance.now(), dt = Math.min(0.2, (now - lastT) / 1000); lastT = now;
+    const k = (x) => keys.has(x);
+    const pad = padInput();
+    if (pad && pad.stop) { if (!padStop) { send({ type: 'stop' }); ctl.thr = ctl.steer = 0; } padStop = true; return; }
+    padStop = false;
+    let thrT = 0, steerT = 0, spin = 0, boost = k('shift'), src = '';
+    if (visible) {
+      thrT = (k('w') || k('arrowup') ? 1 : 0) - (k('s') || k('arrowdown') ? 1 : 0);
+      steerT = (k('d') || k('arrowright') ? 1 : 0) - (k('a') || k('arrowleft') ? 1 : 0);
+      spin = (k('e') ? 1 : 0) - (k('q') ? 1 : 0);
+      if (thrT || steerT || spin) src = 'keys';
+    }
+    if (pad && !pad.idle && !src) { thrT = pad.thr; steerT = pad.steer; boost = boost || pad.boost; src = 'controller'; }
+    if (padDir) { // the on-screen pad drives directly
+      const s = Number(speed.value); send({ type: 'drive', left: DIRS[padDir][0] * s, right: DIRS[padDir][1] * s }); wasDriving = true; ctl.thr = ctl.steer = 0;
+    } else {
+      if (spin) { thrT = 0; steerT = spin; }
+      ctl.thr = toward(ctl.thr, thrT, 3.5, 7, dt);      // 0 → full in ~0.3 s, stops in ~0.15 s
+      ctl.steer = toward(ctl.steer, steerT, 6, 9, dt);
+      const s = boost ? 100 : Number(speed.value);
+      let l, r;
+      if (Math.abs(ctl.thr) < 0.05) { l = ctl.steer; r = -ctl.steer; }          // pivot on the spot
+      else { const k2 = 0.55 * Math.abs(ctl.thr); l = ctl.thr + ctl.steer * k2; r = ctl.thr - ctl.steer * k2; const m = Math.max(1, Math.abs(l), Math.abs(r)); l /= m; r /= m; }
+      if (Math.abs(l) > 0.01 || Math.abs(r) > 0.01) { send({ type: 'drive', left: Math.round(clamp1(l) * s), right: Math.round(clamp1(r) * s) }); wasDriving = true; ctl.src = src; }
+      else if (wasDriving) { send({ type: 'drive', left: 0, right: 0 }); wasDriving = false; }
+    }
+    const shown = padDir || (ctl.thr > 0.05 ? (ctl.steer > 0.2 ? 'fr' : ctl.steer < -0.2 ? 'fl' : 'f') : ctl.thr < -0.05 ? (ctl.steer > 0.2 ? 'br' : ctl.steer < -0.2 ? 'bl' : 'b') : ctl.steer > 0.2 ? 'r' : ctl.steer < -0.2 ? 'l' : null);
+    document.querySelectorAll('#pad button[data-dir]').forEach((b) => b.classList.toggle('active', b.dataset.dir === shown));
   }, 50);
   document.querySelectorAll('#pad button[data-dir]').forEach((b) => {
     b.addEventListener('pointerdown', (e) => { padDir = b.dataset.dir; b.setPointerCapture(e.pointerId); });
     const end = () => { if (padDir === b.dataset.dir) padDir = null; };
     b.addEventListener('pointerup', end); b.addEventListener('pointercancel', end); b.addEventListener('lostpointercapture', end);
   });
-  $('#btnRobotStop').onclick = () => { padDir = null; keys.clear(); send({ type: 'stop' }); };
-  const typing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+  $('#btnRobotStop').onclick = () => { padDir = null; keys.clear(); ctl.thr = ctl.steer = 0; send({ type: 'stop' }); };
+  const typing = () => ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName) || document.activeElement?.isContentEditable;
+  const SPEEDS = { 1: 20, 2: 40, 3: 60, 4: 80, 5: 100 };
   window.addEventListener('keydown', (e) => {
-    if (!visible || typing()) return;
+    if (!visible || typing() || e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.toLowerCase();
-    if (k === ' ') { e.preventDefault(); keys.clear(); send({ type: 'stop' }); return; }
-    if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) { e.preventDefault(); keys.add(k); }
+    if (k === ' ') { e.preventDefault(); keys.clear(); ctl.thr = ctl.steer = 0; send({ type: 'stop' }); return; }
+    if (SPEEDS[k]) { speed.value = SPEEDS[k]; speed.oninput(); return; }
+    if (['w', 'a', 's', 'd', 'q', 'e', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) { e.preventDefault(); keys.add(k); }
   });
   window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
   window.addEventListener('blur', () => { keys.clear(); padDir = null; });
@@ -47,7 +86,7 @@
   };
 
   function setBar(el, v) { const p = Math.abs(v) / 2; el.style.width = p + '%'; el.style.left = v >= 0 ? '50%' : (50 - p) + '%'; el.classList.toggle('neg', v < 0); }
-  function onMotors(m) { motors = m; setBar($('#barL'), m.left); setBar($('#barR'), m.right); $('#valL').textContent = Math.round(m.left); $('#valR').textContent = Math.round(m.right); $('#motorSrc').textContent = m.source; }
+  function onMotors(m) { motors = m; try { hudMotors(m); } catch (_) {} setBar($('#barL'), m.left); setBar($('#barR'), m.right); $('#valL').textContent = Math.round(m.left); $('#valR').textContent = Math.round(m.right); $('#motorSrc').textContent = m.source; }
   $('#btnFindCar').onclick = async () => {
     const info = $('#findInfo'); const btn = $('#btnFindCar');
     btn.disabled = true; info.textContent = 'Searching your network (≈10 s)…';
@@ -90,7 +129,32 @@
   }
   let ledT;
   $('#carLed').oninput = (e) => { clearTimeout(ledT); ledT = setTimeout(() => window.MCapi('/api/robot/led', { body: { v: Number(e.target.value) } }).catch(() => {}), 120); };
+  // Driving display over the live video: heading tape, distance ahead with a colour bar, Wi-Fi, blocked warning, wheels.
+  const hudOn = $('#hudOn');
+  try { hudOn.checked = localStorage.getItem('mc.hud') !== '0'; } catch (_) {}
+  const hudShow = () => { $('#hud').hidden = !hudOn.checked; };
+  hudOn.onchange = () => { try { localStorage.setItem('mc.hud', hudOn.checked ? '1' : '0'); } catch (_) {} hudShow(); };
+  hudShow();
+  (() => { const tape = $('#hudTape'); for (let d = -360; d <= 720; d += 15) { const deg = ((d % 360) + 360) % 360; const t = document.createElement('span'); t.textContent = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' }[deg] || (deg % 45 === 0 ? String(deg) : '|'); t.className = deg % 45 === 0 ? 'big' : ''; t.style.left = `${(d + 360) * 4}px`; tape.append(t); } })();
+  function hud(st) {
+    const sn = st.sensors || {};
+    const yaw = sn.imu ? Number(sn.yaw) || 0 : null;
+    $('#hudHead').textContent = yaw == null ? 'no gyro' : `${Math.round(((yaw % 360) + 360) % 360)}°`;
+    $('#hudTape').style.transform = `translateX(${-((yaw || 0) + 360) * 4}px)`;
+    $('#hudTape').parentElement.style.opacity = yaw == null ? 0.25 : 1;
+    const d = sn.tof ? Number(sn.dist) : null;
+    const pct = d == null || d < 0 ? 0 : Math.max(0, Math.min(100, 100 - (d / 2000) * 100));
+    $('#hudDistFill').style.width = `${pct}%`;
+    $('#hudDistFill').className = d != null && d > 0 && d < 300 ? 'near' : d != null && d > 0 && d < 700 ? 'mid' : 'far';
+    $('#hudDist').textContent = d == null ? (sn.ir ? `IR ${sn.irLeft ? '⛔' : '✓'} ${sn.irRight ? '⛔' : '✓'}` : 'no distance sensor') : d < 0 ? 'clear > 2 m' : `${Math.round(d / 10)} cm`;
+    $('#hudBlock').hidden = !sn.blocked;
+    const r = st.rssi;
+    $('#hudLink').textContent = r ? `Wi-Fi ${r >= -60 ? '▂▄▆█' : r >= -70 ? '▂▄▆' : r >= -78 ? '▂▄' : '▂'} ${r} dBm` : 'Wi-Fi —';
+    $('#hudLink').className = `hud-chip ${r && r < -75 ? 'bad' : ''}`;
+  }
+  function hudMotors(m) { const set = (el, v) => { el.style.height = `${Math.abs(v) / 2}%`; el.style.bottom = v >= 0 ? '50%' : `${50 - Math.abs(v) / 2}%`; el.classList.toggle('neg', v < 0); }; set($('#hudL'), m.left); set($('#hudR'), m.right); }
   function onStatus(st) {
+    hud(st);
     setVideo(st.state === 'online' && !!st.camera);
     const pill = $('#robotPill');
     const fwName = { 'kit-web': ' · factory program', 'kit-app': ' · factory program (APP)', carpathron: '' }[st.firmware] || '';

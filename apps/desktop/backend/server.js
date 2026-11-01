@@ -825,6 +825,30 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         return send(res, 200, { ok: true, mode, restarting: true });
       } catch (e) { return send(res, 200, { error: `The car did not accept it (${e.message}). It needs firmware 2.1 — update it first.` }); }
     }
+    // Voice: spoken robot commands (short ones run at once, the rest go to the agent) and the robot's own voice
+    if (p === '/api/robot/voice' && m === 'POST') {
+      const raw = await readBody(req, 8 * 1024 * 1024);
+      const s = store.settings;
+      if (!s.apiKey) return send(res, 200, { error: 'Voice commands need the Meta API key (Settings) for Muse Voice Transcribe.' });
+      try {
+        const heard = await voice.transcribe(raw, { apiKey: s.apiKey, apiBase: s.apiBase, mime: 'audio/wav' });
+        if (!heard) return send(res, 200, { heard: '', replies: [] });
+        const cmd = voice.voiceToCommand(heard);
+        if (cmd === '/robot stop') robot.stop('voice'); // stop first, before anything else
+        const replies = [];
+        const speak = url.searchParams.get('speak') === '1';
+        await wa.handle('robot-voice', 'desktop', cmd || heard, async (t) => { if (!/^⏳ Working on it/.test(t)) { replies.push(String(t)); if (speak) emit('robot:say', { text: String(t).replace(/[*_`#>]/g, '').slice(0, 400), by: 'muse' }); } }, async () => {});
+        logFn(`Voice: "${heard}"${cmd ? ` → ${cmd}` : ''}`);
+        return send(res, 200, { heard, command: cmd, replies });
+      } catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    if (p === '/api/robot/say' && m === 'POST') {
+      const b = await readJson(req);
+      const text = String(b.text || '').trim().slice(0, 400);
+      if (!text) return send(res, 200, { error: 'Nothing to say.' });
+      emit('robot:say', { text, by: 'you' });
+      return send(res, 200, { ok: true });
+    }
     // Board & parts: board profiles, parts library, pin planner, saved builds (one per board), starter code
     if (p === '/api/robot/parts' && m === 'GET') {
       const B = require('./boards').BOARDS, PT = require('./parts');

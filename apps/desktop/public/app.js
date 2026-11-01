@@ -121,6 +121,7 @@
       case 'camera:photo': window.MCRobot && window.MCRobot.onPhoto && window.MCRobot.onPhoto(d); break;
       case 'robot:status': case 'robot:motors': case 'robot:scan': case 'robot:map': window.MCRobot && window.MCRobot.onEvent(ev, d); break;
       case 'robot:firmware': window.MCfirmware && window.MCfirmware(d.text); break;
+      case 'robot:say': window.MCvoice && window.MCvoice.say(d.text, d.by); break;
       case 'studio:log': case 'studio:serial': window.MCstudio && window.MCstudio.onEvent(ev, d); break;
       case 'avatar:link': avatarLinkPrompt(d); break;
       case 'remote:status': S.boot.servers = d; if (S.view === 'chat') renderHead(); if (S.view === 'remote') renderServerList(); window.MCShield && window.MCShield.onEvent(ev, d); break;

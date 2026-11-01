@@ -520,3 +520,46 @@ button.chip { cursor: pointer; }
 .schem-svg .sch-part:hover .wire, .schem-svg .sch-part:focus .wire { opacity: 1; stroke-width: 3; }
 .schem-svg .sch-part:hover .sch-box, .schem-svg .sch-part:focus .sch-box { stroke: var(--accent); }
 @media (max-width: 980px) { .parts-grid { grid-template-columns: 1fr; } }
+
+/* ---- driving display over the live video */
+.video-wrap { position: relative; }
+.video-wrap .cam-preview { display: block; width: 100%; }
+.hud { position: absolute; inset: 0; pointer-events: none; font-family: var(--mono); color: #eaf6ff; text-shadow: 0 1px 2px #000; font-size: 12px; }
+.hud-top { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; justify-content: space-between; }
+.hud-chip { background: rgba(0,0,0,.45); border-radius: 6px; padding: 2px 7px; }
+.hud-chip.bad { color: #ff8a95; }
+.hud-compass { position: absolute; top: 34px; left: 50%; width: 220px; height: 22px; transform: translateX(-50%); overflow: hidden; background: rgba(0,0,0,.35); border-radius: 6px; }
+.hud-compass #hudTape { position: absolute; left: 110px; top: 3px; height: 16px; transition: transform .25s linear; }
+.hud-compass #hudTape span { position: absolute; transform: translateX(-50%); font-size: 10px; opacity: .7; }
+.hud-compass #hudTape span.big { font-size: 11px; opacity: 1; }
+.hud-mark { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #ffd75e; transform: translateX(-1px); }
+.hud-dist { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; background: rgba(0,0,0,.45); border-radius: 6px; padding: 3px 8px; }
+.hud-dist-bar { width: 120px; height: 8px; border-radius: 4px; background: rgba(255,255,255,.18); overflow: hidden; }
+.hud-dist-bar div { height: 100%; transition: width .3s; }
+.hud-dist-bar .far { background: #3ddc97; } .hud-dist-bar .mid { background: #f5b74e; } .hud-dist-bar .near { background: #ff5b6b; }
+.hud-block { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(160,20,30,.75); padding: 6px 12px; border-radius: 8px; font-weight: 700; }
+.hud-motors { position: absolute; bottom: 10px; left: 10px; display: flex; gap: 4px; }
+.hud-m { position: relative; width: 8px; height: 46px; background: rgba(255,255,255,.18); border-radius: 4px; overflow: hidden; }
+.hud-m div { position: absolute; left: 0; right: 0; background: #4f8cff; }
+.hud-m div.neg { background: #f5b74e; }
+
+/* ---- Robot → Voice */
+#voiceCard h4 { margin: 14px 0 6px; font-size: 13px; }
+.voice-top { display: flex; gap: 14px; align-items: flex-start; }
+.voice-top .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.voice-top p { margin: 0; }
+.robot-face { flex: none; width: 74px; height: 58px; border-radius: 14px; background: #10202e; border: 2px solid #2b5d82; position: relative; }
+.robot-face .eye { position: absolute; top: 16px; width: 12px; height: 12px; border-radius: 50%; background: #4fd1ff; box-shadow: 0 0 8px #4fd1ff; }
+.robot-face .eye:first-child { left: 16px; } .robot-face .eye:nth-child(2) { right: 16px; }
+.robot-face .mouth { position: absolute; left: 22px; right: 22px; bottom: 12px; height: 4px; border-radius: 3px; background: #4fd1ff; transition: height .08s; }
+.robot-face.talking .mouth { height: 9px; animation: talk .22s infinite alternate; }
+.robot-face .mouth.pulse { height: 12px; }
+@keyframes talk { from { height: 3px; } to { height: 11px; } }
+@media (prefers-reduced-motion: reduce) { .robot-face.talking .mouth { animation: none; } }
+.btn.talk { touch-action: none; user-select: none; }
+.btn.talk.on { background: var(--danger); }
+.vmeter { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.vmeter div { height: 100%; width: 0; background: var(--accent-2); transition: width .08s; }
+.vlogs { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; max-height: 160px; overflow: auto; font-size: 12.5px; }
+.vlog b { color: var(--muted); font-weight: 600; }
+#voiceCard .row input:not([type]) { flex: 1; min-width: 0; }

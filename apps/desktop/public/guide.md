@@ -32,7 +32,9 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > camera, memory, Wi-Fi, sensors, each side of wheels — with the likely cause and a one-click fix), firmware **over Wi-Fi**
 > with **undo**, a **practice car** (simulator) to try everything without hardware, the **robot passport** (what changed and
 > what the checks found), a 🎯 **calibration wizard** (gyro, motor dead zone, straight driving, real speed, laser, turns,
-> camera), and the AI tools robot_settings, robot_diagnose and board_pins (sections 3.4.2 – 3.4.5).
+> camera), 🔧 **Board & parts** (pins of 6 boards, parts library, wiring, starter code), smooth keyboard / controller
+> driving with a driving display, 🗣 **voice control and the robot's own voice**, Quest mini-map and haptics, and the AI
+> tools robot_settings, robot_diagnose, board_pins and robot_say (sections 3.4.2 – 3.4.7).
 >
 > **Muse Carpathron** is the open-source edition of this app (Meta AI hackathon). The same app is on the Microsoft
 > Store as *Carpathron Robotics & Coding*. It is made by **Qubitpage LIMITED** (qubitpage.com).
@@ -190,7 +192,7 @@ robot tools. Llama 3.1 8B cannot see, so a **vision model** looks at every photo
 
 ### 3.4.2 The Robot page: Control · Setup · Car settings · Health · Devices · Firmware studio
 
-- **🎮 Control** — drive (pad, W A S D), live video, look around, room map, Quest.
+- **🎮 Control** — drive, live video with the driving display, 🗣 voice, look around, room map, Quest (section 3.4.7).
 - **⚙ Setup** — car address, calibration (drive, turn, distance), **⬆ Car firmware** (check, build, flash over USB or
   Wi-Fi, undo — section 3.4.3), sensor mode and live sensor values.
 - **🛠 Car settings** — every setting of the car in groups (Motors, Driving and safety, Camera, Sensors, Light, Name and
@@ -317,6 +319,32 @@ setup lines for your board; **🤖 Ask Muse to write the firmware** hands the wi
 own wiring (from Car settings) is already in, and a free pin can be **tested on the car**: Read (a button or sensor output
 changes the level), HIGH / LOW for 3 s, Blink (an LED or buzzer on it shows the wire is right). Pins used by the motors or
 the sensors are refused.
+
+### 3.4.7 Driving, voice and the Quest
+
+**Keyboard** — **W / S** (or ↑ ↓) forward and back, **A / D** (or ← →) steer: while driving the car makes a curve (both
+sides keep turning), standing it pivots. **Q / E** spin on the spot, **Shift** full speed, **1 – 5** speed 20 – 100 %,
+**Space** stop. The car speeds up and slows down smoothly (no jerks). A **game controller** (Xbox / PlayStation) works too:
+left stick or the triggers drive, A = full speed, B / circle = stop.
+
+**Driving display** — over the live video: heading (a compass tape from the gyro), distance ahead (green → amber → red
+bar from the laser), Wi-Fi signal bars, "obstacle — forward is blocked", and both wheels' power. Switch it off under the
+video.
+
+**🗣 Voice** — hold **🎤 Hold to talk** and speak, or switch on **Hands-free** (it listens and sends each sentence). Short
+commands run at once without the AI: *"forward two seconds"*, *"back"*, *"turn right 90 degrees"*, *"look left"*,
+*"take a photo"*, *"scan the room"*, *"stop"*. Anything else goes to Muse, which drives the car and answers. Uses Muse
+Voice Transcribe (the Meta API key). Space and STOP always stop at once.
+
+**The robot's voice** — type a sentence (or pick a ready one) and the robot says it; Muse can also talk through the robot
+(*"say hello to the visitors"* → robot_say) and speak its answers to voice commands. It uses the voices of Windows (or of
+the phone), offline; pick the voice, speed and pitch. Every device with **This device is the robot's speaker** on speaks:
+open Muse Carpathron on a phone fixed on the car and the phone becomes the robot's **mouth** — with Hands-free on the
+phone, also its **ears**. The face next to the button moves its mouth while the robot talks.
+
+**Meta Quest** — the robot-eyes view now also shows the distance ahead, the heading and a round **mini-map** (your path in
+green, laser hits as orange dots, 4 m across), and the controllers **buzz** as an obstacle gets close while you drive
+forward (strongly when the car refuses to go on).
 
 ### 3.5 Faster agent: only the tools a chat needs
 

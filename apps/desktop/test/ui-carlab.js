@@ -54,6 +54,26 @@ const { chromium } = require(process.env.PW || 'playwright');
   await p.waitForFunction(() => /✓|⚠|✕/.test(document.querySelector('.cal-step .cal-res').textContent), null, { timeout: 15000 });
   const calText = await p.locator('.cal-step .cal-res').first().textContent();
   await p.locator('.cal-card').screenshot({ path: `${out}/6-calibration.png` });
+  // Control: smooth keyboard driving, driving display, voice card
+  await p.evaluate(() => window.MCui.openRobot('control'));
+  await p.waitForTimeout(1500);
+  const pose0 = await p.evaluate(async (t) => (await (await fetch('/api/robot/car/practice', { headers: { 'x-mc-token': t } })).json()).pose, srv.token);
+  await p.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => {});
+  await p.keyboard.down('w'); await p.waitForTimeout(1200); await p.keyboard.up('w');
+  await p.waitForTimeout(400);
+  const pose1 = await p.evaluate(async (t) => (await (await fetch('/api/robot/car/practice', { headers: { 'x-mc-token': t } })).json()).pose, srv.token);
+  await p.keyboard.down('e'); await p.waitForTimeout(500); await p.keyboard.up('e');
+  await p.waitForTimeout(1500);
+  const hudText = await p.locator('#hud').textContent();
+  await p.evaluate(() => window.MCvoice.say('Hello test', 'test'));
+  const voiceOk = await p.locator('#voiceCard').textContent();
+  await p.screenshot({ path: `${out}/0-control.png`, fullPage: true });
+  await p.locator('#liveCard').screenshot({ path: `${out}/0b-hud.png` }).catch(() => {});
+  await p.locator('#voiceCard').screenshot({ path: `${out}/0c-voice.png` });
+  const moved = Math.hypot(pose1.x - pose0.x, pose1.y - pose0.y);
+  const ctlOk = moved > 10 && /cm|clear/.test(hudText) && /Hold to talk/.test(voiceOk) && /Hello test/.test(voiceOk);
+  console.log(JSON.stringify({ moved, hud: hudText.replace(/\s+/g, ' ').slice(-80), ctlOk }));
+
   // Board & parts
   await p.evaluate(() => window.MCui.openRobot('parts'));
   await p.waitForSelector('#robotParts .board-svg');
@@ -90,5 +110,5 @@ const { chromium } = require(process.env.PW || 'playwright');
   const partsOk = /used by the motors/.test(pinRead) && wires >= 6 && /SERVO|SG90/.test(code) && /Wire.begin\(/.test(code);
   console.log(JSON.stringify({ pinRead: pinRead.slice(0, 160), wires, partsOk }));
   console.log(JSON.stringify({ out, errs, err, disabled, saved, fixBtns, problemsAfterFix: after, calText }));
-  await b.close(); await srv.close(); process.exit(errs.length || !err || !disabled || saved !== 250 || !fixBtns || after || !/✓/.test(calText) || !partsOk ? 1 : 0);
+  await b.close(); await srv.close(); process.exit(errs.length || !err || !disabled || saved !== 250 || !fixBtns || after || !/✓/.test(calText) || !partsOk || !ctlOk ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

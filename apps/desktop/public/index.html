@@ -182,14 +182,23 @@
             <div class="motors">
               <div class="motor"><span>L</span><div class="bar"><div id="barL"></div></div><em id="valL">0</em></div>
               <div class="motor"><span>R</span><div class="bar"><div id="barR"></div></div><em id="valR">0</em></div>
-              <div class="muted small">source: <b id="motorSrc">idle</b> · keys W A S D · Space = stop</div>
+              <div class="muted small">source: <b id="motorSrc">idle</b> · <b>W A S D</b> drive and steer · <b>Q E</b> spin · <b>Shift</b> full speed · <b>1–5</b> speed · <b>Space</b> stop · a game controller works too</div>
             </div>
             <form class="row" id="carForm"><input id="carIp" placeholder="Car IP (empty = simulation)"><button class="btn">Save</button></form>
             <button class="btn" id="btnFindCar" type="button">🔍 Find my car</button> <span class="muted small" id="findInfo"></span>
           </div>
           <div class="card" id="liveCard" hidden>
             <h3>Live video from the car</h3>
-            <img id="carVideo" class="cam-preview" alt="car camera">
+            <div class="video-wrap"><img id="carVideo" class="cam-preview" alt="car camera">
+              <div class="hud" id="hud" aria-live="off">
+                <div class="hud-top"><span id="hudHead" class="hud-chip">—</span><span id="hudLink" class="hud-chip">—</span></div>
+                <div class="hud-compass"><div id="hudTape"></div><span class="hud-mark"></span></div>
+                <div class="hud-dist"><div class="hud-dist-bar"><div id="hudDistFill"></div></div><span id="hudDist">—</span></div>
+                <div class="hud-block" id="hudBlock" hidden>⛔ Obstacle — forward is blocked</div>
+                <div class="hud-motors"><div class="hud-m"><div id="hudL"></div></div><div class="hud-m"><div id="hudR"></div></div></div>
+              </div>
+            </div>
+            <label class="toggle small"><input type="checkbox" id="hudOn" checked> <span>Driving display (heading, distance ahead, Wi-Fi, wheels)</span></label>
             <label class="speed"><span>Headlight</span><input type="range" id="carLed" min="0" max="255" value="0"></label>
           </div>
           <div class="card">
@@ -201,6 +210,7 @@
             <img id="camPreview" class="cam-preview" alt="" hidden>
             <div class="muted small" id="camInfo"></div>
           </div>
+          <div class="card" id="voiceCard"></div>
           <div class="card" id="headCard">
             <h3>Robot head &amp; room map</h3>
             <p class="muted small">The camera is fixed to the car, so the car turns its body to look (like a robot), takes the photo and turns back. A room scan turns a full circle, photographs every side and draws a map.</p>
@@ -268,5 +278,6 @@
   <script src="shield.js"></script>
     <script src="studio.js"></script>
     <script src="robotlab.js"></script>
+    <script src="robotvoice.js"></script>
 </body>
 </html>

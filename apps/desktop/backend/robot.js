@@ -127,6 +127,7 @@ class Robot {
     const s = await this.sensors();
     if (!s || !s.imu) return null;
     this.cancelPlan('gyro turn');
+    this.stopTicks = 10; // no more repeated stops from the last drive: they would cancel the car's own turn
     const start = await carGet(this.ip, `/turn?deg=${Math.round(deg)}&speed=${Math.round(speed)}`, 2000).then((b) => JSON.parse(b)).catch(() => null);
     if (!start || !start.ok) return null;
     const t0 = Date.now();
@@ -194,6 +195,7 @@ class Robot {
     else next = { left: 0, right: 0, source: 'idle' };
     this._send(Math.round(next.left), Math.round(next.right));
     this._odometry(next);
+    if (this.onCommand) try { this.onCommand(Math.round(next.left), Math.round(next.right), next.source); } catch {} // teach & repeat
     const c = this.current;
     this.current = next;
     if (next.left !== c.left || next.right !== c.right || next.source !== c.source) this.emit('robot:motors', next);

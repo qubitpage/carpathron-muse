@@ -86,6 +86,22 @@ const { chromium } = require(process.env.PW || 'playwright');
   const ctlOk = /Point:/.test(pickText) && /laser outline/.test(mapText) && moved > 10 && /cm|clear/.test(hudText) && /Hold to talk/.test(voiceOk) && /Hello test/.test(voiceOk);
   console.log(JSON.stringify({ moved, hud: hudText.replace(/\s+/g, ' ').slice(-80), ctlOk }));
 
+  // Blocks: run the starter mission on the practice car, then firmware blocks → Arduino code
+  await p.evaluate(() => window.MCui.openRobot('blocks'));
+  await p.waitForSelector('#robotBlocks .blocklySvg', { timeout: 15000 });
+  await p.waitForTimeout(500);
+  await p.screenshot({ path: `${out}/b1-mission.png`, fullPage: true });
+  await p.click('#robotBlocks button:has-text("▶ Run")');
+  await p.waitForFunction(() => /finished|stopped|✕/.test(document.querySelector('#robotBlocks .blk-log').textContent), null, { timeout: 60000 });
+  const missionLog = await p.locator('#robotBlocks .blk-log').textContent();
+  await p.click('#robotBlocks .seg button:has-text("Firmware")');
+  await p.waitForSelector('#robotBlocks .blk-code', { timeout: 10000 });
+  await p.waitForTimeout(800);
+  const fwCode = await p.locator('#robotBlocks .blk-code').textContent();
+  await p.screenshot({ path: `${out}/b2-firmware.png`, fullPage: true });
+  const blocksOk = /finished/.test(missionLog) && /digitalWrite\(2, HIGH\)/.test(fwCode) && /void loop\(\)/.test(fwCode) && /pinMode\(2, OUTPUT\)/.test(fwCode);
+  console.log(JSON.stringify({ missionLog: missionLog.slice(0, 200), blocksOk }));
+
   // Board & parts
   await p.evaluate(() => window.MCui.openRobot('parts'));
   await p.waitForSelector('#robotParts .board-svg');
@@ -121,6 +137,27 @@ const { chromium } = require(process.env.PW || 'playwright');
   await p.locator('#robotParts .board-card').screenshot({ path: `${out}/9b-uno.png` });
   const partsOk = /used by the motors/.test(pinRead) && wires >= 6 && /SERVO|SG90/.test(code) && /Wire.begin\(/.test(code);
   console.log(JSON.stringify({ pinRead: pinRead.slice(0, 160), wires, partsOk }));
+  // Firmware studio: colours, pin check before upload, autocomplete, plotter tab
+  await p.evaluate(async (t) => {
+    const H = { 'x-mc-token': t, 'Content-Type': 'application/json' };
+    await fetch('/api/studio/new', { method: 'POST', headers: H, body: JSON.stringify({ name: 'pintest', template: 'blink', fqbn: 'esp32:esp32:esp32cam' }) });
+    await fetch('/api/studio/file', { method: 'POST', headers: H, body: JSON.stringify({ project: 'pintest', name: 'pintest.ino', content: '#define LED 16\n// PSRAM pin!\nvoid setup() { pinMode(LED, OUTPUT); }\nvoid loop() { digitalWrite(LED, HIGH); delay(500); }\n' }) });
+  }, srv.token);
+  await p.evaluate(() => window.MCstudio.openStudio({ project: 'pintest', fqbn: 'esp32:esp32:esp32cam' }));
+  await p.waitForSelector('#robotStudio .studio-hl .k', { timeout: 10000 });
+  await p.click('#robotStudio button:has-text("⬆ Upload")');
+  await p.waitForTimeout(800);
+  const pinNote = await p.locator('#robotStudio .studio-pins').textContent();
+  await p.click('#robotStudio .studio-editor');
+  await p.keyboard.press('Control+End'); await p.keyboard.type('\npinM');
+  await p.waitForTimeout(300);
+  const sugText = await p.locator('#robotStudio .studio-sug').textContent();
+  await p.screenshot({ path: `${out}/s1-studio.png`, fullPage: true });
+  await p.click('#robotStudio .seg button:has-text("Plotter")');
+  await p.waitForTimeout(300);
+  const plotShown = await p.locator('#robotStudio .studio-plot').isVisible();
+  const studioOk = /GPIO 16/.test(pinNote) && /PSRAM/.test(pinNote) && /pinMode/.test(sugText) && plotShown;
+  console.log(JSON.stringify({ pinNote: pinNote.slice(0, 160), sugText, plotShown, studioOk }));
   console.log(JSON.stringify({ out, errs, err, disabled, saved, fixBtns, problemsAfterFix: after, calText }));
-  await b.close(); await srv.close(); process.exit(errs.length || !err || !disabled || saved !== 250 || !fixBtns || after || !/✓/.test(calText) || !partsOk || !ctlOk ? 1 : 0);
+  await b.close(); await srv.close(); process.exit(errs.length || !err || !disabled || saved !== 250 || !fixBtns || after || !/✓/.test(calText) || !partsOk || !ctlOk || !blocksOk || !studioOk ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

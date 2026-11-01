@@ -158,7 +158,7 @@ const pico = {
 };
 
 const BOARDS = { esp32cam, esp32devkit, xiaoesp32s3: esp32s3, uno, mega2560, pico };
-const byFqbn = (fqbn) => Object.values(BOARDS).find((b) => b.fqbn === fqbn) || null;
+const byFqbn = (fqbn) => { const base = String(fqbn || '').split(':').slice(0, 3).join(':'); return Object.values(BOARDS).find((b) => b.fqbn === base) || null; };
 const pinOf = (board, gpio) => (board.pins || []).find((p) => p.gpio === Number(gpio)) || null;
 
 // Check a set of pin assignments { name: gpio } against a board.
@@ -174,7 +174,8 @@ function checkPins(board, assign, { needs = {} } = {}) {
     seen.set(Number(gpio), name);
     if (p.level === 'error') { out.push({ level: 'error', name, gpio, message: `${p.label}: ${p.note || 'reserved by the board.'}` }); continue; }
     const need = needs[name];
-    if (need && !(p.caps || []).includes(need)) out.push({ level: 'error', name, gpio, message: `${p.label} cannot do ${({ out: 'output', pwm: 'PWM', adc: 'analog input', i2c: 'I2C', in: 'input' })[need] || need}.` });
+    if (need === 'adc' && (p.caps || []).includes('adc2') && !(p.caps || []).includes('adc')) out.push({ level: 'warn', name, gpio, message: `${p.label} reads analog values only while Wi-Fi is off (ADC2). With Wi-Fi use GPIO 32–39.` });
+    else if (need && !(p.caps || []).includes(need)) out.push({ level: 'error', name, gpio, message: `${p.label} cannot do ${({ out: 'output', pwm: 'PWM', adc: 'analog input', i2c: 'I2C', in: 'input' })[need] || need}.` });
     else if (p.level === 'warn') out.push({ level: 'warn', name, gpio, message: `${p.label}: ${p.note}` });
   }
   return out;
@@ -185,4 +186,29 @@ Object.assign(BOARDS.esp32devkit, { i2c: { sda: 21, scl: 22 } }); Object.assign(
 Object.assign(BOARDS.uno, { i2c: { sda: 18, scl: 19 } }); Object.assign(BOARDS.mega2560, { i2c: { sda: 20, scl: 21 } }); Object.assign(BOARDS.pico, { i2c: { sda: 4, scl: 5 } });
 Object.assign(BOARDS.esp32cam, { i2c: { sda: 3, scl: 1 } });
 
-module.exports = { BOARDS, byFqbn, pinOf, checkPins };
+// Pins a sketch uses: pinMode / digitalWrite / analogRead / analogWrite / tone / attach / Wire.begin(sda, scl) with a
+// number or a #define / const int name. → { name: gpio } plus what each pin must be able to do.
+function pinsInCode(text) {
+  const src = String(text || '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const names = {};
+  for (const m of src.matchAll(/#define\s+(\w+)\s+(\d+)\b/g)) names[m[1]] = Number(m[2]);
+  for (const m of src.matchAll(/\b(?:const\s+|constexpr\s+|static\s+)*(?:int|uint8_t|byte|unsigned|uint16_t|int8_t)\s+(\w+)\s*=\s*(\d+)\s*;/g)) if (!(m[1] in names)) names[m[1]] = Number(m[2]);
+  const val = (t) => (/^\d+$/.test(t) ? Number(t) : t in names ? names[t] : null);
+  const NEED = { pinMode: null, digitalWrite: 'out', digitalRead: 'in', analogWrite: 'pwm', analogRead: 'adc', tone: 'out', attach: 'pwm', ledcAttachPin: 'pwm', ledcAttach: 'pwm' };
+  const assign = {}, needs = {}, seen = {};
+  const add = (gpio, label, need) => {
+    if (gpio == null || Number.isNaN(gpio)) return;
+    let key = seen[gpio];
+    if (!key) { key = `${label}`; let i = 2; while (key in assign) key = `${label}#${i++}`; seen[gpio] = key; assign[key] = gpio; }
+    if (need && (!needs[key] || need === 'adc' || need === 'pwm')) needs[key] = need;
+  };
+  for (const m of src.matchAll(/\b(pinMode|digitalWrite|digitalRead|analogWrite|analogRead|tone|ledcAttachPin|ledcAttach|\.attach)\s*\(\s*([A-Za-z_]\w*|\d+)\s*(?:,\s*(OUTPUT|INPUT|INPUT_PULLUP)?)?/g)) {
+    const fn = m[1].replace('.', ''), g = val(m[2]);
+    const need = fn === 'pinMode' ? (m[3] === 'OUTPUT' ? 'out' : 'in') : NEED[fn];
+    add(g, /^\d+$/.test(m[2]) ? `${fn}(${m[2]})` : m[2], need);
+  }
+  for (const m of src.matchAll(/Wire\d?\.begin\s*\(\s*([A-Za-z_]\w*|\d+)\s*,\s*([A-Za-z_]\w*|\d+)/g)) { add(val(m[1]), 'I2C SDA', 'i2c'); add(val(m[2]), 'I2C SCL', 'i2c'); }
+  return { assign, needs };
+}
+
+module.exports = { BOARDS, byFqbn, pinOf, checkPins, pinsInCode };

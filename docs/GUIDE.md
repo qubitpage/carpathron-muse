@@ -34,7 +34,8 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > what the checks found), a 🎯 **calibration wizard** (gyro, motor dead zone, straight driving, real speed, laser, turns,
 > camera), 🔧 **Board & parts** (pins of 6 boards, parts library, wiring, starter code), smooth keyboard / controller
 > driving with a driving display, 🗣 **voice control and the robot's own voice**, a 🧊 **3D plan view** with laser room
-> outlines and *Go there*, Quest mini-map and haptics, and the AI
+> outlines and *Go there*, 🧱 **Blocks** (missions, teach & repeat, firmware from blocks), ✅ *Make my robot ready*, a Firmware
+> studio with colours, suggestions, a pin check before upload, a serial plotter and libraries, Quest mini-map and haptics, and the AI
 > tools robot_settings, robot_diagnose, board_pins and robot_say (sections 3.4.2 – 3.4.7).
 >
 > **Muse Carpathron** is the open-source edition of this app (Meta AI hackathon). The same app is on the Microsoft
@@ -199,6 +200,8 @@ robot tools. Llama 3.1 8B cannot see, so a **vision model** looks at every photo
 - **🛠 Car settings** — every setting of the car in groups (Motors, Driving and safety, Camera, Sensors, Light, Name and
   hotspot), each with a plain explanation, its range and default (section 3.4.4).
 - **🩺 Health & calibration** — the car tests itself and Muse explains the result; the calibration wizard (section 3.4.5).
+- **🧱 Blocks** — programming with blocks for beginners: missions that drive the car, firmware for a board, teach &
+  repeat (section 3.4.8).
 - **🔧 Board & parts** — what every pin of a board can do, your robot's parts with their wiring, starter code (section 3.4.6).
 - **🔌 Devices** — what is connected, found by itself: boards on USB by their chip (ESP32 / ESP32-CAM with CH340 or CP210x,
   Arduino Uno / Nano / Mega / R4, Raspberry Pi Pico — also in BOOTSEL or MicroPython —, STM32, Teensy, Jetson on USB) and
@@ -359,6 +362,34 @@ outline, the named objects with their position in metres, the photos).
 **Meta Quest** — the robot-eyes view now also shows the distance ahead, the heading and a round **mini-map** (your path in
 green, laser hits as orange dots, 4 m across), and the controllers **buzz** as an obstacle gets close while you drive
 forward (strongly when the car refuses to go on).
+
+### 3.4.8 Blocks, missions and the Firmware studio
+
+Robot → **🧱 Blocks** — snap blocks together instead of typing code (Blockly, the same blocks as Scratch-style lessons).
+
+- **🚗 Mission** — blocks that drive the car now: *drive forward 30 cm*, *turn right 90 degrees*, *set speed*, *wait*,
+  *repeat 4 times*, *while / if the distance ahead is less than 30 cm*, *something blocks the way*, *say …*, *take a photo*,
+  *look left*, *scan the room*, *go to the door*, *headlight*. **▶ Run** does them one after another (the car still stops by
+  itself before obstacles; **■ Stop** or Space stops at once). **💾 Save** keeps a mission to run again. Missions are plain
+  lists of steps (never code), at most 600 steps and 10 minutes.
+- **⏺ Teach & repeat** — press *Teach by driving*, drive the car by hand on the Control tab (keys, pad or controller), press
+  again: the drive is saved as a mission and the car repeats it with ▶.
+- **🔌 Firmware** — blocks that become Arduino C++ for a board you pick (ESP32 DevKit, ESP32-CAM, XIAO ESP32S3, Uno, Mega,
+  Pico): *pin is an output*, *set pin HIGH*, *power 0–255*, *pin is HIGH*, *analog value*, *wait ms*, *print*, *servo to
+  90°*, *beep*, if / repeat / while, maths and variables. The code appears live next to the blocks and its pins are checked
+  for the board. **🧩 Open in Firmware studio** makes it a project you can compile and upload.
+
+**✅ Make my robot ready** (Health & calibration tab) — one button checks the connection, the firmware (newer one bundled?),
+Wi-Fi updates, the health of every part, the optional sensors, whether the calibration was done and whether there is a
+room map, each with the next thing to do.
+
+**Firmware studio upgrades** — the code is in colour (comments, text, numbers, keywords, Arduino functions);
+**suggestions** appear while you type (or Ctrl+Space: Arduino / ESP32 functions with their arguments and the names in your
+file; ↑ ↓ Enter / Tab to pick). **Before every upload the pins are checked** for the board (from pinMode / digitalWrite /
+analogRead / analogWrite / tone / attach / Wire.begin and #define / const int names): a pin the board cannot use stops the
+upload once with the reason (press Upload again to upload anyway); boot pins and analog pins that do not work with Wi-Fi get
+a warning. **📈 Plotter** draws the numbers the board prints on the serial port as lines (e.g. `Serial.println(analogRead(34));`
+or `temp:21.5 hum:40`). **📚 Libraries** searches and installs Arduino libraries (arduino-cli).
 
 ### 3.5 Faster agent: only the tools a chat needs
 

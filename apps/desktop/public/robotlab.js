@@ -258,6 +258,24 @@
     const btnA = h('button', { class: 'btn primary', onclick: () => run(false) }, '🩺 Check the car');
     const btnB = h('button', { class: 'btn', onclick: () => run(true) }, '🛞 Check + test the wheels');
     const calCard = h('div', { class: 'card cal-card' });
+    const readyCard = h('div', { class: 'card ready-card' });
+    const drawReady = async () => {
+      readyCard.innerHTML = '';
+      readyCard.append(h('h3', {}, '✅ Make my robot ready'), h('p', { class: 'small muted' }, 'One look at everything: connection, firmware, Wi-Fi updates, the health of every part, calibration and the room map — with the next thing to do.'));
+      const go = h('button', { class: 'btn primary', onclick: async () => {
+        go.disabled = true; go.textContent = 'Checking…';
+        const r = await api('/api/robot/ready').catch((e) => ({ items: [{ status: 'bad', title: e.message }] }));
+        go.disabled = false; go.textContent = '↻ Check again';
+        list.innerHTML = '';
+        list.append(h('div', { class: `health-sum ${r.ready ? 'ok' : 'warn'}` }, h('b', {}, r.ready ? '✅ Your robot is ready!' : '👉 A few things to do')));
+        for (const it of r.items) list.append(h('div', { class: `health-item ${it.status}` }, h('span', { class: 'h-ico' }, ICON[it.status]), h('div', { class: 'grow' }, h('b', {}, it.title), it.detail ? h('div', { class: 'small muted' }, it.detail) : null),
+          it.action ? h('button', { class: 'btn tiny', onclick: () => ui().openRobot(it.action.tab) }, `${it.action.label} →`) : null));
+      } }, '▶ Check my robot');
+      const list = h('div', { class: 'health-list' });
+      readyCard.append(go, list);
+    };
+    drawReady();
+    el.append(readyCard);
     el.append(h('p', { class: 'small muted settings-intro' }, 'The car tests its own parts and Muse explains the result: camera, memory, Wi-Fi, the sensor bus, the laser, the gyro and — if you allow it — each side of wheels. Give the car about 30 cm of free space (or lift it) for the wheel test.'),
       practiceStrip(() => {}), h('div', { class: 'row' }, btnA, btnB), out, calCard, hist);
     drawCalibration(calCard, drawHistory);

@@ -177,6 +177,8 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   const agent = new Agent({ store, robot, mcp, emit, log: logFn, memory, projects, skills, camera, remote, jobs, dataDir, github });
   const carsettings = require('./carsettings');
   const boards = require('./boards');
+  const { Missions } = require('./missions');
+  let missions = null; // made after the mapper
   let calibrating = false;
   let practice = null; // the practice car (simulator), started from Robot → Setup
   const carHistory = { // robot passport: what changed on the car and what the health checks found
@@ -185,6 +187,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     add(e) { const l = this.read(); l.push({ at: new Date().toISOString(), ...e }); try { fs.writeFileSync(this.f, JSON.stringify(l.slice(-300), null, 1)); } catch {} },
   };
   const mapper = new Mapper({ robot, camera, api: agent.api, memory, getSettings: () => store.settings, emit, log: logFn });
+  missions = new Missions({ robot, mapper, camera, emit, log: logFn, getSettings: () => store.settings });
   agent.mapper = mapper;
   const shield = new Shield({ store, remote, log: logFn, emit, dataDir });
   agent.shield = shield;
@@ -782,6 +785,26 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
           return send(res, 200, r);
         }
         if (p === '/api/studio/cancel') return send(res, 200, { cancelled: studio.cancel() });
+        if (p === '/api/studio/pincheck') {
+          const B = require('./boards'); const board = B.byFqbn(b.fqbn);
+          if (!board) return send(res, 200, { board: null, problems: [], note: 'No pin profile for this board (profiles: ESP32-CAM, ESP32 DevKit, XIAO ESP32S3, Uno, Mega, Pico).' });
+          let text = ''; for (const f of studio.files(b.project)) text += `\n${studio.file(b.project, f.name)}`;
+          const { assign, needs } = B.pinsInCode(text);
+          return send(res, 200, { board: board.name, pins: assign, problems: B.checkPins(board, assign, { needs }) });
+        }
+        if (p === '/api/studio/libs') {
+          const r = await runProc(studio.cli(), ['lib', 'search', String(b.q || '').slice(0, 60), '--format', 'json'], { timeoutMs: 120000 });
+          let libs = []; try { const j = JSON.parse(r.out); libs = (j.libraries || j || []).slice(0, 30).map((l) => { const rel = l.latest || (l.releases && Object.values(l.releases).pop()) || {}; return { name: l.name, version: rel.version || '', author: rel.author || '', sentence: rel.sentence || '' }; }); } catch {}
+          const inst = await runProc(studio.cli(), ['lib', 'list', '--format', 'json'], { timeoutMs: 60000 });
+          let installed = []; try { const j = JSON.parse(inst.out); installed = (j.installed_libraries || j || []).map((x) => (x.library || x).name); } catch {}
+          return send(res, 200, { libs, installed });
+        }
+        if (p === '/api/studio/libinstall') {
+          const name = String(b.name || '').trim();
+          if (!/^[\w .+\-]{1,80}$/.test(name)) return send(res, 200, { error: 'bad library name' });
+          const r = await runProc(studio.cli(), ['lib', 'install', name], { timeoutMs: 300000 });
+          return send(res, 200, { ok: r.code === 0, out: r.out.slice(-2000) });
+        }
         if (p === '/api/studio/serial') {
           if (b.action === 'start') return send(res, 200, studio.serialStart(b.port, b.baud));
           if (b.action === 'send') return send(res, 200, studio.serialSend(String(b.text || '')));
@@ -866,6 +889,36 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       all[b.board] = { parts: (Array.isArray(b.parts) ? b.parts : []).slice(0, 40).map((x) => ({ id: String(x.id || '').slice(0, 24), name: String(x.name || '').slice(0, 60), part: String(x.part || ''), assign: Object.fromEntries(Object.entries(x.assign || {}).map(([k, v]) => [String(k).slice(0, 12), Number(v)])) })), at: Date.now() };
       fs.writeFileSync(f, JSON.stringify(all, null, 1));
       return send(res, 200, { ok: true });
+    }
+    // Make my robot ready: one look at everything (connection, firmware, Wi-Fi updates, health, calibration, map)
+    if (p === '/api/robot/ready' && m === 'GET') {
+      const items = [], add = (id, status, title, detail, action) => items.push({ id, status, title, detail, action: action || null });
+      const ip = String((store.settings.robot || {}).carIp || '').trim(), st0 = robot.status();
+      if (!ip) { add('connect', 'bad', 'No car address yet', 'Find the car on your Wi-Fi, or try everything on the practice car.', { tab: 'setup', label: 'Find my car' }); return send(res, 200, { items, ready: false }); }
+      if (st0.state !== 'online') { add('connect', 'bad', `The car does not answer at ${ip}`, 'Switch it on; it must be on the same Wi-Fi as this PC.', { tab: 'setup', label: 'Find my car' }); return send(res, 200, { items, ready: false }); }
+      add('connect', 'ok', `Car online at ${ip}`, st0.rssi ? `Wi-Fi ${st0.rssi} dBm` : '');
+      const fwm = require('./firmware'); const bdir = fwm.bundledDir();
+      const bundled = bdir ? fwm.versionOf(fs.readFileSync(path.join(bdir, `${fwm.SKETCH}.ino`), 'utf8')) : null;
+      const carV = st0.version;
+      if (!carV || (bundled && fwm.cmpVersion(bundled, carV) > 0)) add('firmware', 'warn', `Firmware ${carV || 'older than 2.0'} — ${bundled} is available`, 'Car settings, the health check and Wi-Fi updates need the new firmware.', { tab: 'setup', label: 'Update the firmware' });
+      else add('firmware', 'ok', `Firmware ${carV} (newest)`, '');
+      const ota = await fwm.otaInfo(ip).catch(() => null);
+      if (ota && ota.ota && ota.keySet) add('ota', 'ok', 'Wi-Fi updates ready', ota.other && ota.other.valid ? 'Undo is possible.' : '');
+      else if (carV && fwm.cmpVersion(carV, '2.2.0') >= 0) add('ota', 'info', 'Wi-Fi updates not set up yet', 'Flash once over USB from this PC.', { tab: 'setup', label: 'Flash over USB' });
+      let health = null;
+      try { health = carsettings.health(await carsettings.runDiag(ip)); } catch {}
+      if (health) {
+        const bad = health.items.filter((x) => x.status === 'bad'), warn = health.items.filter((x) => x.status === 'warn');
+        add('health', bad.length ? 'bad' : warn.length ? 'warn' : 'ok', bad.length ? `Health: ${bad.map((x) => x.title).join(', ')}` : warn.length ? `Health: ${warn.length} thing(s) to check` : 'Health check: all parts work', [...bad, ...warn].map((x) => x.fix).filter(Boolean).slice(0, 2).join(' '), bad.length || warn.length ? { tab: 'health', label: 'Open the health check' } : null);
+        const sn = st0.sensors || {};
+        if (!sn.tof || !sn.imu) add('sensors', 'info', `Optional sensors: laser ${sn.tof ? '✓' : '—'} · gyro ${sn.imu ? '✓' : '—'}`, 'A VL53L0X and an MPU-6050 (≈ 20 lei) give the safety stop, exact turns, calibration and laser maps.', { tab: 'parts', label: 'See where they go' });
+      }
+      const hist = carHistory.read(), done = new Set(hist.filter((e) => e.kind === 'calibration' && e.ok).map((e) => e.step));
+      const want = ['deadzone', 'straight', 'turn'].filter((x) => !done.has(x));
+      add('calibration', want.length ? 'warn' : 'ok', want.length ? `Calibration not done: ${want.map((x) => ({ deadzone: 'lowest power', straight: 'drive straight', turn: 'exact turns' })[x]).join(', ')}` : 'Calibrated', want.length ? 'A few minutes, the car measures itself.' : '', want.length ? { tab: 'health', label: 'Calibrate' } : null);
+      const maps = mapper.list();
+      add('map', maps.length ? 'ok' : 'info', maps.length ? `Room map from ${maps[0].id.slice(0, 16).replace('T', ' ')}` : 'No room map yet', maps.length ? '' : 'The car photographs (and with the laser measures) all around and draws a map.', maps.length ? null : { tab: 'control', label: 'Scan the room' });
+      return send(res, 200, { items, ready: !items.some((x) => x.status === 'bad' || x.status === 'warn') });
     }
     // Car Settings + Health check (firmware 2.2): explained settings, checked before they are sent; the car's self-test
     if (p.startsWith('/api/robot/car/')) {
@@ -958,6 +1011,26 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       return send(res, 200, { ok: true, started: true });
     }
     if (p === '/api/robot/maps' && m === 'GET') return send(res, 200, mapper.list());
+    // Missions (blocks / teach & repeat)
+    if (p === '/api/robot/missions' && m === 'GET') return send(res, 200, { missions: missions.list(), running: !!missions.running, teaching: !!missions.teach });
+    if (p.startsWith('/api/robot/missions/') && m === 'POST') {
+      const what = p.slice('/api/robot/missions/'.length), b = await readJson(req);
+      try {
+        if (what === 'get') { const x = missions.get(b.name); return send(res, 200, x || { error: 'not found' }); }
+        if (what === 'save') return send(res, 200, { ok: true, mission: missions.save(b.name, { kind: 'blocks', program: b.program, blocks: b.blocks }) });
+        if (what === 'delete') return send(res, 200, missions.remove(b.name));
+        if (what === 'stop') return send(res, 200, missions.stop('STOP pressed'));
+        if (what === 'teach') return send(res, 200, b.action === 'start' ? missions.teachStart() : { ok: true, mission: missions.teachStop(b.name) });
+        if (what === 'run') {
+          const prog = b.program || (missions.get(b.name) || {}).program;
+          if (!prog) return send(res, 200, { error: 'Mission not found.' });
+          if (missions.running) return send(res, 200, { error: 'A mission is already running.' });
+          missions.run(prog, { name: b.name || 'mission' }).then((r) => emit('robot:mission', { done: true, ...r })).catch(() => {});
+          return send(res, 200, { ok: true, started: true });
+        }
+      } catch (e) { return send(res, 200, { error: e.message }); }
+      return send(res, 404, { error: 'not found' });
+    }
     if (p === '/api/robot/goto-point' && m === 'POST') {
       const b = await readJson(req);
       try { robot.stop('go there'); return send(res, 200, await mapper.gotoPoint(Number(b.x), Number(b.y), { source: 'plan view' })); } catch (e) { return send(res, 200, { error: e.message }); }

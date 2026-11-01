@@ -122,6 +122,7 @@
       case 'robot:status': case 'robot:motors': case 'robot:scan': case 'robot:map': window.MCRobot && window.MCRobot.onEvent(ev, d); break;
       case 'robot:firmware': window.MCfirmware && window.MCfirmware(d.text); break;
       case 'robot:say': window.MCvoice && window.MCvoice.say(d.text, d.by); break;
+      case 'robot:mission': window.MCblocks && window.MCblocks.onMission && window.MCblocks.onMission(d); break;
       case 'studio:log': case 'studio:serial': window.MCstudio && window.MCstudio.onEvent(ev, d); break;
       case 'avatar:link': avatarLinkPrompt(d); break;
       case 'remote:status': S.boot.servers = d; if (S.view === 'chat') renderHead(); if (S.view === 'remote') renderServerList(); window.MCShield && window.MCShield.onEvent(ev, d); break;
@@ -438,7 +439,7 @@
   // ---- Robot page tabs: Control (drive) · Setup (calibration, firmware) · Car settings · Health · Devices (discovery) · Firmware studio
   try { S.robotTab = localStorage.getItem('mc.robotTab') || 'control'; } catch { S.robotTab = 'control'; }
   function robotTab(id) {
-    if (!['control', 'setup', 'carset', 'health', 'parts', 'devices', 'studio'].includes(id)) id = 'control';
+    if (!['control', 'setup', 'carset', 'health', 'blocks', 'parts', 'devices', 'studio'].includes(id)) id = 'control';
     S.robotTab = id;
     try { localStorage.setItem('mc.robotTab', id); } catch {}
     $$('#robotTabs button').forEach((b) => { b.classList.toggle('on', b.dataset.rtab === id); b.setAttribute('aria-selected', b.dataset.rtab === id ? 'true' : 'false'); });
@@ -449,6 +450,7 @@
     if (id === 'carset' && window.MClab) window.MClab.renderSettings($('#robotCarset'));
     if (id === 'health' && window.MClab) window.MClab.renderHealth($('#robotHealth'));
     if (id === 'parts' && window.MClab) window.MClab.renderParts($('#robotParts'));
+    if (id === 'blocks' && window.MCblocks) window.MCblocks.render($('#robotBlocks'));
   }
   function openRobot(tab) { S.robotTab = tab; show('robot'); }
   $$('#robotTabs button').forEach((b) => { b.onclick = () => robotTab(b.dataset.rtab); });

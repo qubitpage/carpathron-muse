@@ -327,6 +327,46 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
     assert.ok(chk.problems.some((x) => x.level === 'error'));
     assert.ok((await api('/api/robot/car/practice', { stop: true })).ok);
   });
+  await step('missions: validation, run a blocks program on the practice car, stop, teach & repeat', async () => {
+    const { validate } = require('../backend/missions');
+    assert.throws(() => validate([{ op: 'rm -rf' }]), /Unknown step/);
+    assert.throws(() => validate([{ op: 'if', cond: { op: 'eval' }, then: [] }]), /Unknown condition/);
+    await api('/api/robot/car/practice', {});
+    for (let i = 0; i < 30 && (await api('/api/robot')).state !== 'online'; i++) await sleep(200);
+    const ready = await api('/api/robot/ready');
+    const it = (id) => ready.items.find((x) => x.id === id) || {};
+    assert.ok(it('connect').status === 'ok' && it('firmware').status === 'ok' && it('health').status === 'ok' && it('calibration').status === 'warn', JSON.stringify(ready.items));
+    const p0 = (await api('/api/robot/car/practice')).pose;
+    const prog = [{ op: 'say', text: 'Go' }, { op: 'repeat', n: 2, body: [{ op: 'forward', cm: 20 }, { op: 'turn', deg: 90 }] }, { op: 'if', cond: { op: 'dist_lt', cm: 500 }, then: [{ op: 'log', text: 'something ahead' }], else: [] }];
+    const r = await api('/api/robot/missions/run', { program: prog, name: 'test' });
+    assert.ok(r.started, JSON.stringify(r));
+    let busy = true; for (let i = 0; i < 80 && busy; i++) { await sleep(250); busy = (await api('/api/robot/missions')).running; }
+    assert.ok(!busy, 'mission finished');
+    const p1 = (await api('/api/robot/car/practice')).pose;
+    assert.ok(Math.hypot(p1.x - p0.x, p1.y - p0.y) > 15, `moved ${JSON.stringify([p0, p1])}`);
+    assert.ok(Math.abs(((p1.heading - p0.heading) % 360 + 360) % 360 - 180) < 12, `turned 180: ${p0.heading} → ${p1.heading}`);
+    // stop a long one
+    await api('/api/robot/missions/run', { program: [{ op: 'wait', s: 20 }], name: 'long' });
+    await sleep(300); await api('/api/robot/missions/stop', {});
+    busy = true; for (let i = 0; i < 20 && busy; i++) { await sleep(150); busy = (await api('/api/robot/missions')).running; }
+    assert.ok(!busy, 'stopped');
+    // save / list / delete
+    assert.ok((await api('/api/robot/missions/save', { name: 'Square', program: prog })).ok);
+    assert.ok((await api('/api/robot/missions')).missions.some((x) => x.name === 'Square' && x.steps >= 5));
+    // teach & repeat
+    await api('/api/robot/missions/teach', { action: 'start' });
+    await api('/api/robot/forward', { seconds: 1 });
+    await sleep(600);
+    const taught = await api('/api/robot/missions/teach', { action: 'stop', name: 'Taught one' });
+    assert.ok(taught.ok && taught.mission.program.some((x) => x.op === 'drive' && x.left > 0 && x.ms >= 700), JSON.stringify(taught));
+    const q0 = (await api('/api/robot/car/practice')).pose;
+    await api('/api/robot/missions/run', { name: 'Taught one' });
+    busy = true; for (let i = 0; i < 40 && busy; i++) { await sleep(200); busy = (await api('/api/robot/missions')).running; }
+    const q1 = (await api('/api/robot/car/practice')).pose;
+    assert.ok(Math.hypot(q1.x - q0.x, q1.y - q0.y) > 10, 'the taught drive was repeated');
+    await api('/api/robot/missions/delete', { name: 'Square' });
+    await api('/api/robot/car/practice', { stop: true });
+  });
   await srv.close();
   const failed = results.filter((r) => r[0] === 'FAIL');
   console.log(`\n${results.length - failed.length}/${results.length} passed`);

@@ -568,3 +568,34 @@ button.chip { cursor: pointer; }
 .plan3d { grid-column: 1 / -1; }
 .p3d-view { width: 100%; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); background: #0d0f12; touch-action: none; }
 .p3d-view canvas { display: block; }
+
+/* ---- Robot → Blocks */
+.blk-top { margin: 8px 4px; }
+.blk-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; align-items: start; }
+.blk-area { height: 600px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+.blk-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.blk-side h4 { margin: 10px 0 2px; font-size: 13px; }
+.blk-side .row input { flex: 1; min-width: 0; }
+.blk-code { max-height: 420px; overflow: auto; font-family: var(--mono); font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; white-space: pre; margin: 0; }
+.blk-log { max-height: 220px; overflow: auto; font-size: 12.5px; display: flex; flex-direction: column; gap: 2px; }
+.btn.stop { background: var(--danger); color: #fff; border-color: transparent; }
+.btn.rec { background: var(--danger); color: #fff; }
+.blocklyToolboxDiv { padding-top: 6px; }
+@media (max-width: 980px) { .blk-grid { grid-template-columns: 1fr; } .blk-area { height: 460px; } }
+
+/* ---- Firmware studio: colours, suggestions, pins, plotter */
+.studio-code { position: relative; }
+.studio-edwrap { position: relative; flex: 1; min-width: 0; overflow: hidden; }
+.studio-edwrap .studio-editor, .studio-hl { position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; margin: 0; padding: 10px 12px; font: 13px/18px var(--mono); tab-size: 2; white-space: pre; overflow: auto; border: 0; }
+.studio-hl { pointer-events: none; color: #e6e6e6; overflow: hidden; }
+.studio-edwrap .studio-editor { color: transparent; caret-color: #fff; background: transparent; z-index: 1; }
+.studio-edwrap .studio-editor::selection { background: rgba(79,140,255,.35); color: transparent; }
+.studio-hl .c { color: #6a7585; font-style: italic; } .studio-hl .s { color: #a5d6a7; } .studio-hl .p { color: #c792ea; } .studio-hl .n { color: #f78c6c; } .studio-hl .k { color: #82aaff; } .studio-hl .f { color: #ffcb6b; }
+.studio-sug { position: absolute; z-index: 5; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 8px; min-width: 200px; box-shadow: 0 6px 20px rgba(0,0,0,.4); font: 12.5px var(--mono); overflow: hidden; }
+.studio-sug div { padding: 4px 10px; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; }
+.studio-sug div.on { background: var(--accent); color: #fff; }
+.studio-sug span { color: var(--muted); font-size: 11px; } .studio-sug div.on span { color: #dfe8ff; }
+.studio-pins { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; white-space: pre-wrap; }
+.studio-plot { width: 100%; height: 220px; border-radius: 8px; border: 1px solid var(--line); display: block; }
+.libs .row input { flex: 1; }
+.libs .list { max-height: 50vh; overflow: auto; }

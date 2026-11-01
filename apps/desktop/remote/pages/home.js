@@ -24,6 +24,7 @@
     if (!typing) { $('#name').value = h.name || ''; $('#relay').value = s.relay || ''; $('#relay').placeholder = `Automatic (now ${s.relayNow})`; }
     $('#quality').value = s.quality; $('#autowrap').hidden = !s.standalone || s.store; $('#storeauto').hidden = !(s.standalone && s.store); $('#autostart').checked = !!s.autostart;
     $('#ver').textContent = `Version ${s.version}`;
+    $('#appver').textContent = s.app === 'Carpathron Remote' ? `Carpathron Remote ${s.version}` : `${s.app} ${s.version} · Carpathron Remote plugin`;
     $('#viewonly').checked = !!s.viewOnly; $('#clipsync').checked = s.clipSync !== false;
     const L = s.license || {}; const days = (t) => Math.max(0, Math.ceil((t - Date.now()) / 864e5));
     const day = (t) => new Date(t).toLocaleDateString();

@@ -275,6 +275,7 @@
       h('div', { class: e.api.hasKey ? 'ok' : e.muse.installed ? 'off' : 'warn', title: e.api.hasKey ? '' : 'Optional when Muse Code is installed (Settings → Meta Muse)' }, h('span', { class: 'dot' }), e.api.hasKey ? 'Meta API key set' : e.muse.installed ? 'Meta API key (optional)' : 'No Meta API key'),
       wa && (wa.personal.status !== 'off' || wa.cloud.status !== 'off') ? h('div', { class: wa.personal.status === 'connected' ? 'ok' : 'warn' }, h('span', { class: 'dot' }), `WhatsApp: ${wa.personal.status !== 'off' ? wa.personal.status : wa.cloud.status}`) : null,
     ].filter(Boolean));
+    el.append(h('div', { class: 'ver', title: 'The version you are running' }, `Muse Carpathron ${S.boot.version}`));
     if (!e.muse.installed && !e.api.hasKey) el.append(h('a', { href: '#', onclick: (ev) => { ev.preventDefault(); openSettings('models'); } }, 'Connect to Meta →'));
   }
 

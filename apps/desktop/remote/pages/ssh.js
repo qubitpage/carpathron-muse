@@ -110,4 +110,5 @@
   $('#conns').addEventListener('dblclick', (e) => { const d = e.target.closest('.conn'); if (d) openTab(d.dataset.id); });
   window.__ssh = { openTab, tabs };
   loadList();
+  rd.state().then((s) => { $('#appver').textContent = s.app === 'Carpathron Remote' ? `Carpathron Remote ${s.version}` : `${s.app} ${s.version}`; }).catch(() => {});
 })();

@@ -231,7 +231,7 @@ function publicState() {
     relay: isAuto() ? '' : S.relay, relayNow: relay(), quality: S.quality, autostart: S.autostart, viewOnly: !!S.viewOnly, clipSync: S.clipSync !== false, standalone: !!opts.standalone, store: !!process.windowsStore,
     license: licensePublic(),
     saved: (S.saved || []).map((c) => ({ id: c.id, idFmt: fmtId(c.id), name: c.name || '', last: c.last || 0, hasPw: !!c.pw })),
-    version: app.getVersion(),
+    version: app.getVersion(), app: opts.standalone ? 'Carpathron Remote' : opts.appName,
   };
 }
 function broadcastState() {

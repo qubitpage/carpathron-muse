@@ -13,6 +13,7 @@ const { WebSocketServer } = require('ws');
 const selfsigned = require('selfsigned');
 const { Store } = require('./store');
 const { Tts } = require('./tts');
+const { RoomMap } = require('./roommap');
 const { Robot } = require('./robot');
 const { Mapper } = require('./mapper');
 const { Vision } = require('./vision');
@@ -202,7 +203,15 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     add(e) { const l = this.read(); l.push({ at: new Date().toISOString(), ...e }); try { fs.writeFileSync(this.f, JSON.stringify(l.slice(-300), null, 1)); } catch {} },
   };
   const mapper = new Mapper({ robot, camera, api: agent.api, memory, getSettings: () => store.settings, emit, log: logFn });
+  const roommap = new RoomMap({ robot, mapper, getSettings: () => store.settings, emit, log: logFn });
+  // a room scan also teaches the room map: its laser sweep (from where the car stood) and the objects it named
+  agent.roommap = roommap;
+  mapper.onMap = (map) => {
+    if (map.sweep && map.pose) { for (const pt of map.sweep) roommap.grid.ray(map.pose.x, map.pose.y, (map.pose.heading || 0) + pt.deg, pt.m); roommap.dirty = true; }
+    roommap.addObjects(map.landmarks);
+  };
   missions = new Missions({ robot, mapper, camera, emit, log: logFn, getSettings: () => store.settings });
+  missions.roommap = roommap;
   agent.mapper = mapper;
   const shield = new Shield({ store, remote, log: logFn, emit, dataDir });
   agent.shield = shield;
@@ -1075,6 +1084,28 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       const b = await readJson(req);
       try { robot.stop('go there'); return send(res, 200, await mapper.gotoPoint(Number(b.x), Number(b.y), { source: 'plan view' })); } catch (e) { return send(res, 200, { error: e.message }); }
     }
+    // 🗺 Map: the room map the car learns, places, put the robot somewhere, go / patrol / explore
+    if (p === '/api/robot/roommap' && m === 'GET') return send(res, 200, roommap.view());
+    if (p.startsWith('/api/robot/roommap/') && m === 'POST') {
+      const what = p.slice('/api/robot/roommap/'.length), b = await readJson(req);
+      const bg = (job) => { job.then((r) => emit('robot:roommap', { result: r })).catch((e) => emit('robot:roommap', { result: { ok: false, text: e.message === 'stopped' ? 'Stopped.' : e.message } })); return send(res, 200, { ok: true, started: true }); };
+      try {
+        if (what === 'place') return send(res, 200, { ok: true, places: roommap.addPlace(b.name, b.x, b.y) });
+        if (what === 'unplace') return send(res, 200, { ok: true, places: roommap.removePlace(b.name) });
+        if (what === 'pose') return send(res, 200, { ok: true, pose: roommap.setPose(b.x, b.y, b.heading) });
+        if (what === 'plan') return send(res, 200, { ok: true, route: roommap.plan(b.x, b.y) });
+        if (what === 'reset') { roommap.reset(); return send(res, 200, { ok: true }); }
+        if (what === 'stop') { roommap.stop(); missions.stop('STOP pressed'); return send(res, 200, { ok: true }); }
+        mapper.needCar();
+        if (roommap.busy) return send(res, 200, { error: `The car is busy: ${roommap.busy}. Press ■ Stop first.` });
+        if (what === 'goto') { roommap.plan(b.x, b.y); return bg(roommap.goTo(b.x, b.y, b.label)); }
+        if (what === 'gotoplace') return bg(roommap.goToPlace(b.name));
+        if (what === 'patrol') return bg(roommap.patrol(b.points, b.loops));
+        if (what === 'measure') return bg(roommap.measureHere());
+        if (what === 'explore') return bg(roommap.explore(b.rounds));
+      } catch (e) { return send(res, 200, { error: e.message }); }
+      return send(res, 404, { error: 'not found' });
+    }
     if (p === '/api/robot/pose' && m === 'POST') { const b = await readJson(req); if (b.reset) robot.resetPose(); return send(res, 200, { ok: true, pose: robot.pose }); }
     if (p === '/api/avatar/decide' && m === 'POST') {
       const b = await readJson(req);
@@ -1302,6 +1333,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       server.close(); redirect.close();
       robot.close();
       tts.close();
+      roommap.close();
       if (practice) practice.close();
       shield.stopAll();
       remote.closeAll();

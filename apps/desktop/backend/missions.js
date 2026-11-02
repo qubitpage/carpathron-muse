@@ -92,6 +92,14 @@ class Missions {
         if (!this.mapper.goto) throw new Error('go to is not available');
         note(`Go to ${st.target}`); const r = await this.mapper.goto(String(st.target || ''), { source: 'mission' }); note(r && r.arrived ? `Arrived at ${st.target}` : `Did not reach ${st.target}`); return;
       }
+      case 'place': { // a place named on the room map (Robot → Map): plan a way around the known walls and drive there
+        if (!this.roommap) throw new Error('the room map is not available');
+        note(`Go to the place "${st.name}"`);
+        const p = this.roommap.places.find((q) => q.name.toLowerCase() === String(st.name || '').toLowerCase().trim()) || this.roommap.objects.find((q) => q.name.toLowerCase() === String(st.name || '').toLowerCase().trim());
+        if (!p) throw new Error(`No place called "${st.name}" on the room map.`);
+        this.roommap.stopFlag = false;
+        const r = await this.roommap.driveTo(p.x, p.y, p.name); note(r.text); return;
+      }
       case 'light': await this.robot.led(Math.max(0, Math.min(255, Number(st.v) || 0))).catch(() => {}); return;
       case 'repeat': { const n = Math.max(0, Math.min(100, Math.round(Number(st.n) || 0))); for (let i = 0; i < n && !ctx.abort; i++) await this.block(st.body, ctx); return; }
       case 'while': { let i = 0; while (!ctx.abort && (await this.cond(st.cond)) && i++ < 200) await this.block(st.body, ctx); return; }
@@ -144,7 +152,7 @@ class Missions {
 }
 const clamp = (v) => Math.max(-100, Math.min(100, Math.round(Number(v) || 0)));
 function count(p) { let n = 0; for (const s of p || []) { n++; n += count(s.body) + count(s.then) + count(s.else); } return n; }
-const OPS = new Set(['forward', 'back', 'turn', 'drive', 'wait', 'stop', 'speed', 'say', 'log', 'photo', 'look', 'scan', 'goto', 'light', 'repeat', 'while', 'if']);
+const OPS = new Set(['forward', 'back', 'turn', 'drive', 'wait', 'stop', 'speed', 'say', 'log', 'photo', 'look', 'scan', 'goto', 'place', 'light', 'repeat', 'while', 'if']);
 const COPS = new Set(['true', 'not', 'and', 'or', 'dist_lt', 'dist_gt', 'blocked']);
 function validate(p, depth = 0) {
   if (!Array.isArray(p)) throw new Error('A mission is a list of steps.');

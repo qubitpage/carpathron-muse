@@ -27,6 +27,11 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **1.9.9:** a **🗺 Map** tab: the car learns the room with its laser (an occupancy map in 3D), explores by itself,
+> and you put the robot on the map, name places and send it there — it plans a way around the walls (also by chat, voice
+> and a 🧱 step). **🧱 Blocks** redesigned as a clear step-by-step builder (no more blocks on top of each other), a nicer
+> Baby Carpathron and practice room in 3D, and layout fixes (text out of its box, the robot tabs in one row).
+>
 > **1.9.8:** easier to understand, better to look at and to hear. The robot has its **own voice** — an offline neural
 > voice made on your PC with a small-robot sound (pick *Bella — cute robot*, *Michael — WALL-E style workbot*, *Emma*,
 > *Sky* or the light *Kitten* voices; one download, then no internet needed), and its face moves its mouth with the sound.
@@ -375,13 +380,27 @@ the phone, with speed and pitch) is used. Every device with **This device is the
 open Muse Carpathron on a phone fixed on the car and the phone becomes the robot's **mouth** — with Hands-free on the
 phone, also its **ears**. The face next to the button opens its mouth with the loudness of the sound.
 
-**🧊 3D plan view** (Control tab) — the room as the car knows it: a floor grid in 1 m squares, the **laser outline** of the
-last room scan as low orange walls, the objects the camera named (orange pins = distance measured by the laser, purple =
-estimated from the photo) and the car where it is now with its path. Drag to turn the view, scroll to zoom. **Click the
-floor, then 🚗 Go there**: the car turns towards the point and drives there in short hops (the laser stops it before
-obstacles). The car's position comes from its wheels (calibrated speed) and its gyro, so it is right to about a tenth of
-the distance — **⌖ Car is here** puts it back to the centre. With the practice car the true virtual room is drawn faintly,
-so you can compare what the car mapped with reality.
+**🗺 Map** (its own tab) — the room the car has **learned with its laser**, in 3D: light tiles = floor it measured as
+free, orange blocks = walls and furniture the laser hit, dark = not seen yet. The car learns all the time while it
+drives (each laser reading says "free up to here, something solid there"), and on purpose with:
+
+- **🧭 Explore by itself** — measure all around, drive to the nearest unknown part, measure again (3, 6 or 10 spots);
+- **🔄 Measure all around here** — one slow turn measuring all the way round;
+- **📷 Scan with photos** — the camera also names what it sees (armchair, door…); they appear as purple flags.
+
+Choose what a click on the map does:
+- **🚗 Go here** — the car **plans a way around the walls it knows** (dashed yellow line) and drives it in short hops;
+  the laser still stops it before anything new, and then it looks for another way;
+- **📍 Robot is here** — if the robot on the map is not where the real one stands: click its spot, then where it looks;
+- **🚩 Name a place** — "door", "charger", "kitchen": then **▶ Go** in the list, *"go to the kitchen"* in chat or by voice
+  (robot_map), or the 🧱 step *Go to a place on the map*;
+- **🔁 Patrol points** — click 2 or more spots, then **▶ Start patrol** (1–20 rounds).
+
+**■ Stop** stops at once. Views: 🧊 3D (drag to turn, scroll to zoom), ⬇ From above, 🎥 Follow robot. With the practice
+car, *Show the practice room see-through* lets you compare what the car learned with the real virtual room. The map
+saves itself (workspace → `maps\room-map.json`); **🗑 Start a new map** keeps the old one as a file. It needs the laser
+(VL53L0X); the gyro (MPU-6050) makes positions much more exact. The car's position comes from its wheels and gyro, so
+after long drives use 📍 Robot is here to correct it.
 
 **Room scan with the laser** — with the laser + gyro on the car, *Scan the room* also turns once slowly while measuring all
 around (every 5°): the map gets the room's outline (orange on the 2D map, walls in 3D) and the objects get their distance
@@ -394,23 +413,25 @@ forward (strongly when the car refuses to go on).
 
 ### 3.4.8 Blocks, missions and the Firmware studio
 
-Robot → **🧱 Blocks** — snap blocks together instead of typing code. The blocks use everyday words, and next to them
-three tabs show **What it does** (the program told as a short story), **What to connect** (each part and the pin it goes
-to) and **The code** (with a comment on every line).
+Robot → **🧱 Blocks** — build a program **step by step**, in everyday words. Every step is one line that reads like a
+sentence ("Drive forward 40 cm", "Turn right by 90°", "Say Hello!"), and the steps run from top to bottom.
 
-- **🚗 Mission** — blocks that drive the car now: *drive forward 30 cm*, *turn right 90 degrees*, *set speed*, *wait*,
-  *repeat 4 times*, *while / if the distance ahead is less than 30 cm*, *something blocks the way*, *say …*, *take a photo*,
-  *look left*, *scan the room*, *go to the door*, *headlight*. **▶ Run** does them one after another (the car still stops by
-  itself before obstacles; **■ Stop** or Space stops at once). **💾 Save** keeps a mission to run again. Missions are plain
-  lists of steps (never code), at most 600 steps and 10 minutes.
-- **⏺ Teach & repeat** — press *Teach by driving*, drive the car by hand on the Control tab (keys, pad or controller), press
-  again: the drive is saved as a mission and the car repeats it with ▶.
-- **🔌 A program for a board** (ESP32 DevKit, ESP32-CAM, XIAO ESP32S3, Uno, Mega, Pico) — the big block reads *▶ At start,
-  once: … 🔁 Then forever: …*. Inside: *turn the light on pin 2 ON*, *dim the light to 50 %*, *when the button on pin 4 is
-  pressed*, *the sensor on pin 34 (0–100 %)*, *move the servo to 90°*, *beep*, *wait 1 second*, *repeat*, *if*, *show a
-  message on the PC*. **Examples** to start from: blink a light, light while a button is pressed, night light, sweep a
-  servo, beep. **Put it on the board…** opens it in the Firmware studio (and installs a needed library such as
-  ESP32Servo), ready for Upload.
+1. **Choose what to make**: 🚗 *Make the car do something* (a mission), or 🔌 *Program a board* (ESP32, Arduino, Pico).
+2. **Click an action on the left** (search box on top): it is added where the blue line *New steps go here* is. Click a
+   step to add the next ones after it; after *Repeat* or *If*, the next steps go inside it. Change the numbers and
+   choices right in the line. Hover a step for ▲ ▼ (move — also out of a Repeat), ⧉ (copy), ✕ (delete); drag it by its
+   number; ↶ Undo (Ctrl+Z) takes back the last changes.
+3. **Read the plan on the right** — "What the robot will do" in plain words, how long it takes — then **▶ Run on the
+   car** (■ Stop or Space stops at once; the running step is highlighted).
+
+Or start from an **example** (Drive a square, Patrol and avoid walls, Greeter, Little dance; for boards: Blink, Button
+lights the LED, Night light, Servo wave, Hello beeps). **💾 Save** keeps a mission; **⏺ Teach by driving** records a drive
+you do by hand so the car can repeat it. Missions can also *Go to a place on the map* (🗺 Map → 🚩 Name a place).
+
+For a board, the program has two parts — *▶ When the board switches on (once)* and *🔁 Then, again and again, forever* —
+and the right side shows **📖 What it does**, **🧰 What to connect** (each part, which pin, with a pin check for the
+board) and **💻 The code** (made for you, with a comment on every line). **⬆ Put it on the board…** opens it in the
+Firmware studio (and installs a needed library such as ESP32Servo): connect the board with USB and press ⬆ Upload.
 
 **✅ Make my robot ready** (Health & calibration tab) — one button checks the connection, the firmware (newer one bundled?),
 Wi-Fi updates, the health of every part, the optional sensors, whether the calibration was done and whether there is a

@@ -24,18 +24,25 @@ by Qubitpage LIMITED ([qubitpage.com/products](https://qubitpage.com/products/))
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.9.8-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.9.9-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.6.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.9.8) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. This hackathon edition does not update itself: install a newer build over the old one (chats and settings are kept). Portable: unzip and run `Carpathron.exe`. |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.9.9) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. This hackathon edition does not update itself: install a newer build over the old one (chats and settings are kept). Portable: unzip and run `Carpathron.exe`. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.6) | [**CarpathronAvatar-1.1.6.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) (also built into the app: Robot page → ⬆ Update car firmware) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 | 🖥 **Carpathron Remote** – the remote desktop app on its own (Windows, Linux) | [qubitpage.com/remote](https://qubitpage.com/remote/) | For PCs you want to reach or help that do not run Muse Carpathron. Same IDs and passwords. |
 
-All files of this version: **[Release v1.9.8](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.9.8)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.9.9](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.9.9)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+
+## What's new in 1.9.9 — the room map, and blocks you understand
+
+- **🗺 Map:** the car learns the room with its laser (an occupancy map, 5 cm squares, drawn in 3D: measured floor, walls and furniture, not seen yet). **Explore by itself**, measure all around, or scan with photos (the camera names objects). Put the robot where it really is, **name places** and click to send it: it **plans a way around the walls it knows** (A*) and drives it, re-planning when something new is in the way. Patrol between points. Also from chat and voice (*"go to the kitchen"*, tool robot_map) and as a 🧱 step.
+- **🧱 Blocks redesigned:** a clear step-by-step builder — every step is one line that reads like a sentence, click an action to add it, move / copy / delete / undo, a plain-English plan next to it. Nothing can overlap any more.
+- **Nicer 3D:** a new Baby Carpathron model (rounded body, glowing eyes, antenna) and a more furnished practice room.
+- **Fixes:** text that went out of its box (checkboxes in rows), the robot tabs in one compact row, gyro turns no longer cancelled right after connecting, the car's heading follows the gyro during its own turns, STOP also stops the car's own gyro turn.
 
 ## What's new in 1.9.8 — easier to understand, better to see and hear
 

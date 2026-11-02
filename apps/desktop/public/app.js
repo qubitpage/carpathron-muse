@@ -119,10 +119,11 @@
       case 'log': if (S.view === 'activity') { const pre = $('#techLog'); pre.textContent = `${new Date(d.ts).toLocaleTimeString()} ${d.text}\n` + pre.textContent.slice(0, 40000); } break;
       case 'camera:request': captureWebcam(d.id); break;
       case 'camera:photo': window.MCRobot && window.MCRobot.onPhoto && window.MCRobot.onPhoto(d); break;
-      case 'robot:status': case 'robot:motors': case 'robot:scan': case 'robot:map': window.MCRobot && window.MCRobot.onEvent(ev, d); break;
+      case 'robot:status': case 'robot:motors': case 'robot:scan': case 'robot:map': window.MCRobot && window.MCRobot.onEvent(ev, d); if (ev === 'robot:map' && window.MCroommap) window.MCroommap.onMap(d); break;
       case 'robot:firmware': window.MCfirmware && window.MCfirmware(d.text); break;
       case 'robot:say': window.MCvoice && window.MCvoice.say(d.text, d.by, d.audio, d.more); break;
       case 'voice:download': window.MCvoice && window.MCvoice.onDownload && window.MCvoice.onDownload(d); break;
+      case 'robot:roommap': window.MCroommap && window.MCroommap.onEvent(d); break;
       case 'robot:mission': window.MCblocks && window.MCblocks.onMission && window.MCblocks.onMission(d); break;
       case 'studio:log': case 'studio:serial': window.MCstudio && window.MCstudio.onEvent(ev, d); break;
       case 'avatar:link': avatarLinkPrompt(d); break;
@@ -440,7 +441,7 @@
   // ---- Robot page tabs: Control (drive) · Setup (calibration, firmware) · Car settings · Health · Devices (discovery) · Firmware studio
   try { S.robotTab = localStorage.getItem('mc.robotTab') || 'control'; } catch { S.robotTab = 'control'; }
   function robotTab(id) {
-    if (!['control', 'setup', 'carset', 'health', 'blocks', 'parts', 'devices', 'studio'].includes(id)) id = 'control';
+    if (!['control', 'map', 'setup', 'carset', 'health', 'blocks', 'parts', 'devices', 'studio'].includes(id)) id = 'control';
     S.robotTab = id;
     try { localStorage.setItem('mc.robotTab', id); } catch {}
     $$('#robotTabs button').forEach((b) => { b.classList.toggle('on', b.dataset.rtab === id); b.setAttribute('aria-selected', b.dataset.rtab === id ? 'true' : 'false'); });
@@ -452,6 +453,7 @@
     if (id === 'health' && window.MClab) window.MClab.renderHealth($('#robotHealth'));
     if (id === 'parts' && window.MClab) window.MClab.renderParts($('#robotParts'));
     if (id === 'blocks' && window.MCblocks) window.MCblocks.render($('#robotBlocks'));
+    if (id === 'map') { const go = () => (window.MCroommap ? window.MCroommap.render($('#robotMap')) : setTimeout(go, 200)); go(); }
   }
   function openRobot(tab) { S.robotTab = tab; show('robot'); }
   $$('#robotTabs button').forEach((b) => { b.onclick = () => robotTab(b.dataset.rtab); });
@@ -506,6 +508,7 @@
     });
   }
   window.MCask = askText;
+  window.MCconfirm = async (q, yes = 'Yes', no = 'Cancel') => (await askChoice(q, [{ label: yes, value: true }, { label: no, value: false }])) === true;
   $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
   // ---- where does this chat work: this PC or a server
   $('#chipWhere').onclick = () => {

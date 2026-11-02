@@ -68,7 +68,19 @@ class Robot {
       this.pose.x += Math.sin(a) * v * dt; this.pose.y += Math.cos(a) * v * dt; // y = forward at the start
     }
   }
+  // the car's own turns (gyro turns, the firmware's /turn) don't go through the wheel commands: take the heading from the gyro
+  _fromGyro() {
+    const sn = this.info && this.info.sensors;
+    if (!sn || !sn.imu || !Number.isFinite(Number(sn.yaw))) return;
+    if (this._yaw0 == null) this._yaw0 = Number(sn.yaw) - this.pose.heading; else this.pose.heading = Number(sn.yaw) - this._yaw0;
+  }
   resetPose() { this.pose = { x: 0, y: 0, heading: 0, at: Date.now() }; this._yaw0 = null; }
+  // put the car somewhere on the map (Robot → Map → Put the robot here): metres and degrees, gyro re-anchored
+  setPose({ x, y, heading }) {
+    if (![x, y, heading].every(Number.isFinite)) throw new Error('bad position');
+    this.pose = { x, y, heading: ((heading % 360) + 360) % 360, at: Date.now() }; this._yaw0 = null;
+    const sn = this.info && this.info.sensors; if (sn && sn.imu) this._yaw0 = Number(sn.yaw) - this.pose.heading;
+  }
 
   connect() {
     this.ip = (this.getIp() || '').trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -90,7 +102,7 @@ class Robot {
     let fw = null;
     try {
       const body = await carGet(ip, '/status', 2500);
-      try { const j = JSON.parse(body); if (/carpathron/i.test(j.name || '') || (j.fw && j.sensors)) { fw = 'carpathron'; this.info = j; } } catch {} // firmware 2.2 lets the car be renamed
+      try { const j = JSON.parse(body); if (/carpathron/i.test(j.name || '') || (j.fw && j.sensors)) { fw = 'carpathron'; this.info = j; this._fromGyro(); } } catch {} // firmware 2.2 lets the car be renamed
       if (!fw) fw = this.firmware && this.firmware.startsWith('kit') ? this.firmware : null;
     } catch {}
     if (!fw) {
@@ -120,22 +132,26 @@ class Robot {
   // Fresh sensor values from the car (distance mm, gyro heading, turning…), or null without sensors / our firmware.
   async sensors() {
     if (this.firmware !== 'carpathron' || !this.ip) return null;
-    try { const j = JSON.parse(await carGet(this.ip, '/status', 1500)); this.info = j; return j.sensors || null; } catch { return null; }
+    try { const j = JSON.parse(await carGet(this.ip, '/status', 1500)); this.info = j; this._fromGyro(); return j.sensors || null; } catch { return null; }
   }
   // Exact turn with the car's gyro (firmware 2.0 + MPU-6050). Resolves when done; null when the car cannot.
   async gyroTurn(deg, speed = 70) {
     const s = await this.sensors();
     if (!s || !s.imu) return null;
     this.cancelPlan('gyro turn');
-    this.stopTicks = 10; // no more repeated stops from the last drive: they would cancel the car's own turn
+    this.stopTicks = 10; this.lastSent = { l: 0, r: 0 }; // no more (or first) stop packets: they would cancel the car's own turn
     const start = await carGet(this.ip, `/turn?deg=${Math.round(deg)}&speed=${Math.round(speed)}`, 2000).then((b) => JSON.parse(b)).catch(() => null);
     if (!start || !start.ok) return null;
     const t0 = Date.now();
+    this._gyroTurning = true;
+    try { return await this._waitTurn(deg, t0); } finally { this._gyroTurning = false; }
+  }
+  async _waitTurn(deg, t0) {
     for (;;) {
       await new Promise((r) => setTimeout(r, 120));
       const now = await this.sensors();
       if (now && !now.turning) return { turned: deg, result: now.turnResult === 1 ? 'reached' : now.turnResult === 2 ? 'timeout' : 'cancelled', yaw: now.yaw };
-      if (Date.now() - t0 > 10000) { carGet(this.ip, '/stop', 1500).catch(() => {}); return { turned: deg, result: 'timeout' }; }
+      if (Date.now() - t0 > 6000 + Math.abs(deg) * 35) { carGet(this.ip, '/stop', 1500).catch(() => {}); return { turned: deg, result: 'timeout' }; }
     }
   }
 
@@ -147,6 +163,7 @@ class Robot {
 
   stop(by = 'pc') {
     this.cancelPlan('STOP');
+    if (this._gyroTurning && this.ip) carGet(this.ip, '/stop', 1500).catch(() => {}); // the car's own turn stops too
     this.manual = { left: 0, right: 0, at: Date.now(), by };
     this.emit('log', `STOP from ${by}`);
   }

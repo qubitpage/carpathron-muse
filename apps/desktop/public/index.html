@@ -6,6 +6,7 @@
   <title>Muse Carpathron</title>
   <link rel="icon" href="icon.png">
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="blocks.css">
 </head>
 <body>
   <div class="app">
@@ -158,6 +159,7 @@
         <div class="page-head"><h1>Robots</h1><span class="pill" id="robotPill">…</span></div>
         <nav class="settings-tabs robot-tabs" id="robotTabs" role="tablist">
           <button role="tab" data-rtab="control" class="on">🎮 Control</button>
+          <button role="tab" data-rtab="map">🗺 Map</button>
           <button role="tab" data-rtab="setup">⚙ Setup</button>
           <button role="tab" data-rtab="carset">🛠 Car settings</button>
           <button role="tab" data-rtab="health">🩺 Health &amp; calibration</button>
@@ -166,6 +168,7 @@
           <button role="tab" data-rtab="devices">🔌 Devices</button>
           <button role="tab" data-rtab="studio">🧩 Firmware studio</button>
         </nav>
+        <div class="robot-pane" data-rtab="map" id="robotMap" hidden></div>
         <div class="robot-pane" data-rtab="setup" id="robotSetup" hidden></div>
         <div class="robot-pane" data-rtab="carset" id="robotCarset" hidden></div>
         <div class="robot-pane" data-rtab="health" id="robotHealth" hidden></div>
@@ -213,7 +216,7 @@
             <div class="muted small" id="camInfo"></div>
           </div>
           <div class="card" id="voiceCard"></div>
-          <div class="card plan3d" id="plan3dCard"></div>
+          <div class="card" id="plan3dCard"></div>
           <div class="card" id="headCard">
             <h3>Robot head &amp; room map</h3>
             <p class="muted small">The camera is fixed to the car, so the car turns its body to look (like a robot), takes the photo and turns back. A room scan turns a full circle, photographs every side and draws a map.</p>
@@ -285,7 +288,8 @@
     <script src="robotlab.js"></script>
     <script src="robotvoice.js"></script>
     <script src="blocks.js"></script>
-    <script type="module" src="robot3d.js"></script>
+    <script src="robot3d.js"></script>
+    <script type="module" src="roommap3d.js"></script>
     <script type="module" src="sim3d.js"></script>
 </body>
 </html>

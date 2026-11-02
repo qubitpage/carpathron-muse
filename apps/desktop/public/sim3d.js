@@ -94,6 +94,20 @@ function buildScene(room) {
   add(new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.03, 32), std({ color: 0xe6e1d6, roughness: 0.4 })), 0.55, 0.45, 0.5);
   add(new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.44, 12), std({ color: 0x333333 })), 0.55, 0.22, 0.5);
   add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 24, 16), std({ color: 0xffd23f, roughness: 0.35 })), 1.2, 0.06, 2.4);
+  // details on the walls (above the laser, so what the car measures is still the room's walls and furniture):
+  // a book shelf, curtains at the window, a clock, a light switch, a ceiling lamp shade
+  const shelfWood = std({ color: 0x9a6b43, roughness: 0.6 });
+  add(box(1.1, 0.03, 0.2, shelfWood), 1.35, 1.25, 0.1); add(box(1.1, 0.03, 0.2, shelfWood), 1.35, 1.6, 0.1);
+  const bookCols = [0xb5543c, 0x2f6fd6, 0xe0b84a, 0x3f6e5a, 0x7b2cbf, 0xd8d2c4, 0x2a2a2a, 0xc0392b];
+  for (const yb of [1.265, 1.615]) { let xb = 0.85; while (xb < 1.75) { const bw = rnd(0.025, 0.05), bh = rnd(0.16, 0.24); add(box(bw, bh, rnd(0.13, 0.17), std({ color: bookCols[Math.floor(Math.random() * bookCols.length)], roughness: 0.7 })), xb + bw / 2, yb + bh / 2, 0.11); xb += bw + 0.004; if (Math.random() < 0.12) xb += 0.08; } }
+  add(new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 12), std({ color: 0x3f8f6a })), 1.82, 1.33, 0.1);
+  const curtain = std({ map: fabric('#d9b98a'), side: THREE.DoubleSide });
+  for (const zc of [1.4 - 0.78, 1.4 + 0.78]) { const c = box(0.03, 1.6, 0.34, curtain); add(c, W - 0.06, 1.35, zc); }
+  add(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1.9, 8), std({ color: 0x8a8a8a, metalness: 0.7 })), W - 0.06, 2.17, 1.4).rotation.x = Math.PI / 2;
+  const clock = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.03, 40), std({ map: tex(128, 128, (g2, w2, h2) => { g2.fillStyle = '#f7f3ea'; g2.fillRect(0, 0, w2, h2); g2.strokeStyle = '#222'; g2.lineWidth = 6; g2.beginPath(); g2.arc(64, 64, 58, 0, 7); g2.stroke(); for (let i = 0; i < 12; i++) { const a2 = (i / 12) * Math.PI * 2; g2.fillStyle = '#222'; g2.fillRect(64 + Math.sin(a2) * 48 - 2, 64 - Math.cos(a2) * 48 - 2, 4, 4); } g2.lineWidth = 5; g2.beginPath(); g2.moveTo(64, 64); g2.lineTo(64, 28); g2.moveTo(64, 64); g2.lineTo(92, 70); g2.stroke(); }) }));
+  clock.rotation.x = Math.PI / 2; add(clock, 1.8, 1.95, D - 0.02); clock.rotation.z = Math.PI;
+  add(box(0.08, 0.12, 0.012, std({ color: 0xfafafa })), 2.4, 1.1, 0.008);
+  const shade = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.26, 0.2, 32, 1, true), std({ color: 0xf3e3c3, side: THREE.DoubleSide, emissive: 0x6b5a3a, emissiveIntensity: 0.3 })); add(shade, W / 2, HGT - 0.25, D / 2, false);
   // lights
   scene.add(new THREE.HemisphereLight(0xfff6e5, 0x3a3024, 0.75));
   const sun = new THREE.DirectionalLight(0xfff1d6, 1.4); sun.position.set(W + 1.5, 3.5, 1.2); sun.target.position.set(W / 2, 0, D / 2); sun.castShadow = true;
@@ -106,19 +120,41 @@ function buildScene(room) {
 
 // the Baby Carpathron: blue chassis, four yellow-hub wheels, the ESP32-CAM on a mast, the laser sensor in front
 function buildCar() {
+  // Baby Carpathron: a rounded blue body, a black deck, a little head with the ESP32-CAM "eye" and two glowing eyes,
+  // an antenna, the laser sensor in the front bumper and four chunky wheels with yellow hubs. Faces +x.
   const g = new THREE.Group();
-  const m = (o) => new THREE.MeshStandardMaterial({ roughness: 0.5, ...o });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.15), m({ color: 0x2f6fd6, metalness: 0.2 })); body.position.y = 0.06; body.castShadow = true; g.add(body);
-  const deck = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.012, 0.13), m({ color: 0x1a1a1a })); deck.position.y = 0.092; g.add(deck);
-  const cam = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.04, 0.03), m({ color: 0x222222 })); cam.position.set(0.09, 0.115, 0); g.add(cam);
-  const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.01, 16), m({ color: 0x111111, metalness: 0.9, roughness: 0.2 })); lens.rotation.z = Math.PI / 2; lens.position.set(0.106, 0.118, 0); g.add(lens);
-  const laser = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.02, 0.03), m({ color: 0x7b2cbf })); laser.position.set(0.122, 0.06, 0); g.add(laser);
+  const m = (o) => new THREE.MeshStandardMaterial({ roughness: 0.45, ...o });
+  const rounded = (w, h, d, r, mat) => {
+    const sh = new THREE.Shape(), x = -w / 2, y = -d / 2;
+    sh.moveTo(x + r, y); sh.lineTo(x + w - r, y); sh.quadraticCurveTo(x + w, y, x + w, y + r); sh.lineTo(x + w, y + d - r); sh.quadraticCurveTo(x + w, y + d, x + w - r, y + d);
+    sh.lineTo(x + r, y + d); sh.quadraticCurveTo(x, y + d, x, y + d - r); sh.lineTo(x, y + r); sh.quadraticCurveTo(x, y, x + r, y);
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 3, curveSegments: 8 });
+    geo.rotateX(-Math.PI / 2); geo.translate(0, -h / 2, 0);
+    const mesh = new THREE.Mesh(geo, mat); mesh.castShadow = true; return mesh;
+  };
+  const blue = m({ color: 0x2f6fd6, metalness: 0.25, roughness: 0.35 });
+  const body = rounded(0.24, 0.045, 0.15, 0.035, blue); body.position.y = 0.062; g.add(body);
+  const deck = rounded(0.2, 0.008, 0.12, 0.03, m({ color: 0x15181d, roughness: 0.7 })); deck.position.y = 0.094; g.add(deck);
+  const bumper = rounded(0.03, 0.03, 0.13, 0.012, m({ color: 0x22262d, roughness: 0.6 })); bumper.position.set(0.122, 0.05, 0); g.add(bumper);
+  const laser = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.012, 0.022), m({ color: 0x7b2cbf, emissive: 0x3a0a6b, emissiveIntensity: 0.6 })); laser.position.set(0.139, 0.05, 0); g.add(laser);
+  // the head on a short neck: ESP32-CAM board with its lens, and two eyes that glow
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.01, 0.03, 12), m({ color: 0x9aa3ad, metalness: 0.6 })); neck.position.set(0.05, 0.112, 0); g.add(neck);
+  const head = rounded(0.05, 0.045, 0.075, 0.016, m({ color: 0xf0f2f5, roughness: 0.35 })); head.position.set(0.055, 0.15, 0); g.add(head);
+  const face = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.032, 0.06), m({ color: 0x0d1117, roughness: 0.25 })); face.position.set(0.083, 0.15, 0); g.add(face);
+  for (const z of [-0.016, 0.016]) { const eye = new THREE.Mesh(new THREE.SphereGeometry(0.0085, 16, 12), new THREE.MeshStandardMaterial({ color: 0x7fe3ff, emissive: 0x3ccfff, emissiveIntensity: 1.4 })); eye.scale.set(0.5, 1, 1); eye.position.set(0.0855, 0.152, z); g.add(eye); }
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.008, 16), m({ color: 0x111111, metalness: 0.9, roughness: 0.15 })); lens.rotation.z = Math.PI / 2; lens.position.set(0.087, 0.136, 0); g.add(lens);
+  const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.0015, 0.0015, 0.05, 6), m({ color: 0x9aa3ad, metalness: 0.7 })); ant.position.set(0.04, 0.198, 0.022); g.add(ant);
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.006, 12, 10), new THREE.MeshStandardMaterial({ color: 0xff5a5a, emissive: 0xff2a2a, emissiveIntensity: 1.2 })); tip.position.set(0.04, 0.224, 0.022); g.add(tip);
+  // battery pack on the deck
+  const bat = rounded(0.07, 0.022, 0.05, 0.008, m({ color: 0x3a3f47 })); bat.position.set(-0.05, 0.11, 0); g.add(bat);
+  const led = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.006, 0.02), new THREE.MeshStandardMaterial({ color: 0x3ddc97, emissive: 0x3ddc97, emissiveIntensity: 1 })); led.position.set(-0.012, 0.112, 0); g.add(led);
   const wheels = [];
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
     const w = new THREE.Group();
-    const tyre = new THREE.Mesh(new THREE.CylinderGeometry(0.033, 0.033, 0.026, 24), m({ color: 0x1b1b1b, roughness: 0.9 })); tyre.rotation.x = Math.PI / 2; tyre.castShadow = true;
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.028, 12), m({ color: 0xf2c230 })); hub.rotation.x = Math.PI / 2;
-    w.add(tyre, hub); w.position.set(sx * 0.075, 0.033, sz * 0.09); g.add(w); wheels.push({ w, side: sz < 0 ? 'l' : 'r' });
+    const tyre = new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.011, 12, 28), m({ color: 0x1b1b1b, roughness: 0.95 })); tyre.castShadow = true;
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.02, 20), m({ color: 0xf2c230, metalness: 0.3, roughness: 0.4 })); hub.rotation.x = Math.PI / 2;
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.024, 8), m({ color: 0x555555 })); cap.rotation.x = Math.PI / 2;
+    w.add(tyre, hub, cap); w.position.set(sx * 0.078, 0.037, sz * 0.091); g.add(w); wheels.push({ w, side: sz < 0 ? 'l' : 'r' });
   }
   return { g, wheels };
 }
@@ -189,8 +225,8 @@ function frame(t) {
   spin += 0.02; for (const w of S.wheels) w.w.rotation.z -= ((w.side === 'l' ? S.pose.l : S.pose.r) / 100) * 0.4;
   // first person: the ESP32-CAM, 12 cm above the floor, looking ahead and a little down
   const dx = Math.cos(h), dz = Math.sin(h);
-  S.fpCam.position.set(x + dx * 0.1, 0.12, z + dz * 0.1);
-  S.fpCam.lookAt(x + dx * 2, 0.06, z + dz * 2);
+  S.fpCam.position.set(x + dx * 0.095, 0.136, z + dz * 0.095);
+  S.fpCam.lookAt(x + dx * 2, 0.07, z + dz * 2);
   if (S.pose.camera === false) { S.fp.setClearColor(0x000000); S.fp.clear(); } else S.fp.render(S.scene, S.fpCam);
   // third person
   if (S.mode === 'chase') { S.tpCam.position.set(x - dx * 0.75, 0.42, z - dz * 0.75); S.tpCam.lookAt(x + dx * 0.4, 0.05, z + dz * 0.4); }

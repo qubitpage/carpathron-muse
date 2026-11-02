@@ -41,7 +41,7 @@ class Mapper {
 
   // Drive to a point of the map (metres, x = right, y = ahead at the start): turn towards it, then short hops; the laser
   // stops the car before obstacles. Uses the dead-reckoned pose, so it is right to about 10 % of the distance.
-  async gotoPoint(x, y, { source = 'ai', stopAt = 0 } = {}) {
+  async gotoPoint(x, y, { source = 'ai', stopAt = 0, abort = () => false } = {}) {
     this.needCar();
     const p = this.robot.pose;
     const dx = Number(x) - p.x, dy = Number(y) - p.y, dist = Math.hypot(dx, dy);
@@ -50,8 +50,10 @@ class Mapper {
     const want = (Math.atan2(dx, dy) * 180) / Math.PI;
     let turn = ((want - p.heading) % 360 + 540) % 360 - 180;
     if (Math.abs(turn) > 4) await this.turn(Math.round(turn), source);
+    if (abort()) throw new Error('stopped');
     let left = dist - stopAt, driven = 0, blocked = false;
     while (left > 0.05) {
+      if (abort()) throw new Error('stopped');
       const hop = Math.min(0.5, left);
       const s = await this.robot.sensors().catch(() => null);
       if (s && s.tof && s.dist > 0 && s.dist / 1000 < hop + 0.12) { blocked = true; break; }
@@ -228,6 +230,7 @@ class Mapper {
         this.emit('memory:update', {});
       } catch {}
       this.emit('robot:map', { id: stamp, summary });
+      if (this.onMap) try { this.onMap(map); } catch {}
       progress('Room map ready');
       return { id: stamp, dir, summary, svg, png, collage, photos: photos.map((p) => p.file), analysis };
     } finally { this.busy = false; }

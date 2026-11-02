@@ -71,7 +71,6 @@ const { chromium } = require(process.env.PW || 'playwright');
   await p.screenshot({ path: `${out}/0-control.png`, fullPage: true });
   await p.locator('#liveCard').screenshot({ path: `${out}/0b-hud.png` }).catch(() => {});
   await p.locator('#voiceCard').screenshot({ path: `${out}/0c-voice.png` });
-  await p.waitForSelector('#plan3dCard .p3d-view canvas', { timeout: 10000 });
   await p.waitForSelector('#liveCard .sim3d-fp', { timeout: 15000 });
   await p.waitForSelector('.sim-card.sim3d-on .sim3d-tp', { timeout: 15000 });
   await p.waitForTimeout(1200);
@@ -79,50 +78,57 @@ const { chromium } = require(process.env.PW || 'playwright');
   await p.evaluate(async (t) => { await fetch('/api/robot/scan', { method: 'POST', headers: { 'x-mc-token': t, 'Content-Type': 'application/json' }, body: JSON.stringify({ steps: 4 }) }); }, srv.token);
   for (let i = 0; i < 80; i++) { await p.waitForTimeout(500); const m = await p.evaluate(async (t) => (await (await fetch('/api/robot/maps', { headers: { 'x-mc-token': t } })).json()).length, srv.token); if (m) break; }
   await p.waitForTimeout(1500);
-  await p.locator('#plan3dCard canvas').scrollIntoViewIfNeeded();
-  const cbox = await p.locator('#plan3dCard canvas').boundingBox();
-  await p.mouse.click(cbox.x + cbox.width * 0.55, cbox.y + cbox.height * 0.7);
-  await p.waitForTimeout(500);
-  const pickText = await p.locator('#plan3dCard .p3d-pick').textContent();
-  const mapText = await p.locator('#plan3dCard .p3d-map').textContent();
-  await p.locator('#plan3dCard').screenshot({ path: `${out}/0d-plan3d.png` });
+  // the room map: the scan taught it (laser + objects); the Map tab shows it in 3D; a click plans a way
+  await p.evaluate(() => window.MCui.openRobot('map'));
+  await p.waitForSelector('#robotMap .rm-view canvas', { timeout: 10000 });
+  await p.waitForTimeout(1500);
+  const mapText = await p.locator('#robotMap .rm-stats').textContent();
+  await p.click('#robotMap .rm-modes button[data-mode=place]');
+  const cbox = await p.locator('#robotMap .rm-view canvas').boundingBox();
+  await p.mouse.click(cbox.x + cbox.width * 0.5, cbox.y + cbox.height * 0.5);
+  await p.waitForSelector('#modal:not([hidden]) input', { timeout: 5000 }); await p.fill('#modal input', 'Kitchen'); await p.keyboard.press('Enter');
+  await p.waitForFunction(() => /Kitchen/.test(document.querySelector('#robotMap .rm-places').textContent), null, { timeout: 8000 }).catch(() => {});
+  const pickText = await p.locator('#robotMap .rm-places').textContent();
+  await p.locator('#robotMap .rm-layout').screenshot({ path: `${out}/0d-map.png` });
+  await p.evaluate(() => window.MCui.openRobot('control')); await p.waitForTimeout(400);
   console.log(JSON.stringify({ pickText, mapText }));
   const moved = Math.hypot(pose1.x - pose0.x, pose1.y - pose0.y);
-  const ctlOk = frameBytes === true && /Point:/.test(pickText) && /laser outline/.test(mapText) && moved > 10 && /cm|clear/.test(hudText) && /Hold to talk/.test(voiceOk) && /Hello test/.test(voiceOk);
+  const ctlOk = frameBytes === true && /Kitchen/.test(pickText) && /m²/.test(mapText) && !/^0 m²/.test(mapText) && moved > 10 && /cm|clear/.test(hudText) && /Hold to talk/.test(voiceOk) && /Hello test/.test(voiceOk);
   console.log(JSON.stringify({ moved, hud: hudText.replace(/\s+/g, ' ').slice(-80), ctlOk }));
 
   // Blocks: every example loads, explains itself in plain words, missions run, board programs make commented code
-  await p.evaluate(() => { try { localStorage.removeItem('mc.blocks2.mission'); localStorage.removeItem('mc.blocks2.firmware'); } catch {} });
+  await p.evaluate(() => { try { localStorage.removeItem('mc.steps.mission'); localStorage.removeItem('mc.steps.board'); localStorage.removeItem('mc.steps.mode'); } catch {} });
   await p.evaluate(() => window.MCui.openRobot('blocks'));
-  await p.waitForSelector('#robotBlocks .blocklySvg', { timeout: 15000 });
-  await p.waitForTimeout(600);
-  const exM = await p.evaluate(() => window.MCblocks.EXAMPLES.mission.map((e) => e.title));
+  await p.waitForSelector('#robotBlocks .st-program .st-row', { timeout: 15000 });
+  await p.waitForTimeout(300);
+  const pickEx = async (id) => { await p.click(`#robotBlocks .st-ex[data-ex="${id}"]`); if (await p.locator('#robotBlocks .st-confirm').isVisible()) await p.click('#robotBlocks .st-confirm button:has-text("Yes, load")'); await p.waitForTimeout(250); };
+  const exM = await p.evaluate(() => window.MCblocks.EXAMPLES.mission.map((e) => [e.id, e.title]));
   const stories = {};
-  for (const t of exM) { await p.click(`#robotBlocks .blk-examples button:has-text("${t}")`); await p.waitForTimeout(400); stories[t] = await p.locator('#robotBlocks .blk-plan').textContent(); }
-  await p.click('#robotBlocks .blk-examples button:has-text("Drive a square")'); await p.waitForTimeout(400);
+  for (const [id, t] of exM) { await pickEx(id); stories[t] = await p.locator('#robotBlocks .st-story-box').textContent(); }
+  await pickEx('square');
   await p.screenshot({ path: `${out}/b1-mission.png`, fullPage: true });
   await p.click('#robotBlocks button:has-text("▶ Run on the car")');
-  await p.waitForFunction(() => /finished|stopped|✕/.test(document.querySelector('#robotBlocks .blk-log').textContent), null, { timeout: 90000 });
-  const missionLog = await p.locator('#robotBlocks .blk-log').textContent();
-  await p.click('#robotBlocks .seg button:has-text("Board program")');
-  await p.waitForSelector('#robotBlocks .blk-tabs button', { timeout: 10000 });
+  await p.waitForFunction(() => /finished|stopped|✕/.test(document.querySelector('#robotBlocks .st-log').textContent), null, { timeout: 90000 });
+  const missionLog = await p.locator('#robotBlocks .st-log').textContent();
+  await p.click('#robotBlocks .st-mode:has-text("Program a board")');
+  await p.waitForSelector('#robotBlocks .st-tabs button', { timeout: 10000 });
   const exF = await p.evaluate(() => window.MCblocks.EXAMPLES.firmware.map((e) => [e.id, e.title]));
   const fw = {};
-  for (const [id, t] of exF) {
-    await p.click(`#robotBlocks .blk-examples button:has-text("${t}")`); await p.waitForTimeout(400);
-    await p.click('#robotBlocks .blk-tabs button:has-text("What it does")'); await p.waitForTimeout(200);
-    const story = await p.locator('#robotBlocks .blk-plan').textContent();
-    await p.click('#robotBlocks .blk-tabs button:has-text("What to connect")'); await p.waitForTimeout(500);
-    const parts = await p.locator('#robotBlocks .blk-plan').textContent();
-    await p.click('#robotBlocks .blk-tabs button:has-text("The code")'); await p.waitForTimeout(200);
-    const code = await p.locator('#robotBlocks .blk-code').textContent();
+  for (const [id] of exF) {
+    await pickEx(id);
+    await p.click('#robotBlocks .st-tabs button:has-text("What it does")'); await p.waitForTimeout(200);
+    const story = await p.locator('#robotBlocks .st-pane').textContent();
+    await p.click('#robotBlocks .st-tabs button:has-text("What to connect")'); await p.waitForTimeout(500);
+    const parts = await p.locator('#robotBlocks .st-pane').textContent();
+    await p.click('#robotBlocks .st-tabs button:has-text("The code")'); await p.waitForTimeout(200);
+    const code = await p.locator('#robotBlocks .st-code').textContent();
     fw[id] = { story, parts, code };
     fs.writeFileSync(`${out}/fw-${id}.ino`, code);
   }
-  await p.click('#robotBlocks .blk-examples button:has-text("Night light")'); await p.waitForTimeout(300);
-  await p.click('#robotBlocks .blk-tabs button:has-text("What it does")'); await p.waitForTimeout(300);
+  await pickEx('night');
+  await p.click('#robotBlocks .st-tabs button:has-text("What it does")'); await p.waitForTimeout(300);
   await p.screenshot({ path: `${out}/b2-firmware.png`, fullPage: true });
-  await p.click('#robotBlocks .blk-tabs button:has-text("What to connect")'); await p.waitForTimeout(500);
+  await p.click('#robotBlocks .st-tabs button:has-text("What to connect")'); await p.waitForTimeout(500);
   await p.screenshot({ path: `${out}/b3-connect.png`, fullPage: true });
   const blocksOk = /finished/.test(missionLog) && /Do this 4 times/.test(stories['🟦 Drive a square']) && /closer than 30 cm/.test(stories['🚧 Patrol and avoid walls']) && /Stop/.test(stories['🚧 Patrol and avoid walls'])
     && /Switch the LED on pin 2 ON/.test(fw.blink.story) && /220 Ω/.test(fw.blink.parts) && /digitalWrite\(2, HIGH\);  \/\/ LED on pin 2 ON/.test(fw.blink.code)
@@ -150,6 +156,7 @@ const { chromium } = require(process.env.PW || 'playwright');
   await p.waitForTimeout(500);
   await p.click('text=✓ Add to my robot');
   await p.waitForTimeout(600);
+  await p.waitForFunction(() => document.querySelectorAll('#robotParts .wiring-svg .w-wire').length >= 6, null, { timeout: 8000 }).catch(() => {});
   const wires = await p.locator('#robotParts .wiring-svg .w-wire').count();
   const wireRows = await p.locator('#robotParts .wiring-table tbody tr').count();
   await p.click('text=📋 Starter code');

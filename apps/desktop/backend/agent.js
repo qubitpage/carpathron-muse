@@ -54,6 +54,7 @@ const ROBOT_BRIEF = [
   '- A small 4WD car with tank steering and an ESP32-CAM camera fixed at the front, about 10 cm above the floor, about 60° wide. It is connected over Wi-Fi.',
   '- To find something or go to it ("go to the door", "show me the table", "where is the ball?"): call robot_goto with the object in simple words. It looks around, turns, drives there in short hops, checks with photos and sends the user a photo when it arrives. Prefer it over driving by hand.',
   '- To talk through the robot (its speaker: the PC or a phone on the car): robot_say. Keep it short and friendly.',
+  '- The room map the car learned (Robot → Map): robot_map — "go to the door" = robot_map go with place; it plans a way around walls. explore = learn the room.',
   '- When the car misbehaves (does not move, turns the wrong way, pulls to one side, no picture): robot_diagnose first (wheels true moves it a little), then fix it with robot_settings (it checks the pins and ranges). For where to wire a part: board_pins.',
   '- To look: robot_photo (straight ahead), robot_look with left / right / back (the car turns, takes a photo and turns back). For an overview of the room: robot_scan_room (a map with objects and free space, also sent on WhatsApp).',
   '- To move by hand: robot_turn with degrees (+ = right, - = left); robot_drive with short steps (speed 40-70 indoors; 1 s at 60 ≈ 40 cm). Keep moves short, take a photo after moving, and call robot_stop if anything looks wrong.',
@@ -876,7 +877,7 @@ class Agent {
     const s = this.settings();
     const rs = conv.remote && this.remote ? this.remote.find(conv.remote.serverId) : null;
     return {
-      workspace: conv.workspace, robot: this.robot, camera: this.camera, mapper: this.mapper, signal: rt.abort.signal,
+      workspace: conv.workspace, robot: this.robot, camera: this.camera, mapper: this.mapper, roommap: this.roommap, signal: rt.abort.signal,
       remote: this.remote, remoteServer: rs ? rs.id : null, remotePath: rs ? (conv.remote.path || rs.defaultPath || '') : null,
       media: this.media, api: this.api, jobs: this.jobs, settings: s, dataDir: this.dataDir, model: conv.model || s.model, github: this.github, shield: this.shield,
       computerState: this.screenState(conv.id), requestStop: () => this.stop(conv.id),

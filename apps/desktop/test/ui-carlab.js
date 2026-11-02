@@ -25,6 +25,7 @@ const { chromium } = require(process.env.PW || 'playwright');
   // a pin used twice is refused before saving
   await p.locator('.setting', { hasText: 'Right wheels: speed pin' }).locator('select').selectOption('13');
   await p.waitForTimeout(500);
+  await p.waitForSelector('.setting.error', { timeout: 5000 }).catch(() => {});
   const err = await p.locator('.setting.error').count();
   const disabled = await p.locator('.carset-bar .btn.primary').isDisabled();
   await p.screenshot({ path: `${out}/3-clash.png`, fullPage: true });
@@ -149,19 +150,20 @@ const { chromium } = require(process.env.PW || 'playwright');
   await p.waitForTimeout(500);
   await p.click('text=✓ Add to my robot');
   await p.waitForTimeout(600);
-  const wires = await p.locator('#robotParts .schem-svg .wire').count();
+  const wires = await p.locator('#robotParts .wiring-svg .w-wire').count();
+  const wireRows = await p.locator('#robotParts .wiring-table tbody tr').count();
   await p.click('text=📋 Starter code');
   await p.waitForTimeout(400);
   const code = await p.locator('#robotParts pre').first().textContent();
   await p.screenshot({ path: `${out}/8-parts-devkit.png`, fullPage: true });
-  await p.locator('#robotParts .parts-grid > div').nth(1).screenshot({ path: `${out}/8b-schematic.png` });
+  await p.locator('#robotParts .wiring-wrap').screenshot({ path: `${out}/8b-wiring.png` });
   await p.selectOption('#robotParts .parts-top select', 'mega2560');
   await p.waitForTimeout(600);
   await p.locator('#robotParts .board-card').screenshot({ path: `${out}/9-mega.png` });
   await p.selectOption('#robotParts .parts-top select', 'uno');
   await p.waitForTimeout(600);
   await p.locator('#robotParts .board-card').screenshot({ path: `${out}/9b-uno.png` });
-  const partsOk = /used by the motors/.test(pinRead) && wires >= 6 && /SERVO|SG90/.test(code) && /Wire.begin\(/.test(code);
+  const partsOk = /used by the motors/.test(pinRead) && wires >= 6 && wireRows === wires && /SERVO|SG90/.test(code) && /Wire.begin\(/.test(code);
   console.log(JSON.stringify({ pinRead: pinRead.slice(0, 160), wires, partsOk }));
   // Firmware studio: colours, pin check before upload, autocomplete, plotter tab
   await p.evaluate(async (t) => {

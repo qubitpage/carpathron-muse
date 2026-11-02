@@ -5,7 +5,7 @@ echo  Joining Muse-Carpathron-Setup.exe ...
 del /q "Muse-Carpathron-Setup.exe" 2>nul
 copy /b /y Muse-Carpathron-Setup.part0+Muse-Carpathron-Setup.part1+Muse-Carpathron-Setup.part2+Muse-Carpathron-Setup.part3+Muse-Carpathron-Setup.part4+Muse-Carpathron-Setup.part5 "Muse-Carpathron-Setup.exe" >nul
 if errorlevel 1 goto fail
-certutil -hashfile "Muse-Carpathron-Setup.exe" SHA256 | findstr /i /c:"33a07b849ba8a000578d8b87d4d8dee6f716727ff88420e21c0b25d3b6226e3f" >nul
+certutil -hashfile "Muse-Carpathron-Setup.exe" SHA256 | findstr /i /c:"819e4660987c23d73454aaa4f0ea30e3cc1f503c65d5b36c544122607c516061" >nul
 if errorlevel 1 (
   echo  The file is damaged. Copy the parts again.
   goto fail

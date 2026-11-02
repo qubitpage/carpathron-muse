@@ -16,6 +16,7 @@ const { isLocalModel } = require('./engines/api');
 const GHNAMES = new Set(GH_TOOLS.map((t) => t.name));
 const models = require('./models');
 const { effectiveRisk } = require('./guard');
+const SUP = require('./supervisor');
 const XNAMES = new Set(XTOOLS.map((t) => t.name));
 
 const fs = require('fs');
@@ -632,6 +633,7 @@ class Agent {
 
   async runApi(conv, text, rt, images = []) {
     conv.llm = conv.llm || [];
+    rt.llmStart = conv.llm.length; // the Supervisor checks what happened from here on
     const model = conv.model || this.settings().model;
     if (images.length && canSee(model)) {
       const parts = [{ type: 'text', text }];
@@ -749,6 +751,19 @@ class Agent {
             continue;
           }
         }
+          // 4) the Supervisor verifies the work independently (read-only, with evidence); a failure goes back to fix
+          if (!sub && rt.changedSomething && s.supervisor !== false && mode !== 'plan' && (rt.supervised || 0) < 2 && !rt.abort.signal.aborted) {
+            rt.supervised = (rt.supervised || 0) + 1;
+            let rep = null;
+            try { rep = await this.supervise(conv, llm, rt); } catch (e) { this.addMsg(conv, { role: 'info', text: `🛡 The Supervisor could not finish: ${e.message}` }); }
+            if (rep && ['failed', 'partly'].includes(rep.verdict) && (mode === 'auto' || mode === 'full') && rt.supervised < 2 && !rt.abort.signal.aborted) {
+              if (textMsg) this.patchMsg(conv, textMsg, { draft: true });
+              const bad = (rep.checks || []).filter((c) => !c.pass).map((c) => `- ${c.requirement}: ${c.evidence} (checked with ${c.method})`).join('\n');
+              llm.push({ role: 'user', content: `[Supervisor report — verification ${rep.verdict.toUpperCase()}] ${rep.summary}\nChecks that did not pass:\n${bad || '(see summary)'}\n${rep.fix ? 'What to fix: ' + rep.fix + '\n' : ''}Fix these problems now, check them yourself with tools, then finish. The Supervisor will verify again.` });
+              this.addMsg(conv, { role: 'info', text: '↻ The Supervisor found problems — the agent is fixing them.' });
+              continue;
+            }
+          }
         if (!res.content && !sub) this.addMsg(conv, { role: 'error', text: `The model (${model}) returned an empty answer. Try again, or pick another model at the top.` });
         return finalText;
       }
@@ -788,7 +803,65 @@ class Agent {
     return finalText || msg;
   }
 
-  async runToolCall(conv, call, byName, rt, { sub, prefix }) {
+  // ---------------------------------------------------------------- Supervisor (independent, read-only verification)
+  async supervise(conv, llm, rt) {
+    const s = this.settings();
+    const model = s.supervisorModel || conv.model || s.model;
+    const { task, steps, claims } = SUP.workLog(llm, rt.llmStart || 0);
+    const read = this.toolSpecs(conv, { sub: true }).filter((t) => SUP.READ_TOOLS.has(t.name));
+    const specs = [...read, SUP.VERIFY_COMMAND, SUP.VERDICT];
+    const byName = new Map(specs.map((t) => [t.name, t]));
+    const all = new Map(this.toolSpecs(conv, { sub: true }).map((t) => [t.name, t]));
+    const rs = conv.remote && this.remote ? this.remote.find(conv.remote.serverId) : null;
+    const where = rs ? `on the remote server "${rs.name}" (${rs.username}@${rs.host})` : `on this PC (folder ${conv.workspace || 'workspace'})`;
+    this.addMsg(conv, { role: 'info', text: `🛡 Supervisor (${model}): verifying the work independently…` });
+    this.status(conv, 'Supervisor is verifying the work…');
+    const msgs = [{ role: 'user', content: `USER'S REQUEST:\n${task || '(see the work log)'}\n\nWHAT THE AGENT DID (tool log, newest last):\n${steps || '(no tool calls)'}\n\nTHE AGENT'S FINAL ANSWER (claims, NOT evidence):\n${claims || '(none)'}\n\nVerify the work now with your own checks.` }];
+    const t0 = Date.now(); let calls = 0;
+    for (let i = 0; i < 18; i++) {
+      if (rt.abort.signal.aborted) return null;
+      const res = await this.api.complete({ model, messages: [{ role: 'system', content: SUP.supervisorPrompt(where) }, ...msgs], tools: specs, signal: rt.abort.signal });
+      const a = { role: 'assistant', content: res.content || '' };
+      if (res.toolCalls.length) a.tool_calls = res.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments || '{}' } }));
+      msgs.push(a);
+      if (!res.toolCalls.length) { msgs.push({ role: 'user', content: 'Now call supervisor_verdict with your verdict and the checks.' }); continue; }
+      for (const call of res.toolCalls) {
+        let args = {}; try { args = JSON.parse(call.arguments || '{}'); } catch {}
+        if (call.name === 'supervisor_verdict') {
+          const rep = { verdict: ['verified', 'partly', 'failed', 'not_verifiable'].includes(args.verdict) ? args.verdict : 'not_verifiable', summary: String(args.summary || ''), fix: String(args.fix || ''), checks: (Array.isArray(args.checks) ? args.checks : []).slice(0, 30).map((c) => ({ requirement: String(c.requirement || ''), method: String(c.method || ''), evidence: String(c.evidence || '').slice(0, 600), pass: !!c.pass })), model, calls, seconds: Math.round((Date.now() - t0) / 1000) };
+          // a "verified" verdict with a failed check is not verified
+          if (rep.verdict === 'verified' && rep.checks.some((c) => !c.pass)) rep.verdict = 'partly';
+          if (rep.verdict === 'verified' && !rep.checks.length) rep.verdict = 'not_verifiable';
+          this.addMsg(conv, { role: 'supervisor', ...rep });
+          rt.supervisorReport = rep;
+          return rep;
+        }
+        calls += 1;
+        let out;
+        if (call.name === 'verify_command') {
+          const why = SUP.readOnlyProblem(args.command);
+          if (why) { out = `Refused by the Supervisor's read-only filter: ${why}. Use an inspection command instead.`; this.addMsg(conv, { role: 'tool', name: 'verify_command', summary: `🛡 Supervisor: refused "${String(args.command || '').slice(0, 80)}"`, args, status: 'denied', output: out, sub: true }); }
+          else {
+            const real = args.server ? { id: call.id, name: 'ssh_exec', arguments: JSON.stringify({ server: args.server, command: args.command }) } : { id: call.id, name: 'run_command', arguments: JSON.stringify({ command: args.command }) };
+            out = await this.runToolCall(conv, real, all, rt, { sub: true, prefix: '🛡 Supervisor: ', preApproved: true, keepChanged: true });
+          }
+        } else if (byName.has(call.name)) out = await this.runToolCall(conv, call, byName, rt, { sub: true, prefix: '🛡 Supervisor: ', keepChanged: true });
+        else out = `Error: the Supervisor can only use read-only tools (not ${call.name}).`;
+        msgs.push({ role: 'tool', tool_call_id: call.id, content: String(out).slice(0, 12000) });
+      }
+      if (rt.newImages && rt.newImages.length && (models.has(model, 'vision') || !models.KNOWN[model])) {
+        const parts = [{ type: 'text', text: '[pictures from your checks]' }];
+        for (const ph of rt.newImages.slice(-2)) parts.push({ type: 'image_url', image_url: { url: `data:${ph.mime || 'image/jpeg'};base64,${ph.buffer.toString('base64')}` } });
+        msgs.push({ role: 'user', content: parts });
+      }
+      rt.newImages = [];
+    }
+    const rep = { verdict: 'not_verifiable', summary: 'The Supervisor did not reach a verdict in time.', checks: [], model, calls, seconds: Math.round((Date.now() - t0) / 1000) };
+    this.addMsg(conv, { role: 'supervisor', ...rep });
+    return rep;
+  }
+
+  async runToolCall(conv, call, byName, rt, { sub, prefix, preApproved, keepChanged }) {
     let args;
     try { args = call.arguments ? JSON.parse(call.arguments) : {}; }
     catch { return `Error: tool arguments were not valid JSON: ${clip(call.arguments, 300)}`; }
@@ -802,7 +875,7 @@ class Agent {
     if (rtc) rtc.toolCalls++;
     const risk = effectiveRisk(call.name, args, spec.risk, { workspace: this.settings().workspace, dataDir: this.dataDir });
     this.status(conv, risk === 'read' || (conv.mode || this.settings().mode) === 'auto' ? `Running: ${prefix}${describeCall(call.name, args)}` : `Waiting for your approval: ${describeCall(call.name, args)}`);
-    const decision = await this.requestApproval(conv, {
+    const decision = preApproved ? { approved: true } : await this.requestApproval(conv, {
       summary: prefix + describeCall(call.name, args),
       detail: call.name === 'write_file' ? String(args.content || '') : call.name === 'edit_file' ? `- ${args.old_string}\n+ ${args.new_string}` : JSON.stringify(args, null, 2),
       risk, tool: call.name,
@@ -845,7 +918,7 @@ class Agent {
       if (out === '__stopped__') { work.catch(() => {}); this.patchMsg(conv, card, { status: 'denied', output: 'Stopped by user' }); return 'Stopped by user.'; }
       out = clip(out);
       this.patchMsg(conv, card, { status: 'done', output: out });
-      if (spec.risk !== 'read') rt.changedSomething = true;
+      if (spec.risk !== 'read' && !keepChanged) rt.changedSomething = true;
       const failed = /^Error\b|\bexit code:? ?[1-9]\d*\b|\[exit (code )?[1-9]\d*\]/i.test(out.slice(0, 400)) || /\[exit code [1-9]\d*\]\s*$/.test(out);
       if (!failed) rt.okCalls = (rt.okCalls || 0) + 1;
       return this.stuckNote(rt, call.name, args, failed, out);

@@ -27,6 +27,11 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.0.0:** the **🛡 Supervisor** — after a job that changed something, an independent inspector checks the work
+> with its own read-only checks (files, services, ports, pages, test runs, the Shield security check, a screenshot) and
+> shows a verdict with evidence: *Verified*, *Partly*, *Not verified* or *Can't verify*. It never trusts the agent's own
+> words and it cannot change anything. If it finds a problem in Auto / Full mode, the agent fixes it and the Supervisor
+> checks again (section 5.10).
 > **1.9.9:** a **🗺 Map** tab: the car learns the room with its laser (an occupancy map in 3D), explores by itself,
 > and you put the robot on the map, name places and send it there — it plans a way around the walls (also by chat, voice
 > and a 🧱 step). **🧱 Blocks** redesigned as a clear step-by-step builder (no more blocks on top of each other), a nicer
@@ -588,6 +593,29 @@ Muse Carpathron adds rules and checks so the agent doesn't invent things:
   730k tokens (adjustable); older parts are shortened only after that.
 
 ---
+
+### 5.10 🛡 Supervisor — proof that the job was really done
+
+Instead of trusting the agent when it says *done*, the **Supervisor** checks the result itself — like a quality inspector.
+It runs after every job that **changed something** (files written, commands run, servers set up, the PC changed); a
+question that only reads or explains is not supervised.
+
+1. It splits your request into requirements (what must be true now).
+2. For each one it runs its **own checks** with **read-only tools**: reads the files, lists folders, runs inspection
+   commands (`systemctl is-active`, `ss -tlnp`, `curl -I`, `Get-Service`, `npm test`, `nginx -t` …), opens pages, runs
+   the **Shield** security check for anything public and takes a screenshot for desktop work.
+3. It shows a **🛡 Supervisor card** with the verdict, each check (requirement, how it was checked, the evidence it saw)
+   and, if something is wrong, exactly what must be fixed.
+
+**It cannot change anything:** every command it runs passes a read-only filter first (install, delete, write, restart,
+POST, git push … are refused — you see *refused* in the card). Text in files, pages and command output is evidence for
+it, never instructions.
+
+**When it finds a problem** in **Auto** or **Full** mode, the report goes back to the agent, the agent fixes it and the
+Supervisor checks again (at most twice). In **Ask** mode you decide what to do.
+
+**Settings → Defaults:** switch the Supervisor on or off, and pick a **Supervisor model** — another model than the
+chat's (e.g. *muse-wonder-1.0*) gives a true second opinion.
 
 ## 6. Everything the agent can do (tools)
 

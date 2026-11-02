@@ -713,3 +713,13 @@ button.chip { cursor: pointer; }
 .robot-tabs { max-width: none; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; box-shadow: 0 -24px 0 0 var(--bg), 0 6px 14px -6px rgba(0,0,0,.6); }
 .robot-tabs button { flex: 1 0 auto; padding: 7px 11px; font-size: 13.5px; }
 @media (max-width: 720px) { .robot-tabs button { flex: 0 0 auto; } }
+/* Carpathron Supervisor report */
+.supervisor{border:1px solid var(--line,#2a2f37);border-left:4px solid #8b7bff;border-radius:12px;padding:10px 14px;margin:8px 0;background:rgba(139,123,255,.06)}
+.supervisor.ok{border-left-color:#3ecf8e;background:rgba(62,207,142,.06)}.supervisor.bad{border-left-color:#ff6b6b;background:rgba(255,107,107,.06)}.supervisor.warn{border-left-color:#f5a524;background:rgba(245,165,36,.06)}
+.supervisor .sv-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.supervisor .sv-shield{font-size:18px}
+.supervisor .sv-sum{margin:6px 0 2px}.supervisor details summary{cursor:pointer;font-size:12.5px;color:var(--muted)}
+.supervisor .sv-checks{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.supervisor .sv-check{border:1px solid var(--line,#2a2f37);border-radius:8px;padding:6px 10px}.supervisor .sv-check.fail{border-color:#5c2a31}
+.supervisor .sv-ic{display:inline-block;width:18px;font-weight:700}.supervisor .sv-check.pass .sv-ic{color:#3ecf8e}.supervisor .sv-check.fail .sv-ic{color:#ff6b6b}
+.supervisor .sv-check pre{margin:4px 0 0;white-space:pre-wrap;font-size:12px;max-height:160px;overflow:auto}
+.supervisor .sv-fix{margin-top:8px;font-size:13px}

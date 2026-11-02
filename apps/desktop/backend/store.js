@@ -27,6 +27,8 @@ const DEFAULT_SETTINGS = {
   localFallback: true, // when Meta's cloud cannot be reached, continue with the local model
   toolRouting: true, // send only the tool groups a chat needs (load_tools adds more)
   verifyBeforeFinish: true, // one self-check pass before delivering work that changed something
+  supervisor: true, // Carpathron Supervisor: independent read-only verification of finished work, with evidence
+  supervisorModel: '', // '' = the chat's model; e.g. muse-wonder-1.0 for the strictest checks
   effort: '', // reasoning effort for Muse Spark / Wonder: '', minimal, low, medium, high, xhigh, max
   servers: [], // SSH servers (passwords/keys encrypted, see secrets.js)
   museBridge: true, // give Muse Code sessions the app's tools through the MCP bridge

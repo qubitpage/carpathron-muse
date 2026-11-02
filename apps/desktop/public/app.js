@@ -613,6 +613,20 @@
           }, c.label))) : null);
         break;
       }
+      case 'supervisor': {
+        const V = { verified: ['✓ Verified', 'ok'], partly: ['◐ Partly verified', 'warn'], failed: ['✕ Not verified — problems found', 'bad'], not_verifiable: ['? Could not be verified', 'warn'] }[m.verdict] || ['?', 'warn'];
+        const checks = m.checks || []; const passed = checks.filter((c) => c.pass).length;
+        el = h('div', { class: 'supervisor ' + V[1] },
+          h('div', { class: 'sv-head' }, h('span', { class: 'sv-shield' }, '🛡'), h('b', {}, `Supervisor: ${V[0]}`), h('span', { class: 'muted small' }, ` ${passed}/${checks.length} checks passed · ${m.calls || 0} checks run · ${m.seconds || 0}s · ${m.model || ''}`)),
+          m.summary ? h('div', { class: 'sv-sum' }, m.summary) : null,
+          checks.length ? h('details', m.verdict !== 'verified' ? { open: true } : {}, h('summary', {}, 'Evidence'),
+            h('div', { class: 'sv-checks' }, checks.map((c) => h('div', { class: 'sv-check ' + (c.pass ? 'pass' : 'fail') },
+              h('div', {}, h('span', { class: 'sv-ic' }, c.pass ? '✓' : '✕'), h('b', {}, c.requirement)),
+              h('div', { class: 'muted small' }, 'Checked with: ', c.method),
+              h('pre', {}, c.evidence))))) : null,
+          m.fix && m.verdict !== 'verified' ? h('div', { class: 'sv-fix' }, h('b', {}, 'To fix: '), m.fix) : null);
+        break;
+      }
       case 'error': el = h('div', { class: 'msg error' }, '⚠️ ', m.text, SANDBOX_RE.test(m.text || '') ? sandboxFix() : null); break;
       default: el = h('div', { class: 'msg info' }, m.text || '', m.image ? genImg(m.image) : null);
     }
@@ -1243,6 +1257,8 @@
     const finishAll = h('input', { type: 'checkbox' }); finishAll.checked = S.settings.finishAllTasks !== false;
     const verifyOn = h('input', { type: 'checkbox' }); verifyOn.checked = S.settings.verifyBeforeFinish !== false;
     const routeOn = h('input', { type: 'checkbox' }); routeOn.checked = S.settings.toolRouting !== false;
+    const supOn = h('input', { type: 'checkbox' }); supOn.checked = S.settings.supervisor !== false;
+    const supModel = h('input', { value: S.settings.supervisorModel || '', placeholder: 'same as the chat (e.g. muse-wonder-1.0 for the strictest checks)' });
     const sys = h('textarea', { rows: 4, placeholder: 'e.g. Answer in Romanian. I am building a robot startup called Carpathron.' });
     sys.value = s.systemPrompt || '';
     body.append(h('div', { class: 'card' },
@@ -1254,9 +1270,11 @@
       h('label', { class: 'inline toggle' }, finishAll, ' Finish every task: keep working while the task list has unfinished tasks (also for messages sent while it works)'),
       h('label', { class: 'inline toggle' }, verifyOn, ' Check the work before finishing: one extra pass that verifies every claim with tools (fewer mistakes, slightly slower)'),
       h('label', { class: 'inline toggle' }, routeOn, ' Send only the tools each chat needs (faster and cheaper; Muse loads more tool groups by itself when needed)'),
+      h('label', { class: 'inline toggle' }, supOn, ' 🛡 Supervisor: after a job that changed something, an independent inspector verifies it with its own read-only checks (files, services, pages, tests, Shield security check) and gives a verdict with evidence. If it fails in Auto/Full mode, the agent fixes it and the Supervisor checks again.'),
+      field('Supervisor model', supModel, 'Optional: another model for the Supervisor, so the work is checked by a second opinion.'),
       field('Custom instructions (for every chat)', sys),
       h('button', { class: 'btn primary', onclick: async () => {
-        try { S.settings = await api('/api/settings', { body: { mode: mode.value, workspace: ws.value, model: model.value.trim(), maxSteps: Number(steps.value) || 100, systemPrompt: sys.value, finishAllTasks: finishAll.checked, verifyBeforeFinish: verifyOn.checked, toolRouting: routeOn.checked } }); toast('Saved'); }
+        try { S.settings = await api('/api/settings', { body: { mode: mode.value, workspace: ws.value, model: model.value.trim(), maxSteps: Number(steps.value) || 100, systemPrompt: sys.value, finishAllTasks: finishAll.checked, verifyBeforeFinish: verifyOn.checked, toolRouting: routeOn.checked, supervisor: supOn.checked, supervisorModel: supModel.value.trim() } }); toast('Saved'); }
         catch (e) { toast(e.message, true); }
       } }, 'Save')));
 

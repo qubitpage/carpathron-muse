@@ -140,8 +140,8 @@ function tinyPdf(pages) {
     const full = await sendMsg(c, 'run echo please');
     assert.strictEqual(toolMsg(full).status, 'done');
     assert.ok(/agent-ran/.test(toolMsg(full).output));
-    const sys = fake.calls().slice(-2)[0].messages[0].content;
-    assert.ok(/FULL ACCESS MODE/.test(sys));
+    const sysOf = (x) => String(x.messages && x.messages[0] && x.messages[0].content);
+    assert.ok(fake.calls().slice(-15).some((x) => /FULL ACCESS MODE/.test(sysOf(x))));
   });
 
   let server;
@@ -209,12 +209,12 @@ function tinyPdf(pages) {
     await api(`/api/convs/${c.id}`, { mode: 'full', remote: { serverId: server.id, path: remoteDir } }, 'PATCH');
     let full = await sendMsg(c, 'remote list please');
     assert.ok(/server-file\.txt/.test(toolMsg(full).output), toolMsg(full).output);
-    const sys = fake.calls().slice(-2)[0].messages[0].content;
+    const sys = fake.calls().filter((x) => !/Carpathron Supervisor/.test(String(x.messages && x.messages[0] && x.messages[0].content))).slice(-2)[0].messages[0].content;
     assert.ok(/WORKING ON REMOTE SERVER "testbox"/.test(sys), 'system prompt says where it works');
     full = await sendMsg(c, 'remote write now');
     assert.strictEqual(fs.readFileSync(path.join(remoteDir, 'from-agent.txt'), 'utf8'), 'written over sftp');
     full = await sendMsg(c, 'remote run something');
-    const out = full.messages.filter((m) => m.role === 'tool').pop().output;
+    const out = full.messages.filter((m) => m.role === 'tool' && !/Supervisor/.test(m.summary || '')).pop().output;
     assert.ok(/remote-42/.test(out) && out.includes(remoteDir), out);
   });
 

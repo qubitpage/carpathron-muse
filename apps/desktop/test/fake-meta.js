@@ -18,12 +18,23 @@ function plan(body) {
     const img = last.content.find((c) => c.type === 'image_url');
     return { text: `I can see the photo (${img ? img.image_url.url.slice(0, 23) : 'none'}).` };
   }
+  if (/You are the Carpathron Supervisor/.test(sys)) {
+    const tools = msgs.filter((m) => m.role === 'tool'); const req = String(msgs[1]?.content || '');
+    if (tools.length === 0) return { tool: ['verify_command', { command: process.platform === 'win32' ? 'Get-ChildItem -Name' : 'ls', why: 'the files exist' }] };
+    if (tools.length === 1) return { tool: ['verify_command', { command: 'rm -rf should-not-run', why: 'filter test' }] };
+    if (tools.length === 2) return { tool: ['read_file', { path: /supervisor fail test/.test(req) ? 'a.txt' : 'hello.txt' }] };
+    const listing = String(tools[0].content);
+    const failing = /supervisor fail test/.test(req) && !/fixed\.txt/.test(listing);
+    return { tool: ['supervisor_verdict', { verdict: failing ? 'failed' : 'verified', summary: failing ? 'fixed.txt is missing.' : 'The files are there and contain the right text.', checks: [{ requirement: 'files written', method: 'verify_command ls', evidence: listing.slice(0, 120), pass: !failing }, { requirement: 'content', method: 'read_file', evidence: String(tools[2].content).slice(0, 80), pass: true }], fix: failing ? 'Create fixed.txt' : '' }] };
+  }
   if (/loop forever/.test(String(firstUser))) return { tool: ['run_command', { command: 'echo step' }] };
   if (/always fail/.test(String(firstUser))) return { tool: ['read_file', { path: `missing-${msgs.length}.txt` }] };
   if (last.role === 'tool') return { text: `Done. Result: ${String(last.content).slice(0, 80)}` };
   if (/sub-agent of Carpathron/.test(sys)) return { text: `Report for: ${firstUser.slice(0, 30)}` };
   const u = String(last.content);
   if (/^\[Automatic check\]/.test(u)) return { tool: ['task_update', { tasks: [{ title: 'Step A', status: 'done' }, { title: 'Step B', status: 'done' }] }] };
+  if (/^\[Supervisor report/.test(u)) return { tool: ['write_file', { path: 'fixed.txt', content: 'fixed' }] };
+  if (/supervisor fail test/i.test(u)) return { tool: ['write_file', { path: 'a.txt', content: 'first try' }] };
   if (/^\[Automatic self-check/.test(u)) return { text: 'Verified: everything checked.' };
   if (/New message from the user while you were working/.test(u)) return { text: `Got it, also handled: ${u.split('\n').pop().slice(0, 40)}` };
   if (/make tasks/i.test(u)) return { tool: ['task_update', { tasks: [{ title: 'Step A', status: 'in_progress' }, { title: 'Step B', status: 'pending' }] }] };

@@ -406,6 +406,7 @@
           let r = await api('/api/studio/new', { body: { name, template: 'blink', fqbn: FQBN[st.board] } }).catch((e) => ({ error: e.message }));
           if (r.error && !/already exists/.test(r.error)) return toast(r.error, true);
           r = await api('/api/studio/file', { body: { project: name, name: `${name}.ino`, content: last.code } }).catch((e) => ({ error: e.message }));
+          if (/#include <ESP32Servo.h>/.test(last.code)) { toast('Installing the servo library (ESP32Servo) for this program…'); await api('/api/studio/libinstall', { body: { name: 'ESP32Servo' } }).catch(() => {}); }
           if (r.error) return toast(r.error, true);
           toast(`"${name}" is ready: connect the board with USB, then press ⬆ Upload in the Firmware studio`);
           window.MCstudio && window.MCstudio.openStudio({ project: name, fqbn: FQBN[st.board] });

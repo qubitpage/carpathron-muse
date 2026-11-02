@@ -6,7 +6,11 @@
      K vk d e     key: virtual-key code, d 1 = down / 0 = up, e 1 = extended key
      T base64     type this UTF-8 text
      Q            quit
-   Prints "ready" when it starts. */
+   Prints "ready" when it starts, and these notes for the app:
+     secure 1 / secure 0   Windows switched to / away from its secure desktop (administrator prompt, lock screen,
+                           Ctrl+Alt+Del): a normal program can neither see nor click it
+     elevated 1 / 0        the window in front belongs to a program running as administrator: Windows blocks
+                           clicks and keys from a program that is not (UIPI) */
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
@@ -24,6 +28,30 @@ static void dpi(void) {
   SetAwareness a = s ? (SetAwareness)GetProcAddress(s, "SetProcessDpiAwareness") : NULL;
   if (a && a(2) == S_OK) return;
   SetProcessDPIAware();
+}
+static int selfElevated = 0, lastElev = -1;
+static int elevatedPid(DWORD pid) {
+  int r = 0; HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid), t = NULL;
+  if (!h) return GetLastError() == ERROR_ACCESS_DENIED; /* a protected or SYSTEM program: also out of reach */
+  if (OpenProcessToken(h, TOKEN_QUERY, &t)) { TOKEN_ELEVATION e; DWORD n = 0; if (GetTokenInformation(t, TokenElevation, &e, sizeof e, &n)) r = e.TokenIsElevated != 0; CloseHandle(t); }
+  CloseHandle(h); return r;
+}
+static void checkFront(void) {
+  if (selfElevated) return;
+  HWND w = GetForegroundWindow(); DWORD pid = 0; if (!w) return; GetWindowThreadProcessId(w, &pid);
+  int e = pid ? elevatedPid(pid) : 0;
+  if (e != lastElev) { lastElev = e; printf("elevated %d\n", e); }
+}
+static DWORD WINAPI watchDesktop(LPVOID unused) {
+  int last = 0; (void)unused;
+  for (;;) {
+    int secure = 0; HDESK d = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
+    if (!d) secure = 1;
+    else { WCHAR name[64] = {0}; DWORD n = 0; if (GetUserObjectInformationW(d, UOI_NAME, name, sizeof name, &n) && lstrcmpiW(name, L"Default")) secure = 1; CloseDesktop(d); }
+    if (secure != last) { last = secure; printf("secure %d\n", secure); }
+    Sleep(700);
+  }
+  return 0;
 }
 static void sendone(INPUT *in) { SendInput(1, in, sizeof(INPUT)); }
 static void mouse(DWORD flags, LONG dx, LONG dy, DWORD data) {
@@ -80,14 +108,16 @@ int main(void) {
   dpi();
   setvbuf(stdout, NULL, _IONBF, 0);
   printf("ready\n");
+  { HANDLE t = NULL; if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &t)) { TOKEN_ELEVATION e; DWORD n = 0; if (GetTokenInformation(t, TokenElevation, &e, sizeof e, &n)) selfElevated = e.TokenIsElevated != 0; CloseHandle(t); } }
+  CreateThread(NULL, 0, watchDesktop, NULL, 0, NULL);
   while (fgets(line, sizeof line, stdin)) {
     char *p = line; size_t L = strlen(p); while (L && (p[L - 1] == '\n' || p[L - 1] == '\r')) p[--L] = 0;
     int a = 0, b = 0, c = 0;
     switch (p[0]) {
       case 'M': if (sscanf(p + 1, "%d %d", &a, &b) == 2) move(a, b); break;
-      case 'B': if (sscanf(p + 1, "%d %d", &a, &b) == 2) button(a, b); break;
+      case 'B': if (sscanf(p + 1, "%d %d", &a, &b) == 2) { if (b) checkFront(); button(a, b); } break;
       case 'W': if (sscanf(p + 1, "%d %d", &a, &b) == 2) { if (a) mouse(MOUSEEVENTF_WHEEL, 0, 0, (DWORD)a); if (b) mouse(MOUSEEVENTF_HWHEEL, 0, 0, (DWORD)b); } break;
-      case 'K': if (sscanf(p + 1, "%d %d %d", &a, &b, &c) >= 2) key(a, b, c); break;
+      case 'K': if (sscanf(p + 1, "%d %d %d", &a, &b, &c) >= 2) { if (b) checkFront(); key(a, b, c); } break;
       case 'T': if (p[1] == ' ') text(p + 2); break;
       case 'Q': return 0;
     }

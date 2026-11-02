@@ -117,6 +117,17 @@ Object.assign(XK, {
 const XBTN = [1, 2, 3, 8, 9]; // left, middle, right, back, forward
 
 class Injector {
+  // notes from rdinput.exe: what Windows does not let a remote program see or click
+  note(l) {
+    if (!l) return;
+    if (l === 'ready') return this.log('remote input helper ready');
+    if (l === 'secure 1') { this.secure = true; return this.status('The remote PC is showing a Windows security screen (an administrator prompt "Do you want to allow this app…", the lock screen or Ctrl+Alt+Del). Windows hides that screen from every remote program, so the picture stays still and clicks do not reach it. Ask the person at that PC to answer it (Yes / No or the password); the picture comes back by itself.'); }
+    if (l === 'secure 0') { if (this.secure) { this.secure = false; this.status('The Windows security screen is closed: the picture and remote control work again.'); } return; }
+    if (l === 'elevated 1') { const now = Date.now(); if (!this.elevAt || now - this.elevAt > 60000) { this.elevAt = now; this.status('The window in front runs as administrator, so Windows blocks clicks and keys from Carpathron Remote into it. To control such windows, start Carpathron Remote on that PC with right-click → "Run as administrator".'); } return; }
+    if (l === 'elevated 0') return;
+    this.log(`remote input helper: ${l.slice(0, 200)}`);
+  }
+  status(text) { this.log(text); try { this.onStatus && this.onStatus(text); } catch {} }
   constructor(log) { this.log = log || (() => {}); this.proc = null; this.down = new Set(); this.file = process.env.RD_INJECT_LOG || ''; }
   static support() {
     if (process.env.RD_INJECT_LOG) return { ok: true };
@@ -142,13 +153,20 @@ class Injector {
     // Windows: the small native helper bin/rdinput.exe (SendInput); PowerShell only if it is missing
     const exe = path.join(__dirname, 'bin', 'rdinput.exe').replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
     let cmd, args;
-    if (fs.existsSync(exe)) { cmd = exe; args = []; }
+    if (fs.existsSync(exe) && !this.useFallback) { cmd = exe; args = []; }
     else { const W = require('./winexe'); cmd = W.exe('powershell'); args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(PS, 'utf16le').toString('base64')]; }
     this.log(`remote input helper starting: ${cmd === exe ? 'rdinput.exe' : 'PowerShell (rdinput.exe missing: ' + exe + ')'}`);
     this.proc = spawn(cmd, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: require('./winexe').env() });
-    this.proc.stdout.on('data', (d) => { if (/ready/.test(String(d))) this.log('remote input helper ready'); });
-    this.proc.on('error', (e) => { this.log(`remote input helper could not start (${cmd}): ${e.message}`); this.proc = null; this.failedAt = Date.now(); });
-    this.proc.on('exit', (c) => { this.log(`remote input helper exited (${c})`); this.proc = null; });
+    this.proc.stdout.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) this.note(l.trim()); });
+    const started = Date.now(); const native = cmd === exe;
+    // a helper that cannot start or dies at once (blocked by antivirus / policy, damaged system): switch to the other one
+    const failed = (why) => {
+      this.proc = null; this.failedAt = Date.now();
+      if (native && !this.useFallback) { this.useFallback = true; this.failedAt = 0; this.status(`Remote control: the input helper was blocked on this PC (${why}); switching to the PowerShell method.`); }
+      else this.status(`Remote control is not possible on this PC right now: the input helper is blocked (${why}). The antivirus or a security policy may block programs that move the mouse; allow Carpathron Remote there, or run it as administrator.`);
+    };
+    this.proc.on('error', (e) => { this.log(`remote input helper could not start (${cmd}): ${e.message}`); failed(e.message); });
+    this.proc.on('exit', (c) => { this.log(`remote input helper exited (${c})`); if (Date.now() - started < 5000 && c !== 0) failed(`exit code ${c}`); else this.proc = null; });
     this.proc.stderr.on('data', (d) => this.log(`remote input helper: ${String(d).slice(0, 300)}`));
     this.proc.stdin.on('error', () => {});
   }

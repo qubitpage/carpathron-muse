@@ -204,12 +204,31 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
     wy += -e.deltaY * unit * 1.2; wx += e.deltaX * unit * 1.2;
     if (!wt) wt = setTimeout(() => { send({ t: 'in', e: { k: 'wh', dy: Math.round(wy), dx: Math.round(wx) } }); wy = wx = 0; wt = null; }, 30);
   }, { passive: false });
-  const held = new Set();
+  const held = new Set(); let vPending = false, vUpLater = false;
   window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.altKey && e.code === 'KeyF') { e.preventDefault(); e.stopPropagation(); setFull(!document.body.classList.contains('fs')); return; }
     if (!live || document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    // Ctrl+V: first send this PC's clipboard, then the V key, so the remote computer pastes what you just copied
+    if (e.code === 'KeyV' && (e.ctrlKey || e.metaKey) && !e.repeat && $('#clipsync').checked) {
+      e.preventDefault(); held.add(e.code); vPending = true;
+      pushClip().catch(() => {}).then(() => new Promise((r) => setTimeout(r, 250))).then(() => {
+        send({ t: 'in', e: { k: 'kd', code: 'KeyV' } }); vPending = false;
+        if (vUpLater) { vUpLater = false; send({ t: 'in', e: { k: 'ku', code: 'KeyV' } }); }
+      });
+      return;
+    }
+    // keys without a physical key code (on-screen keyboards, IME, password managers, a remote session inside a remote session,
+    // automation tools) carry only the character: send it as text instead of dropping it
+    if (!e.code || e.code === 'Unidentified' || e.key === 'Process') {
+      if (e.key && e.key.length <= 2 && e.key !== 'Process' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); send({ t: 'in', e: { k: 'txt', s: e.key } }); }
+      return;
+    }
     e.preventDefault(); held.add(e.code); send({ t: 'in', e: { k: 'kd', code: e.code } });
   }, true);
+  // text from an input method (Chinese, Japanese, emoji picker...) arrives as a finished composition
+  window.addEventListener('compositionend', (e) => { if (live && e.data && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName))) send({ t: 'in', e: { k: 'txt', s: e.data } }); }, true);
   window.addEventListener('keyup', (e) => {
+    if (e.code === 'KeyV' && vPending) { e.preventDefault(); held.delete(e.code); vUpLater = true; return; }
     if (!live || !held.has(e.code)) return; e.preventDefault(); held.delete(e.code); send({ t: 'in', e: { k: 'ku', code: e.code } });
   }, true);
   window.addEventListener('blur', () => { for (const code of held) send({ t: 'in', e: { k: 'ku', code } }); held.clear(); });
@@ -347,7 +366,23 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
   $('#quality').onchange = (e) => { send({ t: 'quality', q: e.target.value }); stage.focus(); };
   $('#keys').onchange = (e) => { if (e.target.value) send({ t: 'in', e: { k: 'combo', name: e.target.value } }); e.target.value = ''; stage.focus(); };
   $('#paste').onclick = async () => { const t = await rd.clipboard(); if (t) send({ t: 'in', e: { k: 'txt', s: t } }); stage.focus(); };
-  $('#full').onclick = async () => { const on = await rd.fullscreen(!document.body.classList.contains('fs')); document.body.classList.toggle('fs', on); stage.focus(); };
+  // Full screen: the bar slides down when the mouse touches the top edge; "Exit full screen" stays in the corner; Ctrl+Alt+F toggles
+  async function setFull(want) {
+    const on = await rd.fullscreen(!!want); document.body.classList.toggle('fs', on); document.body.classList.remove('barshow');
+    $('#full').textContent = on ? 'Exit full screen' : 'Full screen'; stage.focus();
+  }
+  $('#full').onclick = () => setFull(!document.body.classList.contains('fs'));
+  $('#fsexit').onclick = () => setFull(false);
+  window.addEventListener('mousemove', (e) => {
+    if (!document.body.classList.contains('fs')) return;
+    const bar = $('#bar').getBoundingClientRect();
+    if (e.clientY <= 6) document.body.classList.add('barshow');
+    else if (document.body.classList.contains('barshow') && e.clientY > bar.height + 30 && !$('#bar').contains(document.activeElement)) document.body.classList.remove('barshow');
+  }, true);
+  // keep the controls in step with the real window state (F11, the system, a late switch): there is always a way back
+  const fsUi = (on) => { document.body.classList.toggle('fs', !!on); if (!on) document.body.classList.remove('barshow'); $('#full').textContent = on ? 'Exit full screen' : 'Full screen'; };
+  if (rd.onFs) rd.onFs((on) => fsUi(on));
+
   $('#end').onclick = () => { stopRec(); endCall(true, true); if (live) ch.send({ t: 'bye' }); ended = true; live = false; setTimeout(() => window.close(), 150); };
   window.addEventListener('beforeunload', () => { if (live) { try { ch.send({ t: 'bye' }); } catch {} } });
 

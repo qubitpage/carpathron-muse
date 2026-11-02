@@ -28,7 +28,8 @@ body.viewer { display: flex; flex-direction: column; overflow: hidden; }
 #stage video, #stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 #overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(13,15,18,0.92); padding: 20px; }
 body.fs #bar { position: absolute; top: 0; left: 50%; transform: translate(-50%, -100%); transition: transform .15s; z-index: 5; border-radius: 0 0 10px 10px; border: 1px solid var(--line); }
-body.fs #bar:hover, body.fs #bar:focus-within { transform: translate(-50%, 0); }
+body.fs #bar:hover, body.fs #bar:focus-within, body.fs.barshow #bar { transform: translate(-50%, 0); }
+#fsexit { display: none; } body.fs #fsexit { display: block; position: fixed; top: 8px; right: 8px; z-index: 6; opacity: .55; font-size: 12px; padding: 5px 10px; } body.fs #fsexit:hover { opacity: 1; }
 body.fs::before { content: ""; position: fixed; top: 0; left: 30%; right: 30%; height: 6px; z-index: 4; }
 
 /* home */

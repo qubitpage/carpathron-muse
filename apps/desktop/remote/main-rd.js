@@ -16,7 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
-const { app, BrowserWindow, ipcMain, protocol, session, desktopCapturer, screen, dialog, safeStorage, powerSaveBlocker, nativeImage, clipboard, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, protocol, session, utilityProcess, MessageChannelMain, desktopCapturer, screen, dialog, safeStorage, powerSaveBlocker, nativeImage, clipboard, shell } = require('electron');
 const { Injector } = require('./inject');
 const runner = require('./runner');
 
@@ -176,6 +176,7 @@ function ensureHost() {
   harden(hostWin);
   hostWin.on('closed', () => { hostWin = null; });
   hostWin.webContents.on('render-process-gone', () => { log('host page crashed, restarting'); hostWin = null; setTimeout(ensureHost, 2000); });
+  hostWin.webContents.on('did-finish-load', () => givePort());
   hostWin.loadURL(pageUrl('host.html'));
 }
 function openHome() {
@@ -204,6 +205,8 @@ function openViewer(id, password, name, remember) {
   const w = new BrowserWindow({ width: 1280, height: 820, minWidth: 640, minHeight: 420, title: `${opts.appName} — ${fmtId(id)}`, backgroundColor: '#000000', icon: opts.icon || undefined, autoHideMenuBar: true, webPreferences: webPrefs() });
   harden(w);
   viewers.add(w); w.on('closed', () => { viewers.delete(w); viewerJobs.delete(token); });
+  const fsNote = (on) => { try { if (!w.isDestroyed()) w.webContents.send('rd-fs', on); } catch {} };
+  w.on('enter-full-screen', () => fsNote(true)); w.on('leave-full-screen', () => fsNote(false));
   w.loadURL(pageUrl(`viewer.html#${token}`));
   return w;
 }
@@ -266,7 +269,51 @@ function publicState() {
     version: app.getVersion(), app: opts.appName, cmdUnattended: !!S.cmdUnattended, aiReady: !!(aiMod && aiMod.ready()),
   };
 }
+// ---------------------------------------------------------------- mouse + keyboard in their own process (see input-worker.js)
+let inputWorker = null, workerFails = 0;
+const noteCtl = (text) => { if (hostWin && !hostWin.isDestroyed()) hostWin.webContents.send('rd-ctl-note', text); };
+function startInputWorker() {
+  if (!utilityProcess || !MessageChannelMain) return false;
+  let w;
+  try { w = utilityProcess.fork(path.join(__dirname, 'input-worker.js'), [], { serviceName: 'Carpathron Remote input', stdio: 'ignore' }); }
+  catch (e) { log(`remote control: input process could not start (${e.message})`); return false; }
+  inputWorker = w;
+  w.on('message', (m) => {
+    if (!m) return;
+    if (m.log) log(m.log);
+    if (m.status) noteCtl(m.status);
+    if (m.first) { const s = sessions.get(String(m.first)); log(`remote control: first input from ${s ? s.name : m.first} (${m.k})`); }
+  });
+  w.on('exit', (code) => {
+    if (inputWorker !== w) return;
+    inputWorker = null; log(`remote control: input process stopped (${code})`);
+    if (++workerFails <= 5) setTimeout(() => { if (!inputWorker && startInputWorker()) { syncInput(); givePort(); } }, 1000);
+    else { log('remote control: the input process keeps stopping, using the main process'); injector = localInjector(); }
+  });
+  return true;
+}
+function localInjector() { const j = new Injector(opts.log); j.onStatus = noteCtl; return j; }
+// which sessions may control, and the screen each one sees (physical pixels)
+function syncInput() {
+  if (!inputWorker) return;
+  let ds; try { ds = displays(); } catch { return; } const allow = {};
+  for (const [sid, s] of sessions) if (s.control !== false) allow[sid] = (ds[s.screen || 0] || ds[0]).phys;
+  try { inputWorker.postMessage({ type: 'sessions', allow }); } catch {}
+}
+// a direct line from the host page to the input process
+function givePort() {
+  if (!inputWorker || !hostWin || hostWin.isDestroyed()) return;
+  try { const { port1, port2 } = new MessageChannelMain(); inputWorker.postMessage({ type: 'port' }, [port1]); hostWin.webContents.postMessage('rd-input-port', null, [port2]); }
+  catch (e) { log(`remote control: no direct input line (${e.message})`); }
+}
+const workerInjector = {
+  handle: (ev, _rect, sid) => { if (inputWorker) inputWorker.postMessage({ type: 'in', sid, ev }); },
+  releaseAll: (rect) => { if (inputWorker) inputWorker.postMessage({ type: 'release', rect }); },
+  stop: () => { const w = inputWorker; inputWorker = null; workerFails = 99; if (!w) return; try { w.postMessage({ type: 'stop' }); } catch {} setTimeout(() => { try { w.kill(); } catch {} }, 500); },
+};
+
 function broadcastState() {
+  syncInput();
   for (const w of [homeWin, bannerWin, hostWin]) if (w && !w.isDestroyed()) w.webContents.send('rd-state');
 }
 
@@ -412,8 +459,9 @@ function setupIpc() {
     c.last = Date.now(); S.saved = [c, ...S.saved.filter((x) => x !== c)].slice(0, 50); save(); broadcastState();
   });
   handle('rd-title', (e, t) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.setTitle(String(t).slice(0, 120)); });
-  handle('rd-fullscreen', (e, on) => { const w = BrowserWindow.fromWebContents(e.sender); if (w) w.setFullScreen(!!on); return w ? w.isFullScreen() : false; });
-  handle('rd-clipboard', () => String(clipboard.readText() || '').slice(0, 20000));
+  handle('rd-fullscreen', (e, on) => { const w = BrowserWindow.fromWebContents(e.sender); if (!w) return false; w.setFullScreen(!!on); return !!on; }); // the switch can finish later: answer what was asked
+  // Electron 44: clipboard.readText() returns a Promise — always await it
+  handle('rd-clipboard', async () => String((await clipboard.readText()) || '').slice(0, 20000));
 
   // files: open a dropped file (path from webUtils in the preload), read it in chunks; save received files
   handle('rd-file-open', async (_e, p) => {
@@ -447,7 +495,7 @@ function setupIpc() {
   });
   handle('rd-show-file', (_e, p) => { p = String(p || ''); if (received.has(p)) shell.showItemInFolder(p); else if (p === 'downloads' || p === 'rec') shell.openPath(recvDir(p === 'rec' ? 'rec' : 'file')); return true; });
   handle('rd-clip-write', (_e, text) => { if (S.clipSync !== false && typeof text === 'string') clipboard.writeText(text.slice(0, 100000)); return true; });
-  handle('rd-clip-read', () => (S.clipSync !== false ? String(clipboard.readText() || '').slice(0, 100000) : ''));
+  handle('rd-clip-read', async () => (S.clipSync !== false ? String((await clipboard.readText()) || '').slice(0, 100000) : ''));
 
   // session panel (on the controlled computer) <-> host page
   handle('rd-panel-cmd', (_e, cmd) => { if (hostWin && !hostWin.isDestroyed() && cmd && typeof cmd.t === 'string') hostWin.webContents.send('rd-panel-cmd', cmd); return true; });
@@ -495,7 +543,7 @@ function setupIpc() {
     if (!s || !ev || s.control === false) { if (!inputWarned.has(String(sid))) { inputWarned.add(String(sid)); log(`remote control: input ignored (${!s ? 'unknown session' : !ev ? 'empty event' : 'view only'})`); } return; }
     if (!s.inputSeen) { s.inputSeen = true; log(`remote control: first input from ${s.name} (${ev.k})`); }
     const ds = displays(); const d = ds[s.screen || 0] || ds[0];
-    injector.handle(ev, d.phys);
+    injector.handle(ev, d.phys, String(sid));
   }, true);
 }
 
@@ -517,7 +565,9 @@ function serve(req) {
 function init(o) {
   opts = Object.assign(opts, o || {});
   load();
-  injector = new Injector(opts.log);
+  // mouse + keyboard in their own process; the people controlling this PC are told (in their chat) when they cannot be used
+  injector = startInputWorker() ? workerInjector : localInjector();
+  try { for (const ev of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(ev, () => syncInput()); } catch {}
   newOtp();
   const ses = session.fromPartition(PART);
   ses.protocol.handle(SCHEME, serve);

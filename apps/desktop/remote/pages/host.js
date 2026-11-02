@@ -64,6 +64,7 @@
   function later() { clearTimeout(laterTimer); laterTimer = setTimeout(connect, retry); retry = Math.min(retry * 2, 30000); }
   setInterval(() => { if (ctl && ctl.readyState === 1) ctl.send(JSON.stringify({ t: 'ice' })); }, 6 * 3600 * 1000);
   rd.onConfig(() => { retry = 1000; connect(); });
+  rd.onCtlNote((text) => { for (const s of sessions.values()) if (s.how && s.ch) s.ch.send({ t: 'chat', text: '⚠ ' + String(text) }).catch(() => {}); });
   rd.onKill((sid) => { for (const [id, s] of sessions) if (sid === '*' || sid === id) s.end('The host ended the session.'); });
 
   // ------------------------------------------------------------ one viewer session

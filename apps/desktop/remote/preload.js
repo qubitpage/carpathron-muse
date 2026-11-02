@@ -3,6 +3,10 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const inv = (ch) => (...a) => ipcRenderer.invoke(ch, ...a);
 const on = (ch) => (fn) => { const h = (_e, ...a) => fn(...a); ipcRenderer.on(ch, h); return () => ipcRenderer.removeListener(ch, h); };
+// input for this PC goes straight to the input process when it is there (not through the main thread)
+let inPort = null;
+ipcRenderer.on('rd-input-port', (e) => { try { if (inPort) inPort.close(); } catch {} inPort = e.ports && e.ports[0] || null; if (inPort) inPort.start(); });
+const sendInput = (sid, ev) => { if (inPort) { try { inPort.postMessage({ sid: String(sid), ev }); return Promise.resolve(); } catch { inPort = null; } } return ipcRenderer.invoke('rd-input', sid, ev); };
 contextBridge.exposeInMainWorld('rd', {
   // home + banner
   state: inv('rd-state'), set: inv('rd-set'), newOtp: inv('rd-new-otp'), setPassword: inv('rd-set-password'),
@@ -20,9 +24,9 @@ contextBridge.exposeInMainWorld('rd', {
   panelCmd: inv('rd-panel-cmd'), panelOpen: inv('rd-panel-open'), panelLog: inv('rd-panel-log'), onPanelEvent: on('rd-panel-event'), onPanelOpen: on('rd-panel-open'),
   // host page
   hostConfig: inv('rd-host-config'), hostStatus: inv('rd-host-status'), authResult: inv('rd-auth-result'), locked: inv('rd-locked'),
-  consent: inv('rd-consent'), screens: inv('rd-screens'), source: inv('rd-source'), session: inv('rd-session'), input: inv('rd-input'),
+  consent: inv('rd-consent'), screens: inv('rd-screens'), source: inv('rd-source'), session: inv('rd-session'), input: sendInput,
   panelEvent: inv('rd-panel-event'), sysinfo: inv('rd-sysinfo'), onPanelCmd: on('rd-panel-cmd'),
-  onKill: on('rd-kill'), onConfig: on('rd-config'),
+  onKill: on('rd-kill'), onConfig: on('rd-config'), onCtlNote: on('rd-ctl-note'), onFs: on('rd-fs'),
   // SSH terminal
   openSsh: inv('rd-open-ssh'), sshList: inv('rd-ssh-list'), sshSave: inv('rd-ssh-save'), sshDelete: inv('rd-ssh-delete'), sshForgetKey: inv('rd-ssh-forget-key'),
   sshOpen: inv('rd-ssh-open'), sshTrust: inv('rd-ssh-trust'), sshWrite: inv('rd-ssh-write'), sshResize: inv('rd-ssh-resize'), sshClose: inv('rd-ssh-close'), sshKeyFile: inv('rd-ssh-keyfile'),

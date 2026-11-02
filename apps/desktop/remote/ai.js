@@ -127,7 +127,7 @@ async function callModel(cfg, system, hist, tools, signal) {
   if (!base) throw new Error('Set the API address in Settings → AI technician.');
   if (!cfg.model) throw new Error('Choose a model in Settings → AI technician.');
   const sig = AbortSignal.any([signal, AbortSignal.timeout(180000)]);
-  const err = async (r) => { const t = await r.text(); let m = t; try { const j = JSON.parse(t); m = (j.error && (j.error.message || j.error)) || j.message || t; } catch {} return new Error(`AI service ${r.status}: ${String(typeof m === 'string' ? m : JSON.stringify(m)).slice(0, 400)}`); };
+  const err = async (r) => { const t = await r.text(); let m = t; try { const j = JSON.parse(t); m = (j.error && (j.error.message || j.error)) || j.message || t; } catch {} const hint = r.status === 401 ? ' — the service refused the API key: check that it is the key of the AI service chosen above, copied whole, and not deleted on that service\'s website.' : r.status === 402 || r.status === 429 ? ' — check the credit / limits of your account on that service.' : ''; return new Error(`AI service ${r.status}: ${String(typeof m === 'string' ? m : JSON.stringify(m)).slice(0, 400)}${hint}`); };
   if (cfg.format === 'anthropic') {
     const r = await fetch(`${base}/messages`, { method: 'POST', signal: sig, headers: { 'content-type': 'application/json', 'x-api-key': cfg.key, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({ model: cfg.model, max_tokens: 4096, system, tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })), messages: toAnthropic(hist) }) });
@@ -182,6 +182,10 @@ function create({ getS, save, seal, unseal, log, handle, desktop, ssh, onAiState
     if (p.provider && P[p.provider]) { if (a.provider !== p.provider) { a.base = ''; a.model = ''; } a.provider = p.provider; }
     if (p.base !== undefined) { const b = String(p.base || '').trim(); if (b && !/^https?:\/\/[^\s]+$/.test(b)) throw new Error('The API address must start with https:// (or http:// for a local model).'); a.base = b; }
     if (p.model !== undefined) a.model = String(p.model || '').trim().slice(0, 120);
+    // a key that clearly belongs to another service is refused with a clear message (instead of a 401 later)
+    if (p.key) { const t = String(p.key).trim(), g = /^sk-ant-/.test(t) ? 'anthropic' : /^sk-or-/.test(t) ? 'openrouter' : '';
+      if (a.provider === 'anthropic' && !/^sk-ant-/.test(t)) throw new Error('This is not a Claude API key: Claude API keys start with "sk-ant-" (create one at console.anthropic.com → API keys; a claude.ai login is not an API key).');
+      if (g && g !== a.provider && a.provider !== 'custom') throw new Error(`This looks like a ${P[g] ? P[g].label : g} key: choose that AI service first, then paste it.`); }
     if (p.key !== undefined) { a.keys = a.keys || {}; if (p.key) a.keys[a.provider] = seal(String(p.key).trim()); else delete a.keys[a.provider]; }
     if (p.mode) a.mode = p.mode === 'auto' ? 'auto' : 'approve';
     if (p.supervisor !== undefined) a.supervisor = !!p.supervisor;

@@ -97,6 +97,8 @@ function load() {
   try { S = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { S = {}; }
   S = Object.assign({ relay: DEFAULT_RELAY, id: '', key: '', name: os.hostname(), enabled: !!opts.hostDefault, unattended: false, perm: null, quality: 'auto', saved: [], autostart: false, viewOnly: false, clipSync: true, plugin: true }, S);
   if (!unseal(S.key)) { S.key = seal(rnd(32).toString('hex')); save(); }
+  // reconnect keys of earlier sessions: after an app or PC restart they are valid 10 more minutes at most
+  S.resumes = (Array.isArray(S.resumes) ? S.resumes : []).filter((r) => r && r.exp > Date.now()).map((r) => ({ ...r, exp: Math.min(r.exp, Date.now() + 10 * 60000) }));
 }
 function save() { try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file + '.tmp', JSON.stringify(S, null, 1)); fs.renameSync(file + '.tmp', file); } catch (e) { log('save', e.message); } }
 
@@ -261,7 +263,7 @@ function sysinfo() {
 
 function publicState() {
   return {
-    host: { ...hostState, control: Injector.support(), enabled: S.enabled, id: S.id, idFmt: fmtId(S.id), otp: S.enabled ? otp : '', unattended: S.unattended, hasPerm: !!S.perm, name: S.name, locked: lockedUntil > Date.now() ? lockedUntil : 0 },
+    host: { ...hostState, control: Injector.support(), enabled: S.enabled, id: S.id, idFmt: fmtId(S.id), otp: S.enabled ? otp : '', unattended: S.unattended, hasPerm: !!S.perm, trusted: (S.trusted || []).map((t) => ({ salt: t.salt, name: t.name, pc: t.pc, added: t.added, last: t.last || 0 })), name: S.name, locked: lockedUntil > Date.now() ? lockedUntil : 0 },
     sessions: [...sessions.entries()].map(([sid, s]) => ({ sid, ...s })),
     relay: isAuto() ? '' : S.relay, relayNow: relay(), quality: S.quality, autostart: S.autostart, viewOnly: !!S.viewOnly, clipSync: S.clipSync !== false, standalone: !!opts.standalone, store: !!process.windowsStore,
     license: licensePublic(),
@@ -270,7 +272,8 @@ function publicState() {
   };
 }
 // ---------------------------------------------------------------- mouse + keyboard in their own process (see input-worker.js)
-let inputWorker = null, workerFails = 0;
+let inputWorker = null, workerFails = 0, idChange = null;
+const recaptureAll = (why) => { if (hostWin && !hostWin.isDestroyed() && sessions.size) hostWin.webContents.send('rd-recapture', why); };
 const noteCtl = (text) => { if (hostWin && !hostWin.isDestroyed()) hostWin.webContents.send('rd-ctl-note', text); };
 function startInputWorker() {
   if (!utilityProcess || !MessageChannelMain) return false;
@@ -282,6 +285,8 @@ function startInputWorker() {
     if (!m) return;
     if (m.log) log(m.log);
     if (m.status) noteCtl(m.status);
+    if (m.secure === 0) recaptureAll('the Windows security screen closed');
+    if (m.secure === 1) log('remote control: Windows security screen shown through the helper service');
     if (m.first) { const s = sessions.get(String(m.first)); log(`remote control: first input from ${s ? s.name : m.first} (${m.k})`); }
   });
   w.on('exit', (code) => {
@@ -320,16 +325,16 @@ function broadcastState() {
 // ---------------------------------------------------------------- consent (attended access)
 async function askConsent(info) {
   const auto = process.env.RD_AUTO_CONSENT;
-  if (auto) return auto === 'allow' ? 'full' : auto === 'view' ? 'view' : false;
+  if (auto) return auto === 'allow' ? 'full' : auto === 'trust' ? 'trust' : auto === 'view' ? 'view' : false;
   const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 60000);
   try {
     const parent = (homeWin && !homeWin.isDestroyed() && homeWin.isVisible()) ? homeWin : null;
-    const o = { type: 'question', buttons: ['Allow', 'Allow viewing only', 'Deny'], defaultId: 2, cancelId: 2, noLink: true, title: opts.appName,
+    const o = { type: 'question', buttons: ['Allow', 'Allow and always trust this computer', 'Allow viewing only', 'Deny'], defaultId: 3, cancelId: 3, noLink: true, title: opts.appName,
       message: `${String(info.name || 'Someone').slice(0, 60)} wants to control this computer`,
-      detail: `They used this computer's one-time password${info.pc ? ` from "${String(info.pc).slice(0, 60)}"` : ''}.\n\nAllow: they see your screen and use your mouse and keyboard.\nAllow viewing only: they only see your screen (presentation).\n\nAllow only people you trust. You can chat, call, send files or end the session any time from the bar at the top of the screen.\n\nNo answer in 60 seconds = Deny.`,
+      detail: `They used this computer's one-time password${info.pc ? ` from "${String(info.pc).slice(0, 60)}"` : ''}.\n\nAllow: they see your screen and use your mouse and keyboard.\nAllow and always trust this computer: from now on that computer can connect any time without a password and without asking (for your own computers or your IT support; you can remove it in Remote desktop → Trusted computers).\nAllow viewing only: they only see your screen (presentation).\n\nAllow only people you trust. You can chat, call, send files or end the session any time from the bar at the top of the screen.\n\nNo answer in 60 seconds = Deny.`,
       signal: ac.signal };
     const r = parent ? await dialog.showMessageBox(parent, o) : await dialog.showMessageBox(o);
-    return r.response === 0 ? 'full' : r.response === 1 ? 'view' : false;
+    return r.response === 0 ? 'full' : r.response === 1 ? 'trust' : r.response === 2 ? 'view' : false;
   } catch { return false; } finally { clearTimeout(t); }
 }
 
@@ -373,6 +378,19 @@ function setupIpc() {
     save(); ensureHost(); broadcastState(); return publicState();
   });
   handle('rd-new-otp', () => { newOtp(); return publicState(); });
+  // change this computer's ID: a chosen 9-digit number (if free) or a new random one ('')
+  handle('rd-change-id', async (_e, want) => {
+    want = String(want || '').replace(/\D/g, '');
+    if (want && !/^\d{9}$/.test(want)) return { ok: false, error: 'The ID must have exactly 9 digits.' };
+    if (want && want === S.id) return { ok: true, id: fmtId(S.id) };
+    if (!S.enabled) return { ok: false, error: 'Turn on "Accept connections" first.' };
+    if (idChange) return { ok: false, error: 'Already changing the ID, wait a moment.' };
+    const prev = S.id; S.id = want; save();
+    const r = await new Promise((res) => { idChange = { res }; setTimeout(() => res({ ok: false, error: 'The relay did not answer. Check the internet and try again.' }), 15000); ensureHost(); });
+    idChange = null;
+    if (!r.ok) { S.id = prev; save(); ensureHost(); } else log(`ID changed to ${r.id}`);
+    broadcastState(); return r;
+  });
   handle('rd-set-password', async (_e, pw) => {
     pw = String(pw || '');
     if (!pw) { S.perm = null; S.unattended = false; save(); broadcastState(); return publicState(); }
@@ -449,7 +467,8 @@ function setupIpc() {
   handle('rd-viewer-job', async (e, token) => {
     const j = viewerJobs.get(String(token)); if (!j) return null;
     try { await licenseCall('status'); } catch {} // fresh usage for today
-    return { id: j.id, idFmt: fmtId(j.id), password: j.password, name: j.name, remember: j.remember, lic: licToken(), buyUrl: BUY_URL, relay: relay(), me: S.name, pc: os.hostname(), quality: S.quality, clipSync: S.clipSync !== false };
+    let trust = null; try { const c = (S.saved || []).find((x) => x.id === j.id); if (c && c.trust) trust = JSON.parse(unseal(c.trust)); } catch {}
+    return { trust, id: j.id, idFmt: fmtId(j.id), password: j.password, name: j.name, remember: j.remember, lic: licToken(), buyUrl: BUY_URL, relay: relay(), me: S.name, pc: os.hostname(), quality: S.quality, clipSync: S.clipSync !== false };
   });
   handle('rd-viewer-connected', (_e, id, remoteName) => {
     id = String(id || '').replace(/\D/g, ''); if (!/^\d{9}$/.test(id)) return;
@@ -505,11 +524,48 @@ function setupIpc() {
   handle('rd-sysinfo', () => sysinfo(), true);
 
   // host page only
-  handle('rd-host-config', () => ({ relay: relay(), id: S.id, key: unseal(S.key), name: S.name, otp, otpSalt, perm: S.perm ? { salt: S.perm.salt, k: unseal(S.perm.k) } : null, unattended: S.unattended, quality: S.quality, locked: lockedUntil, forceRelay: process.env.RD_FORCE_RELAY === '1', viewOnly: !!S.viewOnly, clipSync: S.clipSync !== false }), true);
+  // ---- reconnect keys: a viewer that lost the connection (network, app or PC restart) comes back without a new
+  // password or a new "Allow", for 10 minutes after the session ended (like the big remote tools)
+  const liveResumes = () => (S.resumes || []).filter((r) => r.exp > Date.now());
+  handle('rd-resume-add', (_e, r) => {
+    if (!r || !r.salt || !r.key) return false;
+    S.resumes = liveResumes().slice(-4);
+    S.resumes.push({ sid: String(r.sid || ''), salt: String(r.salt), k: seal(String(r.key)), name: String(r.name || '').slice(0, 60), how: String(r.how || ''), control: r.control !== false, exp: Date.now() + 12 * 3600000 });
+    save(); return true;
+  }, true);
+  // trusted computers: the person at this PC chose "Allow and always trust this computer"; that viewer then connects
+  // any time without a password or a question (until removed here)
+  handle('rd-trust-add', (_e, t) => {
+    if (!t || !t.salt || !t.key) return false;
+    S.trusted = (S.trusted || []).filter((x) => x.salt !== t.salt).slice(-199);
+    S.trusted.push({ salt: String(t.salt), k: seal(String(t.key)), name: String(t.name || '').slice(0, 60), pc: String(t.pc || '').slice(0, 60), added: Date.now() });
+    save(); broadcastState(); log(`trusted computer added: ${t.name} (${t.pc})`); return true;
+  }, true);
+  handle('rd-trust-used', (_e, salt) => { const t = (S.trusted || []).find((x) => x.salt === salt); if (t) { t.last = Date.now(); save(); } return true; }, true);
+  handle('rd-untrust', (_e, salt) => { S.trusted = (S.trusted || []).filter((x) => x.salt !== String(salt)); save(); broadcastState(); return publicState(); });
+  // the viewer side keeps the trust key of a computer with its saved entry (encrypted)
+  handle('rd-remember-trust', (_e, token, tok, salt) => {
+    const j = viewerJobs.get(String(token)); if (!j || !tok || !salt) return false;
+    let c = (S.saved || []).find((x) => x.id === j.id); if (!c) { c = { id: j.id }; S.saved.unshift(c); }
+    c.trust = seal(JSON.stringify({ tok: String(tok), salt: String(salt) })); save(); broadcastState(); return true;
+  });
+  handle('rd-resume-use', (_e, salt) => { S.resumes = liveResumes().filter((r) => r.salt !== salt); save(); return true; }, true);
+  // restart this PC for the person controlling it (the viewer reconnects by itself afterwards)
+  handle('rd-restart-pc', (_e, who) => {
+    const msg = `Carpathron Remote: restart asked by ${String(who || 'the remote helper').slice(0, 60)}`;
+    try {
+      if (process.env.RD_INJECT_LOG) { log(`TEST: restart asked by ${who}`); return { ok: true, autostart: true }; } // tests never restart the machine
+      if (process.platform === 'win32') { const W = require('./winexe'); require('child_process').spawn(W.exe('cmd'), ['/c', 'shutdown', '/r', '/t', '8', '/c', msg], { windowsHide: true, detached: true, env: W.env() }).unref(); }
+      else require('child_process').spawn('systemctl', ['reboot'], { detached: true, stdio: 'ignore' }).unref();
+      log(`restart of this PC asked by ${who}`); return { ok: true, autostart: process.platform !== 'win32' || !!S.autostart || !opts.standalone };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }, true);
+  handle('rd-host-config', () => ({ trusted: (S.trusted || []).map((t) => ({ salt: t.salt, k: unseal(t.k), name: t.name })), resumes: liveResumes().map((r) => ({ salt: r.salt, k: unseal(r.k), name: r.name, how: r.how, control: r.control })), relay: relay(), id: S.id, key: unseal(S.key), name: S.name, otp, otpSalt, perm: S.perm ? { salt: S.perm.salt, k: unseal(S.perm.k) } : null, unattended: S.unattended, quality: S.quality, locked: lockedUntil, forceRelay: process.env.RD_FORCE_RELAY === '1', viewOnly: !!S.viewOnly, clipSync: S.clipSync !== false }), true);
   handle('rd-host-status', (_e, st) => {
     hostState = { state: String(st && st.state || 'off'), error: st && st.error ? String(st.error) : '' };
     if (st && st.id && /^\d{9}$/.test(st.id) && st.id !== S.id) { S.id = st.id; save(); }
-    if (st && st.error === 'id-taken') { S.id = ''; save(); }
+    if (st && st.id && idChange) idChange.res({ ok: true, id: fmtId(st.id) });
+    if (st && st.error === 'id-taken') { if (idChange) idChange.res({ ok: false, error: 'This ID is already used by another computer. Choose another one.' }); else { S.id = ''; save(); } }
     broadcastState();
   }, true);
   handle('rd-auth-result', (_e, ok) => {
@@ -534,10 +590,12 @@ function setupIpc() {
       const s = sessions.get(sid); sessions.delete(sid);
       if (s && injector) { const d = displays()[s.screen || 0] || displays()[0]; injector.releaseAll(d.phys); }
       if (info === null && s && s.how === 'one-time password') newOtp(); // a used one-time password is not used twice
+      if (S.resumes && S.resumes.some((r) => r.sid === sid)) { for (const r of S.resumes) if (r.sid === sid) r.exp = Math.min(r.exp, Date.now() + 10 * 60000); save(); }
       if (!sessions.size && blocker != null) { try { powerSaveBlocker.stop(blocker); } catch {} blocker = null; }
     }
     showBanner(); broadcastState();
   }, true);
+  handle('rd-log-line', (_e, t) => { log(`host: ${String(t).slice(0, 300)}`); return true; }, true);
   handle('rd-input', (_e, sid, ev) => {
     const s = sessions.get(String(sid));
     if (!s || !ev || s.control === false) { if (!inputWarned.has(String(sid))) { inputWarned.add(String(sid)); log(`remote control: input ignored (${!s ? 'unknown session' : !ev ? 'empty event' : 'view only'})`); } return; }
@@ -567,7 +625,8 @@ function init(o) {
   load();
   // mouse + keyboard in their own process; the people controlling this PC are told (in their chat) when they cannot be used
   injector = startInputWorker() ? workerInjector : localInjector();
-  try { for (const ev of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(ev, () => syncInput()); } catch {}
+  try { for (const ev of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(ev, () => { syncInput(); recaptureAll('the screens changed'); }); } catch {}
+  try { const { powerMonitor } = require('electron'); powerMonitor.on('unlock-screen', () => recaptureAll('the PC was unlocked')); powerMonitor.on('resume', () => recaptureAll('the PC woke up')); } catch {}
   newOtp();
   const ses = session.fromPartition(PART);
   ses.protocol.handle(SCHEME, serve);
@@ -600,4 +659,4 @@ function setPlugin(on) {
   if (!S.plugin) { S.enabled = false; for (const w of [homeWin, sshWin, ...viewers]) if (w && !w.isDestroyed()) w.close(); }
   save(); ensureHost(); broadcastState(); return pluginState();
 }
-module.exports = { preReady, init, openHome, openSsh, openViewer, pluginState, setPlugin, pluginEnabled: () => !!S && S.plugin !== false, isHosting: () => !!(S && S.enabled), sessionsCount: () => sessions.size, _test: { publicState, displays, otp: () => otp, setPerm: (pw) => { const salt = rnd(16); S.perm = { salt: salt.toString('base64'), k: seal(crypto.pbkdf2Sync(pw, salt, ITER, 32, 'sha256').toString('base64')) }; S.unattended = true; save(); }, settings: () => S, ensureHost } };
+module.exports = { preReady, init, openHome, openSsh, openViewer, pluginState, setPlugin, pluginEnabled: () => !!S && S.plugin !== false, isHosting: () => !!(S && S.enabled), sessionsCount: () => sessions.size, _test: { fakeAgent: (line) => { if (inputWorker) inputWorker.postMessage({ type: 'fake', line }); }, publicState, displays, otp: () => otp, setPerm: (pw) => { const salt = rnd(16); S.perm = { salt: salt.toString('base64'), k: seal(crypto.pbkdf2Sync(pw, salt, ITER, 32, 'sha256').toString('base64')) }; S.unattended = true; save(); }, settings: () => S, ensureHost } };

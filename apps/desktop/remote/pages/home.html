@@ -24,10 +24,13 @@
       <p class="muted">Give your ID and password only to people you trust: they will see your screen and use your mouse and keyboard.</p>
       <label class="switch"><input type="checkbox" id="enabled"> <span>Accept connections</span></label>
       <div id="hostinfo">
-        <div class="field"><div class="label">Your ID</div><div class="big" id="myid">—</div></div>
+        <div class="field"><div class="label">Your ID</div><div class="row" style="margin-top:2px"><div class="big" id="myid">—</div><button id="chid" title="Choose another ID for this computer">Change</button></div>
+          <div class="row" id="idform" hidden><input type="text" id="newid" inputmode="numeric" maxlength="11" placeholder="9 digits, e.g. 123 456 789" style="width:190px"><button id="idsave" class="primary">Save</button><button id="idrandom" title="A new random ID">Random</button><button id="idcancel">Cancel</button></div>
+          <div class="small" id="idmsg" hidden></div></div>
         <div class="field"><div class="label">One-time password</div><div class="row" style="margin-top:2px"><div class="big" id="otp">—</div><button id="newotp" title="Make a new one-time password">New</button></div>
           <div class="muted small">Changes after every session. Someone at this computer must click <b>Allow</b>.</div></div>
         <div class="field"><div class="label">Unattended access (your own computers)</div>
+          <div class="list" id="trusted" hidden></div>
           <label class="switch"><input type="checkbox" id="unattended"> <span>Allow connections with my personal password, without asking</span></label>
           <div class="row"><input type="password" id="ppw" placeholder="Personal password (10+ characters)" autocomplete="new-password" style="flex:1"><button id="setppw">Set</button></div>
           <div id="ppwstate" class="muted small"></div>

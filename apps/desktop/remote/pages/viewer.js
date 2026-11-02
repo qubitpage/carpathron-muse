@@ -6,6 +6,7 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
   const { RD } = window; const rd = window.rd;
   const $ = (s) => document.querySelector(s);
   const stage = $('#stage'), video = $('#video'), canvas = $('#canvas'), ctx = canvas.getContext('2d', { alpha: false });
+  let resume = null, reconn = null, pingTimer = null; // reconnect key from the host; reconnecting state
   let job = null, ch = null, pc = null, dc = null, mode = '', screenW = 0, screenH = 0, ice = [], hostName = '', ended = false, live = false;
   let frames = 0, fpsShown = 0, rtt = 0;
   let tr = null, voice = null, ui = null, call = '', control = true, lastClip = null, unread = 0, rec = null;
@@ -41,53 +42,75 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
     $('#who').textContent = job.name ? `${job.name} · ${job.idFmt}` : job.idFmt;
     $('#quality').value = job.quality || 'auto';
     $('#clipsync').checked = job.clipSync !== false;
-    if (job.password) start(); else askPassword();
+    if (job.password || job.trust) start(); else askPassword();
   }
 
   function start() {
     ended = false;
-    overlay(`<div class="card"><div class="spin"></div><h2>Connecting to ${esc(job.idFmt)}…</h2><p class="muted" id="step">Looking for the computer</p></div>`);
+    if (reconn) { overlay(`<div class="card"><div class="spin"></div><h2>Reconnecting to ${esc(hostName || job.idFmt)}…</h2><p class="muted" id="step">${esc(reconn.why)} · attempt ${reconn.n}</p><div class="row"><button id="rcstop">Stop</button></div></div>`); $('#rcstop').onclick = () => { reconn = null; fail('Reconnecting stopped.'); }; }
+    else overlay(`<div class="card"><div class="spin"></div><h2>Connecting to ${esc(job.idFmt)}…</h2><p class="muted" id="step">Looking for the computer</p></div>`);
     status('Connecting', 'warn');
     let ws; try { ws = new WebSocket(RD.relayUrl(job.relay)); } catch { return fail('bad-relay'); }
     ch = new RD.Channel(ws);
-    let nh = '', so = '', sp = null, nv = '', kOtp = null, kPerm = null;
-    ch.onclose = (e) => { stopLimit(); rd.licenseQuiet().catch(() => {}); if (e && e.code === 4429) return fail('session-limit'); if (e && e.code === 4430) return fail('daily-limit'); if (!ended) fail(live ? 'The connection was closed.' : 'The connection to the relay was lost.'); };
+    let nh = '', so = '', sp = null, nv = '', kOtp = null, kPerm = null, kRes = null;
+    const myCh = ch;
+    ch.onclose = (e) => {
+      if (ch !== myCh) return;
+      stopLimit(); rd.licenseQuiet().catch(() => {});
+      if (e && e.code === 4429) return fail('session-limit'); if (e && e.code === 4430) return fail('daily-limit');
+      if (ended) return;
+      if (live || reconn) return reconnect(reconn ? reconn.why : 'The connection was lost');
+      fail('The connection to the relay was lost.');
+    };
     ws.onopen = () => ws.send(JSON.stringify({ t: 'connect', id: job.id, lic: job.lic || '' }));
     ch.onjson = async (m) => {
       if (m.t === 'waiting') { ice = m.ice || []; const s = $('#step'); if (s) s.textContent = 'Waiting for the computer to answer'; }
-      else if (m.t === 'error') fail(m.code);
+      else if (m.t === 'error') { if (reconn && ['offline', 'no-answer', 'busy'].includes(m.code)) { const c = ch; ch = null; try { c.close(); } catch {} return reconnect(reconn.why); } fail(m.code); }
       else if (m.t === 'paired') { const s = $('#step'); if (s) s.textContent = 'Checking the password'; if (m.limit) startLimit(m.limit, m.daily); }
       else if (m.t === 'hello') {
         hostName = m.name || ''; nh = m.nh; so = m.so; sp = m.sp; nv = RD.b64(RD.rand(16));
         const msg = { t: 'auth', v: 1, nv, name: job.me || 'Carpathron user', pc: job.pc || '' };
         if (so) { kOtp = await RD.derive(job.password, so); msg.po = await RD.hmac(kOtp, 'viewer|' + nh + '|' + nv); }
         if (sp) { kPerm = await RD.derive(job.password, sp); msg.pp = await RD.hmac(kPerm, 'viewer|' + nh + '|' + nv); }
+        if (!resume && job.trust && Array.isArray(m.sr) && m.sr.includes(job.trust.salt)) { kRes = await RD.derive(job.trust.tok, job.trust.salt); msg.pr = await RD.hmac(kRes, 'viewer|' + nh + '|' + nv); msg.rs = job.trust.salt; }
+        if (resume && Array.isArray(m.sr) && m.sr.includes(resume.salt)) { kRes = await RD.derive(resume.tok, resume.salt); msg.pr = await RD.hmac(kRes, 'viewer|' + nh + '|' + nv); msg.rs = resume.salt; }
         await ch.send(msg);
         const s = $('#step'); if (s) s.textContent = 'Waiting for the person at that computer to allow the connection';
       } else if (m.t === 'denied') {
         ended = true; ch.close();
-        if (m.reason === 'password') { job.password = ''; askPassword(REASONS.password); status('Not connected', 'bad'); }
+        if (m.reason === 'password' && reconn) { reconn = null; resume = null; job.password = ''; askPassword('The connection was lost and the other computer asks for its password again (its one-time password changes after every session).'); status('Not connected', 'bad'); }
+        else if (m.reason === 'password' && job.trust && !job.password) { job.trust = null; askPassword('That computer does not trust this one any more. Enter its password.'); status('Not connected', 'bad'); }
+        else if (m.reason === 'password') { job.password = ''; askPassword(REASONS.password); status('Not connected', 'bad'); }
         else fail(m.reason);
       } else if (m.t === 'ok') {
         let key = null;
-        for (const k of [kOtp, kPerm]) if (k && RD.same(await RD.hmac(k, 'host|' + nh + '|' + nv), m.p)) { key = k; break; }
+        for (const k of [kRes, kOtp, kPerm]) if (k && RD.same(await RD.hmac(k, 'host|' + nh + '|' + nv), m.p)) { key = k; break; }
         if (!key) { ended = true; ch.close(); return fail('That computer could not prove it knows the password. Connection stopped.'); }
         ch.secure(await RD.sessionKeys(key, nh, nv, 'viewer'));
         ch.onjson = onMsg; ch.onbinary = onFrame;
         live = true;
         setupExtras();
+        if (reconn) { if (ui) ui.info('Reconnected.'); reconn = null; } resume = null;
         rd.viewerConnected(job.id, hostName).catch(() => {});
         if (job.remember) rd.remember(location.hash.slice(1), job.password).catch(() => {});
         rd.title(`${hostName || job.idFmt} — ${APPNAME}`).catch(() => {});
         $('#who').textContent = hostName ? `${hostName} · ${job.idFmt}` : job.idFmt;
         const s = $('#step'); if (s) s.textContent = 'Starting the picture';
-        setInterval(() => { if (live) ch.send({ t: 'ping', ts: performance.now() }); }, 2000);
+        // latency of the path the mouse really uses: the direct link when there is one, else the relay
+        if (!pingTimer) pingTimer = setInterval(() => { if (!live) return; if (dc && dc.readyState === 'open') { try { dc.send(JSON.stringify({ t: 'ping', ts: performance.now(), dc: 1 })); return; } catch {} } ch.send({ t: 'ping', ts: performance.now() }); }, 2000);
         if (job.quality && job.quality !== 'auto') ch.send({ t: 'quality', q: job.quality });
       }
     };
   }
 
+  function confirmRestart() {
+    if (!control) { if (ui) ui.info('View only: you cannot restart that computer.', true); return; }
+    overlay(`<div class="card"><h2>Restart ${esc(hostName || job.idFmt)}?</h2><p>Unsaved work on that computer is lost. Its programs are closed and Windows restarts in about 10 seconds. This window reconnects by itself when it is back (Windows must be signed in, Carpathron Remote must start with Windows).</p><div class="row"><button class="primary" id="rsyes">Restart</button><button id="rsno">Cancel</button></div></div>`);
+    $('#rsno').onclick = () => { overlay(null); stage.focus(); };
+    $('#rsyes').onclick = () => { overlay(null); ch.send({ t: 'restart' }); stage.focus(); };
+  }
   function fail(code) {
+    reconn = null;
     ended = true; live = false; stopRec(); endCall(false, true); if (tr) tr.cancelAll();
     try { ch && ch.close(); } catch {} try { pc && pc.close(); } catch {}
     status('Not connected', 'bad');
@@ -130,7 +153,7 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
           pc = new RTCPeerConnection({ iceServers: ice });
           pc.onicecandidate = (e) => { if (e.candidate) ch.send({ t: 'cand', c: e.candidate.toJSON() }); };
           pc.ontrack = (e) => { video.srcObject = e.streams[0] || new MediaStream([e.track]); video.play().catch(() => {}); };
-          pc.ondatachannel = (e) => { dc = e.channel; };
+          pc.ondatachannel = (e) => { dc = e.channel; dc.onmessage = (ev) => { try { const q = JSON.parse(ev.data); if (q && q.t === 'pong') rtt = Math.round(performance.now() - q.ts); } catch {} }; };
           pc.onconnectionstatechange = () => { if (pc && (pc.connectionState === 'failed') && mode === 'direct') ch.send({ t: 'relay' }); };
           await pc.setRemoteDescription(m.sdp);
           const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
@@ -146,6 +169,14 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
         status(mode === 'direct' ? 'Direct' : 'Via relay', mode === 'direct' ? 'good' : 'warn');
         break;
       case 'pong': rtt = Math.round(performance.now() - m.ts); break;
+      case 'resume': if (m.tok && m.salt) resume = { tok: String(m.tok), salt: String(m.salt) }; break;
+      case 'trust': if (m.tok && m.salt) { job.trust = { tok: String(m.tok), salt: String(m.salt) }; rd.rememberTrust(location.hash.slice(1), m.tok, m.salt).catch(() => {}); if (ui) ui.info('That computer trusts this one now: next time you connect without a password.'); } break;
+      case 'restarting':
+        if (!m.ok) { if (ui) ui.info('The restart did not start: ' + (m.error || 'unknown error'), true); break; }
+        if (ui) ui.info(m.autostart ? 'The remote computer restarts. This window reconnects by itself when it is back (Windows must be signed in).' : 'The remote computer restarts. Carpathron Remote is not set to start with Windows there, so someone must open it after sign-in.');
+        reconn = { until: Date.now() + 8 * 60000, n: 0, why: 'The remote computer is restarting' };
+        break;
+      case 'refreshed': if (ui) ui.info(`The picture was restarted (${String(m.why || '').slice(0, 80)}).`); break;
       case 'perm': control = m.control !== false; $('#viewonly').hidden = control; document.body.classList.toggle('watch', !control); if (ui) ui.info(control ? 'You can control the remote computer.' : 'View only: the person at that computer lets you watch, not control.'); break;
       case 'chat': if (ui) ui.chat(hostName || 'Remote', String(m.text || '').slice(0, 4000), false); break;
       case 'clip': window.__clipIn = (window.__clipIn || 0) + 1; if (typeof m.s === 'string' && $('#clipsync').checked) { lastClip = m.s; rd.clipWrite(m.s).catch(() => {}); } break;
@@ -234,8 +265,21 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
   window.addEventListener('blur', () => { for (const code of held) send({ t: 'in', e: { k: 'ku', code } }); held.clear(); });
 
   // ------------------------------------------------------------ chat, voice call, files, clipboard, recording
+  // lost connection (network, sleep, app or PC restart): try again for a few minutes with the reconnect key
+  function reconnect(why) {
+    if (!reconn) reconn = { until: Date.now() + 3 * 60000, n: 0, why: why || 'The connection was lost' };
+    if (Date.now() > reconn.until) { reconn = null; return fail('The connection was lost and could not be restored. Try again when the other computer is online.'); }
+    live = false; stopRec(); endCall(false, true); if (tr) tr.cancelAll();
+    try { pc && pc.close(); } catch {} pc = null; dc = null;
+    reconn.n += 1; status('Reconnecting', 'warn');
+    const n = reconn.n;
+    overlay(`<div class="card"><div class="spin"></div><h2>Reconnecting to ${esc(hostName || job.idFmt)}…</h2><p class="muted">${esc(reconn.why)} · attempt ${n}</p><div class="row"><button id="rcstop">Stop</button></div></div>`);
+    $('#rcstop').onclick = () => { reconn = null; fail('Reconnecting stopped.'); };
+    setTimeout(() => { if (reconn && reconn.n === n && !ended) start(); }, Math.min(10000, 1500 * n));
+  }
   function setupExtras() {
     const sendC = (o) => ch.send(o);
+    if (ui) { tr = new RD.Transfers(sendC, rd, (ev) => ui && ui.file(ev)); voice = new RD.Voice(sendC); return; } // reconnected: keep the chat
     tr = new RD.Transfers(sendC, rd, (ev) => ui && ui.file(ev));
     voice = new RD.Voice(sendC);
     ui = new window.PanelUI({
@@ -248,7 +292,7 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
       onUnread: () => { if ($('#side').hidden) { unread += 1; $('#badge').textContent = unread; $('#badge').hidden = false; } },
     });
     rd.clipRead().then((t) => { lastClip = t; }).catch(() => {});
-    window.__rdTest = { sendPath: async (p) => tr.sendFile(await rd.fileFromDrop(p)), voice: () => ({ tx: voice.tx, rx: voice.rx, on: voice.on }), call: () => call, control: () => control, lastClip: () => lastClip, sendClip: (t) => ch.send({ t: 'clip', s: t }) };
+    window.__rdTest = { sendPath: async (p) => tr.sendFile(await rd.fileFromDrop(p)), voice: () => ({ tx: voice.tx, rx: voice.rx, on: voice.on }), call: () => call, control: () => control, lastClip: () => lastClip, sendClip: (t) => ch.send({ t: 'clip', s: t }), dropLink: () => { try { ch.ws.close(); } catch {} }, hasResume: () => !!resume };
   }
   async function startCall() {
     try { await voice.start(); call = 'calling'; ui.callState('calling'); await ch.send({ t: 'call' }); }
@@ -364,7 +408,12 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
   // ------------------------------------------------------------ toolbar
   $('#screen').onchange = (e) => { send({ t: 'screen', i: Number(e.target.value) }); stage.focus(); };
   $('#quality').onchange = (e) => { send({ t: 'quality', q: e.target.value }); stage.focus(); };
-  $('#keys').onchange = (e) => { if (e.target.value) send({ t: 'in', e: { k: 'combo', name: e.target.value } }); e.target.value = ''; stage.focus(); };
+  $('#keys').onchange = (e) => {
+    const v = e.target.value; e.target.value = ''; stage.focus(); if (!v || !live) return;
+    if (v === 'refresh') ch.send({ t: 'refresh' });
+    else if (v === 'restart') confirmRestart();
+    else send({ t: 'in', e: { k: 'combo', name: v } });
+  };
   $('#paste').onclick = async () => { const t = await rd.clipboard(); if (t) send({ t: 'in', e: { k: 'txt', s: t } }); stage.focus(); };
   // Full screen: the bar slides down when the mouse touches the top edge; "Exit full screen" stays in the corner; Ctrl+Alt+F toggles
   async function setFull(want) {
@@ -373,6 +422,16 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
   }
   $('#full').onclick = () => setFull(!document.body.classList.contains('fs'));
   $('#fsexit').onclick = () => setFull(false);
+  // actual size: moving the mouse near an edge of the window slides the view that way
+  let edge = null;
+  stage.addEventListener('mousemove', (e) => {
+    if (!document.body.classList.contains('actual')) { edge = null; return; }
+    const r = stage.getBoundingClientRect(), m = 28;
+    edge = { dx: e.clientX < r.left + m ? -1 : e.clientX > r.right - m ? 1 : 0, dy: e.clientY < r.top + m ? -1 : e.clientY > r.bottom - m ? 1 : 0 };
+  });
+  stage.addEventListener('mouseleave', () => { edge = null; });
+  setInterval(() => { if (edge && (edge.dx || edge.dy)) { stage.scrollLeft += edge.dx * 24; stage.scrollTop += edge.dy * 24; } }, 30);
+  $('#scale').onclick = () => { const on = document.body.classList.toggle('actual'); $('#scale').textContent = on ? 'Fit to window' : 'Actual size'; stage.focus(); };
   window.addEventListener('mousemove', (e) => {
     if (!document.body.classList.contains('fs')) return;
     const bar = $('#bar').getBoundingClientRect();

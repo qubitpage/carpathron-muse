@@ -10,6 +10,9 @@ const { Injector } = require('./inject');
 const send = (m) => { try { process.parentPort.postMessage(m); } catch {} };
 const inj = new Injector((t) => send({ log: String(t) }));
 inj.onStatus = (t) => send({ status: String(t) });
+inj.onSecure = (on) => { send({ secure: on ? 1 : 0 }); toHost({ t: 'secure', on: !!on }); };
+inj.onFrame = (b64) => toHost({ t: 'frame', b64 });
+function toHost(m) { try { if (port) port.postMessage(m); } catch {} }
 
 let allow = {}; // sid -> physical rect of the shared screen, only for sessions allowed to control
 const seen = new Set();
@@ -34,6 +37,7 @@ process.parentPort.on('message', (e) => {
     allow = m.allow || {};
     for (const sid of [...seen]) if (!allow[sid]) seen.delete(sid);
   } else if (m.type === 'in') input(m.sid, m.ev); // fallback path through the main process
+  else if (m.type === 'fake' && process.env.RD_INJECT_LOG) inj.note(String(m.line || '')); // tests: lines as if from the helper
   else if (m.type === 'release') { try { inj.releaseAll(m.rect); } catch {} }
   else if (m.type === 'stop') { try { inj.stop(); } catch {} process.exit(0); }
 });

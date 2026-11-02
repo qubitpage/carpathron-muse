@@ -121,12 +121,19 @@ class Injector {
   note(l) {
     if (!l) return;
     if (l === 'ready') return this.log('remote input helper ready');
-    if (l === 'secure 1') { this.secure = true; return this.status('The remote PC is showing a Windows security screen (an administrator prompt "Do you want to allow this app…", the lock screen or Ctrl+Alt+Del). Windows hides that screen from every remote program, so the picture stays still and clicks do not reach it. Ask the person at that PC to answer it (Yes / No or the password); the picture comes back by itself.'); }
-    if (l === 'secure 0') { if (this.secure) { this.secure = false; this.status('The Windows security screen is closed: the picture and remote control work again.'); } return; }
+    if (l.startsWith('F ')) { try { this.onFrame && this.onFrame(l.slice(2)); } catch {} return; }
+    if (l === 'agent 1') { this.agent = true; return this.log('full control helper (service) connected: administrator windows, administrator prompt and sign-in screen can be used'); }
+    if (l === 'agent 0') { this.agent = false; return this.log('full control helper (service) disconnected'); }
+    if (l === 'nosas') return this.status('Ctrl+Alt+Del needs the Carpathron Remote Helper service on the remote PC (installed by the Windows installer of Carpathron Remote). Without it, use Keys → Ctrl+Shift+Esc for Task Manager or Win+L to lock.');
+    if (l === 'secure 1' && this.agent) { this.secure = true; try { this.onSecure && this.onSecure(true); } catch {} return this.status('The remote PC shows a Windows security screen (administrator prompt, sign-in or Ctrl+Alt+Del). You see it here and can answer it.'); }
+    if (l === 'secure 1') { this.secure = true; return this.status('The remote PC is showing a Windows security screen (an administrator prompt "Do you want to allow this app…", the lock screen or Ctrl+Alt+Del). Windows hides that screen from every remote program, so the picture stays still and clicks do not reach it. Ask the person at that PC to answer it (Yes / No or the password); the picture comes back by itself. (With the Windows installer of Carpathron Remote on that PC, its helper service lets you see and answer it from here.)'); }
+    if (l === 'secure 0') { try { this.onSecure && this.onSecure(false); } catch {} if (this.secure) { this.secure = false; this.status('The Windows security screen is closed: the picture and remote control work again.'); } return; }
     if (l === 'elevated 1') { const now = Date.now(); if (!this.elevAt || now - this.elevAt > 60000) { this.elevAt = now; this.status('The window in front runs as administrator, so Windows blocks clicks and keys from Carpathron Remote into it. To control such windows, start Carpathron Remote on that PC with right-click → "Run as administrator".'); } return; }
     if (l === 'elevated 0') return;
     this.log(`remote input helper: ${l.slice(0, 200)}`);
   }
+  // Ctrl+Alt+Del: only the helper service can send it (Windows reserves it)
+  sas() { if (IS_WIN) this.line('S'); else this.status('Ctrl+Alt+Del is for Windows computers.'); }
   status(text) { this.log(text); try { this.onStatus && this.onStatus(text); } catch {} }
   constructor(log) { this.log = log || (() => {}); this.proc = null; this.down = new Set(); this.file = process.env.RD_INJECT_LOG || ''; }
   static support() {
@@ -157,7 +164,8 @@ class Injector {
     else { const W = require('./winexe'); cmd = W.exe('powershell'); args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(PS, 'utf16le').toString('base64')]; }
     this.log(`remote input helper starting: ${cmd === exe ? 'rdinput.exe' : 'PowerShell (rdinput.exe missing: ' + exe + ')'}`);
     this.proc = spawn(cmd, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: require('./winexe').env() });
-    this.proc.stdout.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) this.note(l.trim()); });
+    let buf = ''; // stdout comes in chunks: only whole lines are notes (picture lines are long)
+    this.proc.stdout.on('data', (d) => { buf += String(d); let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); this.note(l); } if (buf.length > 8e6) buf = ''; });
     const started = Date.now(); const native = cmd === exe;
     // a helper that cannot start or dies at once (blocked by antivirus / policy, damaged system): switch to the other one
     const failed = (why) => {
@@ -197,6 +205,7 @@ class Injector {
       if (k === 'kd') this.down.add('k' + ev.code); else this.down.delete('k' + ev.code);
     } else if (k === 'txt') {
       const s = String(ev.s || '').slice(0, 20000); if (s) this.line(`T ${Buffer.from(s, 'utf8').toString('base64')}`);
+    } else if (k === 'combo' && ev.name === 'cad') { this.sas();
     } else if (k === 'combo') {
       const c = COMBOS[String(ev.name || '')]; if (!c) return;
       for (const keys of c) { for (const code of keys) this.handle({ k: 'kd', code }, rect); for (const code of [...keys].reverse()) this.handle({ k: 'ku', code }, rect); }

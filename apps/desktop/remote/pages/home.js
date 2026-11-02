@@ -15,6 +15,9 @@
     const [label, kind] = STATE[h.state] || STATE.off;
     $('#hstate').textContent = h.state === 'error' && h.error ? `Error: ${ERR[h.error] || h.error}` : label; $('#hstate').className = 'pill ' + kind;
     $('#unattended').checked = h.unattended; $('#unattended').disabled = !h.hasPerm;
+    { const T = h.trusted || []; const el = $('#trusted'); el.hidden = !T.length;
+      el.innerHTML = T.length ? '<div class="muted small" style="padding:4px 0">Trusted computers (connect without a password or a question):</div>' + T.map((t) => `<div class="item"><div class="t"><b>${esc(t.pc || t.name || 'Computer')}</b><span class="muted small">${esc(t.name || '')} · added ${ago(t.added)}${t.last ? ' · last ' + ago(t.last) : ''}</span></div><button data-untrust="${esc(t.salt)}">Remove</button></div>`).join('') : '';
+      el.querySelectorAll('[data-untrust]').forEach((b) => { b.onclick = () => rd.untrust(b.dataset.untrust).then(render); }); }
     $('#ppwstate').textContent = h.hasPerm ? 'A personal password is set. Leave the box empty and click Set to remove it.' : 'No personal password yet.';
     const C = h.control || { ok: true }; $('#ctlnote').hidden = C.ok;
     if (!C.ok) $('#ctlnote').textContent = C.why === 'wayland' ? 'This Linux desktop uses Wayland: others can see this screen, but Wayland does not let any app move the mouse or type for them. To be controlled, choose an "Xorg"/X11 session on the login screen.' : C.why === 'xdotool' ? 'To be controlled on Linux, install xdotool first:  sudo apt install xdotool  (or your distribution\'s package manager).' : 'Being controlled is not supported on this system yet; you can still control other computers.';
@@ -81,6 +84,19 @@
   $('#enabled').onchange = (e) => rd.set({ enabled: e.target.checked }).then(render);
   $('#unattended').onchange = (e) => rd.set({ unattended: e.target.checked }).then(render);
   $('#newotp').onclick = () => rd.newOtp().then(render);
+  // change this computer's ID (people who saved the old ID must use the new one)
+  const idMsg = (t, bad) => { const m = $('#idmsg'); m.hidden = !t; m.textContent = t || ''; m.className = 'small ' + (bad ? 'err' : 'muted'); };
+  $('#chid').onclick = () => { $('#idform').hidden = false; $('#newid').value = ''; $('#newid').focus(); idMsg('Computers that saved the old ID will need the new one.'); };
+  $('#idcancel').onclick = () => { $('#idform').hidden = true; idMsg(''); };
+  const doChange = async (want) => {
+    $('#idsave').disabled = $('#idrandom').disabled = true; idMsg('Changing the ID…');
+    try { const r = await rd.changeId(want); if (r.ok) { $('#idform').hidden = true; idMsg(`Your ID is now ${r.id}.`); } else idMsg(r.error || 'The ID could not be changed.', true); }
+    catch (e) { idMsg(String(e.message || e), true); }
+    finally { $('#idsave').disabled = $('#idrandom').disabled = false; }
+  };
+  $('#idsave').onclick = () => { const v = $('#newid').value.replace(/\D/g, ''); if (!/^\d{9}$/.test(v)) return idMsg('The ID must have exactly 9 digits.', true); doChange(v); };
+  $('#newid').onkeydown = (e) => { if (e.key === 'Enter') $('#idsave').click(); };
+  $('#idrandom').onclick = () => doChange('');
   $('#setppw').onclick = async () => { try { render(await rd.setPassword($('#ppw').value)); $('#ppw').value = ''; } catch (e) { alert(String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); } };
   $('#savename').onclick = () => rd.set({ name: $('#name').value }).then(render);
   $('#saverelay').onclick = () => rd.set({ relay: $('#relay').value }).then(render);

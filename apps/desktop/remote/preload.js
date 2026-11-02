@@ -5,11 +5,16 @@ const inv = (ch) => (...a) => ipcRenderer.invoke(ch, ...a);
 const on = (ch) => (fn) => { const h = (_e, ...a) => fn(...a); ipcRenderer.on(ch, h); return () => ipcRenderer.removeListener(ch, h); };
 // input for this PC goes straight to the input process when it is there (not through the main thread)
 let inPort = null;
-ipcRenderer.on('rd-input-port', (e) => { try { if (inPort) inPort.close(); } catch {} inPort = e.ports && e.ports[0] || null; if (inPort) inPort.start(); });
+const agentFns = new Set();
+ipcRenderer.on('rd-input-port', (e) => {
+  try { if (inPort) inPort.close(); } catch {} inPort = e.ports && e.ports[0] || null; if (!inPort) return;
+  inPort.onmessage = (ev) => { for (const f of agentFns) { try { f(ev.data); } catch {} } }; // secure screen notes + picture from the helper service
+  inPort.start();
+});
 const sendInput = (sid, ev) => { if (inPort) { try { inPort.postMessage({ sid: String(sid), ev }); return Promise.resolve(); } catch { inPort = null; } } return ipcRenderer.invoke('rd-input', sid, ev); };
 contextBridge.exposeInMainWorld('rd', {
   // home + banner
-  state: inv('rd-state'), set: inv('rd-set'), newOtp: inv('rd-new-otp'), setPassword: inv('rd-set-password'),
+  state: inv('rd-state'), set: inv('rd-set'), newOtp: inv('rd-new-otp'), changeId: inv('rd-change-id'), resumeAdd: inv('rd-resume-add'), resumeUse: inv('rd-resume-use'), restartPc: inv('rd-restart-pc'), trustAdd: inv('rd-trust-add'), trustUsed: inv('rd-trust-used'), untrust: inv('rd-untrust'), rememberTrust: inv('rd-remember-trust'), setPassword: inv('rd-set-password'),
   openViewer: inv('rd-open-viewer'), forget: inv('rd-forget'), renameSaved: inv('rd-rename-saved'), openHome: inv('rd-open-home'),
   disconnect: inv('rd-disconnect'), onState: on('rd-state'),
   licenseActivate: inv('rd-license-activate'), licenseRelease: inv('rd-license-release'), licenseRefresh: inv('rd-license-refresh'), buy: inv('rd-buy'), plans: inv('rd-plans'), myLicenses: inv('rd-my-licenses'), licenseQuiet: inv('rd-license-quiet'), licenseUnhost: inv('rd-license-unhost'),
@@ -26,7 +31,7 @@ contextBridge.exposeInMainWorld('rd', {
   hostConfig: inv('rd-host-config'), hostStatus: inv('rd-host-status'), authResult: inv('rd-auth-result'), locked: inv('rd-locked'),
   consent: inv('rd-consent'), screens: inv('rd-screens'), source: inv('rd-source'), session: inv('rd-session'), input: sendInput,
   panelEvent: inv('rd-panel-event'), sysinfo: inv('rd-sysinfo'), onPanelCmd: on('rd-panel-cmd'),
-  onKill: on('rd-kill'), onConfig: on('rd-config'), onCtlNote: on('rd-ctl-note'), onFs: on('rd-fs'),
+  onKill: on('rd-kill'), onConfig: on('rd-config'), onCtlNote: on('rd-ctl-note'), onFs: on('rd-fs'), onRecapture: on('rd-recapture'), onHelper: (fn) => { agentFns.add(fn); return () => agentFns.delete(fn); }, isTest: !!process.env.RD_INJECT_LOG, logLine: inv('rd-log-line'),
   // SSH terminal
   openSsh: inv('rd-open-ssh'), sshList: inv('rd-ssh-list'), sshSave: inv('rd-ssh-save'), sshDelete: inv('rd-ssh-delete'), sshForgetKey: inv('rd-ssh-forget-key'),
   sshOpen: inv('rd-ssh-open'), sshTrust: inv('rd-ssh-trust'), sshWrite: inv('rd-ssh-write'), sshResize: inv('rd-ssh-resize'), sshClose: inv('rd-ssh-close'), sshKeyFile: inv('rd-ssh-keyfile'),

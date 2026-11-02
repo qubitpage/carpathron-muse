@@ -42,7 +42,7 @@ function run(req, onOut) {
         ? `& cmd.exe /d /c "\`"${file}\`" > \`"${outFile}\`" 2>&1"; exit $LASTEXITCODE`
         : `& { & '${file}' *> '${outFile}' }; exit $(if ($?) { 0 } else { 1 })`;
       const outer = `$p = Start-Process '${W.exe('powershell')}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${enc(inner)}'; exit $p.ExitCode`;
-      cmd = W.exe('powershell'); args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc(outer)];
+      cmd = W.exe('powershell'); args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-OutputFormat', 'Text', '-EncodedCommand', enc(PS_PRE + outer)];
     } else {
       file = tmpFile('.sh', script); cmd = 'pkexec'; args = ['bash', file];
     }
@@ -54,7 +54,9 @@ function run(req, onOut) {
 
   return new Promise((resolve) => {
     let size = 0, truncated = false, timedOut = false, done = false;
-    const emit = (d) => { if (!d) return; const s = String(d); if (size >= MAX_OUT) { truncated = true; return; } size += s.length; try { onOut(s); } catch {} };
+    // PowerShell can still print progress as CLIXML ("#< CLIXML", <Objs …>…</Objs>): never show that to people or the AI
+    const clixml = (t) => t.replace(/#< CLIXML\r?\n?/g, '').replace(/<Objs\b[\s\S]*?<\/Objs>/g, '').replace(/<Objs\b[\s\S]*$/g, '');
+    const emit = (d) => { if (!d) return; const s = clixml(String(d)); if (!s) return; if (size >= MAX_OUT) { truncated = true; return; } size += s.length; try { onOut(s); } catch {} };
     let child;
     try { child = spawn(cmd, args, { windowsHide: true, cwd: os.homedir(), env: W.env({ TERM: 'dumb', DEBIAN_FRONTEND: 'noninteractive' }) }); }
     catch (e) { return resolve({ code: -1, ms: 0, error: e.message }); }

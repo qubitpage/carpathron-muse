@@ -145,7 +145,8 @@ body.ssh .slist .appver { margin-top: auto; padding-top: 10px; }
 .aip { padding: 10px; gap: 8px; }
 .aip-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .aip-head b { color: #c9c1ff; } .aip-head select { padding: 4px 6px; font-size: 12px; }
-.aip-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.aip-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
+.aip-head .aip-svc { max-width: 150px; }
 .aip-setup { background: var(--panel); border: 1px solid #4b3f9a; border-radius: 10px; padding: 12px; }
 .aip-log { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 6px; min-height: 120px; padding-right: 2px; }
 .aip-msg { border-radius: 10px; padding: 8px 10px; font-size: 13px; line-height: 1.45; background: var(--panel); border: 1px solid var(--line); word-wrap: break-word; }

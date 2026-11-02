@@ -55,8 +55,13 @@ function systemPrompt(kind, info) {
     '- Never disable antivirus, firewall, updates or security settings unless the technician explicitly asked; say why it is risky. Never delete user data (documents, photos, desktop, downloads, databases, home folders, web roots) unless the technician asked for exactly that. Never format disks, delete partitions or wipe anything without an explicit request naming it.',
     '- Uninstall only what was asked. Do not create, delete or change user accounts or passwords unless asked.',
     '- Prefer exact commands and the ready-made checks over clicking: they are faster and give facts. Filter long output.',
-    '- Work step by step: before each tool say in one short sentence what you do and why; after every change check the result.',
-    '- When the task is done (or you are blocked), stop calling tools and give a short report: what you found, what you changed, what is left or recommended.',
+    'How a real technician works (this is your job, not the technician\'s):',
+    '- Own the job from start to end. Never hand commands or steps back to the technician that you can do yourself. Ask people only for what you cannot do: passwords and logins, physical actions, and decisions about their own files or money.',
+    '- Read every result: the exit code, errors, warnings and the numbers. A failed command is information: work out WHY it failed (wrong syntax or parameter, missing cmdlet / module / program, not administrator, service stopped or disabled, path or file not found, old PowerShell / Windows version, broken WMI or provider, policy or antivirus block, no network, timeout) and fix it: correct the command, use another tool for the same fact (another cmdlet, a built-in .exe, the registry, the event log, the program\'s own CLI, or the screen), add admin=true after "access denied". Never repeat the same failing command; after 3 different approaches report what blocks you, with the evidence.',
+    '- Diagnose like an expert: symptom → collect facts (checks, logs, event IDs, versions, recent changes) → list the likely causes → test the most likely first → confirm the root cause with evidence → fix → verify the fix with a new measurement → say how to prevent it. Explain error codes (0x8…, event IDs, HTTP / exit codes) in plain words.',
+    '- Before each tool, say in one short sentence what you do and why. After every change, check the result.',
+    '- Talk with the technician like a colleague: answer questions directly and clearly, say what you think is wrong and how sure you are, and propose the next step when there is a choice that is theirs to make.',
+    '- When the task is done (or truly blocked), stop calling tools and give a short report in plain words: the cause you found (with the evidence), what you changed, numbers before → after, what is left or risky, and the next steps you recommend (offer to do them).',
   ].join('\n');
   if (kind === 'ssh') return [
     `You are the Carpathron AI DevOps engineer, an expert Linux system administrator. You work on the server ${info.target} over SSH for the technician who gives you tasks${info.os ? ` (${info.os})` : ''}.`,
@@ -77,7 +82,8 @@ function systemPrompt(kind, info) {
     '- Uninstall: winget uninstall --id <Id> -e --silent, or the program\'s own uninstaller.',
     '- Disks: check disks first. Free space safely: temp folders, Windows Update cache (Dism /Online /Cleanup-Image /StartComponentCleanup, admin), recycle bin, cleanmgr; show the user big folders instead of deleting their files. chkdsk C: /scan (read-only), Optimize-Volume. Never format or delete partitions unless explicitly asked.',
     '- Security / vulnerabilities: check security and check updates; report missing updates (with severity), outdated programs, antivirus state and signature age, firewall profiles, SMBv1, RDP, UAC, BitLocker, listening ports, admin accounts. Fix what the technician asks: Update-MpSignature, Start-MpScan -ScanType QuickScan, Set-NetFirewallProfile -Enabled True, install updates (admin), winget upgrades.',
-    '- Administrator prompts (UAC) appear on a secure screen you cannot see: tell the person with message_user to click Yes, then run the command with admin=true.',
+    '- Administrator prompts (UAC): a command with admin=true makes Windows ask the person at that computer to click Yes. Tell them first with message_user. While the prompt is open your command waits; if it is refused or nobody answers, say so and offer a way without admin.',
+    '- Common Windows failures and what they mean: "Access is denied" / 0x80070005 = needs admin=true; "is not recognized as the name of a cmdlet" = the module or program is missing or the name is wrong (find another way); Get-MpComputerStatus failing = Defender is off, replaced by another antivirus, or its WMI provider is broken (check the services WinDefend and SecurityHealthService, and Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct); winget missing = App Installer not installed (use the program\'s installer or the screen).',
     common,
   ].join('\n');
 }
@@ -179,7 +185,10 @@ function create({ getS, save, seal, unseal, log, handle, desktop, ssh, onAiState
   handle('rd-ai-settings', () => pub());
   handle('rd-ai-save', (_e, p) => {
     p = p || {}; const a = S();
-    if (p.provider && P[p.provider]) { if (a.provider !== p.provider) { a.base = ''; a.model = ''; } a.provider = p.provider; }
+    if (p.provider && P[p.provider] && a.provider !== p.provider) { // each service keeps its own model and address
+      a.models = a.models || {}; a.bases = a.bases || {}; a.models[a.provider] = a.model || ''; a.bases[a.provider] = a.base || '';
+      a.provider = p.provider; a.model = a.models[p.provider] || ''; a.base = a.bases[p.provider] || '';
+    }
     if (p.base !== undefined) { const b = String(p.base || '').trim(); if (b && !/^https?:\/\/[^\s]+$/.test(b)) throw new Error('The API address must start with https:// (or http:// for a local model).'); a.base = b; }
     if (p.model !== undefined) a.model = String(p.model || '').trim().slice(0, 120);
     // a key that clearly belongs to another service is refused with a clear message (instead of a 401 later)
@@ -216,7 +225,10 @@ function create({ getS, save, seal, unseal, log, handle, desktop, ssh, onAiState
     const target = o.target === 'ssh' ? 'ssh' : 'desktop'; const tid = target === 'ssh' ? String(o.tid || '') : '';
     const k = keyOf(e.sender, tid);
     let run = runs.get(k);
-    if (run && run.running) throw new Error('The AI is already working here. Stop it first or wait.');
+    if (run && run.running) { // talking to the AI while it works: it reads the message at its next step
+      const msg = String(o.task || '').trim().slice(0, 8000); if (!msg) return true;
+      (run.inbox = run.inbox || []).push(msg); ev(run, { t: 'info', text: 'The AI reads your message at its next step.' }); return true;
+    }
     if (!run) { run = { key: k, wc: e.sender, target, tid, hist: [], running: false, approvals: new Map(), autoAll: false }; runs.set(k, run); e.sender.once('destroyed', () => { const r = runs.get(k); if (r) { r.abort && r.abort.abort(); runs.delete(k); } }); }
     const task = String(o.task || '').trim().slice(0, 8000); if (!task) throw new Error('Write a task for the AI.');
     run.mode = o.mode === 'auto' ? 'auto' : o.mode === 'approve' ? 'approve' : cfg().mode; run.autoAll = run.mode === 'auto';
@@ -259,6 +271,7 @@ function create({ getS, save, seal, unseal, log, handle, desktop, ssh, onAiState
       while (!run.stopped) {
         if (run.steps >= MAX_STEPS) { ev(run, { t: 'info', text: `Paused after ${MAX_STEPS} steps. Write "continue" to go on.` }); break; }
         run.steps += 1;
+        if (run.inbox && run.inbox.length) { run.hist.push({ role: 'user', text: `[The technician writes to you during the job — take it into account now]\n${run.inbox.join('\n')}` }); run.inbox = []; }
         ev(run, { t: 'thinking' });
         pruneImages(run.hist);
         const res = await callModel(c, system, run.hist, tools, run.abort.signal);
@@ -276,6 +289,7 @@ function create({ getS, save, seal, unseal, log, handle, desktop, ssh, onAiState
               continue;
             }
           }
+          if (run.inbox && run.inbox.length) continue; // a message arrived while it finished: answer it
           ev(run, { t: 'done' }); break;
         }
         for (const call of res.calls) {
@@ -316,7 +330,9 @@ function create({ getS, save, seal, unseal, log, handle, desktop, ssh, onAiState
       const bad = pts.find(([x, y]) => !Number.isFinite(Number(x)) || !Number.isFinite(Number(y)) || x < 0 || y < 0 || x >= run.shot.w || y >= run.shot.h);
       if (bad) { const msg = `Error: ${bad[0]},${bad[1]} is outside the screenshot (${run.shot.w}x${run.shot.h} pixels, x 0-${run.shot.w - 1}, y 0-${run.shot.h - 1}). Look at the last screenshot again and use its pixel coordinates.`; ev(run, { ...card, status: 'error', out: msg }); return { text: msg, error: true }; }
     }
-    if (NEEDS_OK.has(call.name) && !run.autoAll) {
+    // "Ask before changes": a command that only reads (status, lists, logs) runs without asking; anything else asks
+    const readOnly = call.name === 'run_command' && !a.admin && !a.sudo && SUP.autoReadOnly(a.script);
+    if (NEEDS_OK.has(call.name) && !run.autoAll && !readOnly) {
       ev(run, { ...card, status: 'ask' });
       const ok = await new Promise((res) => run.approvals.set(id, res));
       run.approvals.delete(id);

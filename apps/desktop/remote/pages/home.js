@@ -7,6 +7,7 @@
   let st = null; let typing = false;
   function ago(t) { if (!t) return ''; const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; }
   function render(s) {
+    if (s && s.ai === false) { const a = $('#aiset'); if (a) a.hidden = true; } // apps without the AI technician (Carpathron Remote)
     st = s; const h = s.host;
     $('#enabled').checked = h.enabled;
     $('#hostinfo').style.opacity = h.enabled ? 1 : 0.45;

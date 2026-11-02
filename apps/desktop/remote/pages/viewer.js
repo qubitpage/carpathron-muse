@@ -42,6 +42,7 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
     $('#who').textContent = job.name ? `${job.name} · ${job.idFmt}` : job.idFmt;
     $('#quality').value = job.quality || 'auto';
     $('#clipsync').checked = job.clipSync !== false;
+    if (job.ai === false) { $('#aibtn').hidden = true; } // apps without the AI technician
     if (job.password || job.trust) start(); else askPassword();
   }
 

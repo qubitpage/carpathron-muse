@@ -265,7 +265,7 @@ function publicState() {
   return {
     host: { ...hostState, control: Injector.support(), enabled: S.enabled, id: S.id, idFmt: fmtId(S.id), otp: S.enabled ? otp : '', unattended: S.unattended, hasPerm: !!S.perm, trusted: (S.trusted || []).map((t) => ({ salt: t.salt, name: t.name, pc: t.pc, added: t.added, last: t.last || 0 })), name: S.name, locked: lockedUntil > Date.now() ? lockedUntil : 0 },
     sessions: [...sessions.entries()].map(([sid, s]) => ({ sid, ...s })),
-    relay: isAuto() ? '' : S.relay, relayNow: relay(), quality: S.quality, autostart: S.autostart, viewOnly: !!S.viewOnly, clipSync: S.clipSync !== false, standalone: !!opts.standalone, store: !!process.windowsStore,
+    relay: isAuto() ? '' : S.relay, relayNow: relay(), quality: S.quality, autostart: S.autostart, viewOnly: !!S.viewOnly, clipSync: S.clipSync !== false, standalone: !!opts.standalone, ai: opts.ai !== false, store: !!process.windowsStore,
     license: licensePublic(),
     saved: (S.saved || []).map((c) => ({ id: c.id, idFmt: fmtId(c.id), name: c.name || '', last: c.last || 0, hasPw: !!c.pw })),
     version: app.getVersion(), app: opts.appName, cmdUnattended: !!S.cmdUnattended, aiReady: !!(aiMod && aiMod.ready()),
@@ -470,7 +470,7 @@ function setupIpc() {
     const j = viewerJobs.get(String(token)); if (!j) return null;
     try { await licenseCall('status'); } catch {} // fresh usage for today
     let trust = null; try { const c = (S.saved || []).find((x) => x.id === j.id); if (c && c.trust) trust = JSON.parse(unseal(c.trust)); } catch {}
-    return { trust, id: j.id, idFmt: fmtId(j.id), password: j.password, name: j.name, remember: j.remember, lic: licToken(), buyUrl: BUY_URL, relay: relay(), me: S.name, pc: os.hostname(), quality: S.quality, clipSync: S.clipSync !== false };
+    return { ai: opts.ai !== false, trust, id: j.id, idFmt: fmtId(j.id), password: j.password, name: j.name, remember: j.remember, lic: licToken(), buyUrl: BUY_URL, relay: relay(), me: S.name, pc: os.hostname(), quality: S.quality, clipSync: S.clipSync !== false };
   });
   handle('rd-viewer-connected', (_e, id, remoteName) => {
     id = String(id || '').replace(/\D/g, ''); if (!/^\d{9}$/.test(id)) return;

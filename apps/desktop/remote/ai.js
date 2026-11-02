@@ -298,6 +298,12 @@ function create({ getS, save, seal, unseal, log, handle, desktop, ssh, onAiState
     const card = { t: 'tool', id, name: call.name, title: describe(call.name, a), detail: call.name === 'run_command' ? String(a.script || '') : call.name === 'write_file' ? `${a.path}\n\n${String(a.content || '').slice(0, 3000)}` : call.name === 'type' || call.name === 'message_user' ? String(a.text || '') : '' };
     const tools = run.target === 'ssh' ? SSH_TOOLS : DESKTOP_TOOLS;
     if (!tools.some((t) => t.name === call.name)) { ev(run, { ...card, status: 'error', out: 'unknown tool' }); return { text: `Error: unknown tool ${call.name}`, error: true }; }
+    // a position outside the last screenshot is a model mistake: say so to the model, never ask the person to approve it
+    if (run.target !== 'ssh' && ['click', 'drag', 'scroll'].includes(call.name) && run.shot) {
+      const pts = call.name === 'drag' ? [[a.x, a.y], [a.x2, a.y2]] : call.name === 'scroll' && a.x == null && a.y == null ? [] : [[a.x, a.y]];
+      const bad = pts.find(([x, y]) => !Number.isFinite(Number(x)) || !Number.isFinite(Number(y)) || x < 0 || y < 0 || x >= run.shot.w || y >= run.shot.h);
+      if (bad) { const msg = `Error: ${bad[0]},${bad[1]} is outside the screenshot (${run.shot.w}x${run.shot.h} pixels, x 0-${run.shot.w - 1}, y 0-${run.shot.h - 1}). Look at the last screenshot again and use its pixel coordinates.`; ev(run, { ...card, status: 'error', out: msg }); return { text: msg, error: true }; }
+    }
     if (NEEDS_OK.has(call.name) && !run.autoAll) {
       ev(run, { ...card, status: 'ask' });
       const ok = await new Promise((res) => run.approvals.set(id, res));

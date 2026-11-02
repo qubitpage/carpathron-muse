@@ -137,7 +137,11 @@ class Injector {
       return;
     }
     if (!IS_WIN) return;
-    this.proc = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(PS, 'utf16le').toString('base64')], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    if (this.failedAt && Date.now() - this.failedAt < 5000) return; // do not retry in a tight loop
+    const W = require('./winexe');
+    const ps = W.exe('powershell');
+    this.proc = spawn(ps, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(PS, 'utf16le').toString('base64')], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: W.env() });
+    this.proc.on('error', (e) => { this.log(`remote input helper could not start (${ps}): ${e.message}`); this.proc = null; this.failedAt = Date.now(); });
     this.proc.on('exit', (c) => { this.log(`remote input helper exited (${c})`); this.proc = null; });
     this.proc.stderr.on('data', (d) => this.log(`remote input helper: ${String(d).slice(0, 300)}`));
     this.proc.stdin.on('error', () => {});
@@ -147,6 +151,7 @@ class Injector {
     if (IS_LINUX) return this.x11(s);
     if (!IS_WIN) return;
     if (!this.proc) this.start();
+    if (!this.proc) return;
     try { this.proc.stdin.write(s + '\n'); } catch {}
   }
   // ev: { k, x, y (0..1 of the shared screen), b, dx, dy, code, s, name }   rect: physical pixels of that screen

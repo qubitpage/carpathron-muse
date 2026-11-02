@@ -27,6 +27,7 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.0.3:** remote desktop fix: on some Windows PCs the mouse and keyboard did not work on the remote screen and the AI technician's commands failed ("spawn powershell.exe ENOENT", a broken PATH). Windows programs are now started by their full path.
 > **2.0.2:** the **✦ AI technician** in the built-in Remote desktop and **✦ AI DevOps** in its SSH terminal: give a job
 > and Muse works on the remote PC (sees the screen, clicks, types, runs PowerShell / bash, installs and removes software,
 > checks disks, security and updates) or on a server over SSH — with your OK for every change or on Autopilot, and the

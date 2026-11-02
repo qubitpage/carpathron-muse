@@ -106,7 +106,7 @@ function machineId() {
   let raw = '';
   try {
     if (process.platform === 'win32') {
-      const out = require('child_process').execFileSync('reg', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+      const out = require('child_process').execFileSync(require('./winexe').exe('reg'), ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
       raw = (/MachineGuid\s+REG_SZ\s+(\S+)/.exec(out) || [])[1] || '';
     } else if (process.platform === 'linux') {
       for (const f of ['/etc/machine-id', '/var/lib/dbus/machine-id']) { try { raw = fs.readFileSync(f, 'utf8').trim(); if (raw) break; } catch {} }

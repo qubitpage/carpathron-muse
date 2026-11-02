@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const W = require('./winexe');
 
 const IS_WIN = process.platform === 'win32';
 const MAX_OUT = 200000;
@@ -40,22 +41,22 @@ function run(req, onOut) {
       const inner = shell === 'cmd'
         ? `& cmd.exe /d /c "\`"${file}\`" > \`"${outFile}\`" 2>&1"; exit $LASTEXITCODE`
         : `& { & '${file}' *> '${outFile}' }; exit $(if ($?) { 0 } else { 1 })`;
-      const outer = `$p = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${enc(inner)}'; exit $p.ExitCode`;
-      cmd = 'powershell.exe'; args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc(outer)];
+      const outer = `$p = Start-Process '${W.exe('powershell')}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${enc(inner)}'; exit $p.ExitCode`;
+      cmd = W.exe('powershell'); args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', enc(outer)];
     } else {
       file = tmpFile('.sh', script); cmd = 'pkexec'; args = ['bash', file];
     }
   } else if (IS_WIN && shell === 'cmd') {
-    file = tmpFile('.cmd', '@echo off\r\nchcp 65001 >nul\r\n' + script); cmd = 'cmd.exe'; args = ['/d', '/c', file];
+    file = tmpFile('.cmd', '@echo off\r\nchcp 65001 >nul\r\n' + script); cmd = W.exe('cmd'); args = ['/d', '/c', file];
   } else if (IS_WIN) {
-    cmd = 'powershell.exe'; args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-OutputFormat', 'Text', '-EncodedCommand', enc(PS_PRE + script)];
+    cmd = W.exe('powershell'); args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-OutputFormat', 'Text', '-EncodedCommand', enc(PS_PRE + script)];
   } else { cmd = 'bash'; args = ['-s']; stdin = script; }
 
   return new Promise((resolve) => {
     let size = 0, truncated = false, timedOut = false, done = false;
     const emit = (d) => { if (!d) return; const s = String(d); if (size >= MAX_OUT) { truncated = true; return; } size += s.length; try { onOut(s); } catch {} };
     let child;
-    try { child = spawn(cmd, args, { windowsHide: true, cwd: os.homedir(), env: { ...process.env, TERM: 'dumb', DEBIAN_FRONTEND: 'noninteractive' } }); }
+    try { child = spawn(cmd, args, { windowsHide: true, cwd: os.homedir(), env: W.env({ TERM: 'dumb', DEBIAN_FRONTEND: 'noninteractive' }) }); }
     catch (e) { return resolve({ code: -1, ms: 0, error: e.message }); }
     const timer = setTimeout(() => { timedOut = true; kill(req.rid); }, timeout);
     running.set(req.rid, { child, timer });
@@ -77,7 +78,7 @@ function run(req, onOut) {
 function kill(rid) {
   const r = running.get(rid); if (!r) return false;
   try {
-    if (IS_WIN) spawn('taskkill', ['/pid', String(r.child.pid), '/t', '/f'], { windowsHide: true });
+    if (IS_WIN) spawn(W.exe('taskkill'), ['/pid', String(r.child.pid), '/t', '/f'], { windowsHide: true });
     else r.child.kill('SIGKILL');
   } catch {}
   return true;

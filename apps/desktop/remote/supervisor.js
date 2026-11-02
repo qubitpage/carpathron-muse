@@ -7,7 +7,7 @@ const obj = (properties, required = []) => ({ type: 'object', properties, requir
 
 // A command is accepted only if it looks like pure inspection (best effort: deny anything that writes or changes).
 const DENY = new RegExp([
-  String.raw`\bformat\s+[a-z]:|\bFormat-Volume\b|\bClear-Disk\b|\s-delete\b|(?:^|[;&|({\n` + '`' + String.raw`]|\bsudo\s|\bdoas\s|\bxargs\s|\bexec\s|\bnohup\s|\btime\s|\bwatch\s)\s*(?:-\S+\s+)*(rm|rmdir|del|erase|rd|mv|move|cp|copy|xcopy|robocopy|chmod|chown|chgrp|chattr|mkdir|md|touch|ln|dd|mkfs\S*|fdisk|parted|wipefs|shred|truncate|tee|kill|pkill|killall|taskkill|reboot|shutdown|halt|poweroff|useradd|userdel|usermod|groupadd|passwd|chpasswd|visudo|crontab|install|choco|scoop|setx|bcdedit|diskpart|cipher|icacls|takeown|attrib|regedit|ri|rni|mi|ni|si|sp|cpi|kill|spps|saps|start|iwr|irm)\b(?![-.\/\\])`,
+  String.raw`\bformat\s+[a-z]:|\bFormat-Volume\b|\bClear-Disk\b|\s-delete\b|(?:^|[;&|({\n` + '`' + String.raw`]|\bsudo\s|\bdoas\s|\bxargs\s|\bexec\s|\bnohup\s|\btime\s|\bwatch\s)\s*(?:-\S+\s+)*(rm|rmdir|del|erase|rd|mv|move|cp|copy|xcopy|robocopy|chmod|chown|chgrp|chattr|mkdir|md|touch|ln|dd|mkfs\S*|fdisk|parted|wipefs|shred|truncate|tee|kill|pkill|killall|taskkill|reboot|shutdown|halt|poweroff|useradd|userdel|usermod|groupadd|passwd|chpasswd|visudo|crontab|install|choco|scoop|setx|bcdedit|diskpart|cipher|icacls|takeown|attrib|regedit|ri|rni|mi|ni|si|sp|cpi|kill|spps|saps|start|iwr|irm|iex|Invoke-Expression)\b(?![-.\/\\])`,
   String.raw`\b(apt|apt-get|dnf|yum|zypper|pacman|apk|brew|snap|flatpak|pip3?|npm|pnpm|yarn|gem|cargo|go|composer|winget)\s+(install|i|add|remove|rm|uninstall|purge|upgrade|update|dist-upgrade|full-upgrade|autoremove|ci|publish|link|refresh)\b`,
   String.raw`\bnpm\s+run\s+(build|deploy|start|dev|release|publish)\b`,
   String.raw`\bgit\s+(push|commit|reset|checkout|switch|merge|rebase|pull|clean|stash|rm|mv|tag|branch\s+-[dD]|restore|apply|am|cherry-pick|revert|init|clone|fetch)\b`,
@@ -16,7 +16,7 @@ const DENY = new RegExp([
   String.raw`\bdocker\b[^|;&]*\b(rm|rmi|run|stop|kill|restart|start|exec|create|pull|push|build|prune|update|cp)\b`,
   String.raw`\bdocker[- ]compose\b[^|;&]*\b(up|down|rm|stop|restart|start|pull|build|exec|run)\b`,
   String.raw`\b(sed|perl)\s+(-[a-zA-Z]*i|--in-place)`,
-  String.raw`\b(Remove|Set|New|Stop|Start|Restart|Install|Uninstall|Disable|Enable|Clear|Rename|Move|Copy|Add|Update|Register|Unregister|Reset|Suspend|Resume|Initialize|Mount|Dismount|Out-File|Export|Import|Invoke-Expression|iex|Write|Grant|Revoke|Unblock|Lock|Unlock|Rename|Push|Pop|Publish|Save|Send|Submit|Expand|Compress)-[A-Za-z]`,
+  String.raw`(?:^|[;&|({\n` + '`' + String.raw`]|\b(?:ForEach-Object|%|Invoke-Command|Start-Job)\s*\{)\s*(?:&\s*)?(Remove|Set|New|Stop|Start|Restart|Install|Uninstall|Disable|Enable|Clear|Rename|Move|Copy|Add|Update|Register|Unregister|Reset|Suspend|Resume|Initialize|Mount|Dismount|Out-File|Export|Import|Invoke-Expression|iex|Write|Grant|Revoke|Unblock|Lock|Unlock|Rename|Push|Pop|Publish|Save|Send|Submit|Expand|Compress)-[A-Za-z]`,
   String.raw`\b(reg|schtasks|sc|net|netsh|wmic|bitsadmin|certutil|vssadmin|wevtutil)\b[^|;&]*\b(add|delete|create|change|config|stop|start|set|reset|import|cl|clear-log|urlcache|-decode|-encode)\b`,
   String.raw`\bInvoke-(WebRequest|RestMethod)\b[^|;&]*-Method\s+(Post|Put|Delete|Patch)`,
   String.raw`\bcurl\b[^|;&]*(\s-X\s*(POST|PUT|DELETE|PATCH)|\s--request\s+(POST|PUT|DELETE|PATCH)|\s(-d|--data\S*|-F|--form|-T|--upload-file|-o|--output|-O|--remote-name)\b)`,

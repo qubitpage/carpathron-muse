@@ -15,7 +15,7 @@ No install rights? Download **Muse-Carpathron-win-x64-portable.zip** from the sa
 *Alternative:* GitHub limits files inside a repository to 100 MB, so [`windows/`](windows) holds the same installer in 6 parts.
 Download all files of that folder into one folder and double-click **`Install.bat`**: it joins the parts, checks the SHA-256 and starts the installer.
 
-SHA-256 of `Muse-Carpathron-Setup.exe`: `bc4647bcb6c76cb0bbbd0896347318070737083f25027848116907cdb4945cec`
+SHA-256 of `Muse-Carpathron-Setup.exe`: `ed94e03948fbfaa1461445b5d2807a19d6abb26c7d6a557a909bcd5e9e192b37`
 
 ## 🥽 Carpathron Avatar — Meta Quest 3 / 3S / Pro / 2 (v1.1.6)
 

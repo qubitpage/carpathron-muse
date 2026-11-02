@@ -207,3 +207,4 @@ requestAnimationFrame(frame);
 const boot = () => { if (window.MCui) poll(); else setTimeout(boot, 400); };
 boot();
 window.MCsim3d = { state: S };
+export { buildScene, buildCar };

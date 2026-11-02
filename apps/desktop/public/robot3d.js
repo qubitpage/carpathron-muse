@@ -4,6 +4,7 @@
 // With the practice car, the true virtual room is drawn faintly so you can compare what the car mapped with reality.
 import * as THREE from './lib/three.module.min.js';
 import { OrbitControls } from './lib/OrbitControls.js';
+import { buildScene, buildCar } from './sim3d.js';
 
 const ui = () => window.MCui;
 const S = { scene: null, cam: null, ren: null, ctl: null, car: null, trail: null, trailPts: [], mapGroup: null, simGroup: null, target: null, el: null, raf: 0, follow: false, pose: { x: 0, y: 0, heading: 0 }, mapId: '' };
@@ -28,7 +29,7 @@ function build(el) {
   const box = el.querySelector('.p3d-view');
   S.scene = new THREE.Scene(); S.scene.background = new THREE.Color(0x0d0f12);
   S.cam = new THREE.PerspectiveCamera(50, 1, 0.05, 100); S.cam.position.set(0, 4.5, 4.5);
-  S.ren = new THREE.WebGLRenderer({ antialias: true }); S.ren.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  S.ren = new THREE.WebGLRenderer({ antialias: true }); S.ren.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); S.ren.outputColorSpace = THREE.SRGBColorSpace; S.ren.toneMapping = THREE.ACESFilmicToneMapping;
   box.append(S.ren.domElement);
   S.ctl = new OrbitControls(S.cam, S.ren.domElement); S.ctl.enableDamping = true; S.ctl.maxPolarAngle = Math.PI / 2 - 0.05; S.ctl.target.set(0, 0, 0);
   S.scene.add(new THREE.HemisphereLight(0xcfe3ff, 0x202530, 1.1));
@@ -36,11 +37,11 @@ function build(el) {
   const grid = new THREE.GridHelper(10, 10, 0x3a4a5e, 0x232a33); S.scene.add(grid);
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshBasicMaterial({ visible: false })); floor.rotation.x = -Math.PI / 2; floor.name = 'floor'; S.scene.add(floor);
   // the car: body + an arrow nose
+  // the Baby Carpathron model (same as the practice car), a bit bigger so it is easy to see; nose = direction
   S.car = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.07, 0.22), new THREE.MeshStandardMaterial({ color: 0x4f8cff }));
-  body.position.y = 0.06; S.car.add(body);
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.1, 12), new THREE.MeshStandardMaterial({ color: 0xffd75e }));
-  nose.rotation.x = -Math.PI / 2; nose.position.set(0, 0.06, -0.16); S.car.add(nose);
+  const model = buildCar().g; model.rotation.y = Math.PI / 2; model.scale.setScalar(1.6); S.car.add(model);
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.12, 16), new THREE.MeshStandardMaterial({ color: 0xffd75e, emissive: 0x6b5200 }));
+  arrow.rotation.x = -Math.PI / 2; arrow.position.set(0, 0.25, -0.12); S.car.add(arrow);
   S.scene.add(S.car);
   S.trail = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x3ddc97 })); S.scene.add(S.trail);
   S.target = new THREE.Mesh(new THREE.RingGeometry(0.08, 0.12, 24), new THREE.MeshBasicMaterial({ color: 0xffd75e, side: THREE.DoubleSide })); S.target.rotation.x = -Math.PI / 2; S.target.visible = false; S.scene.add(S.target);
@@ -109,10 +110,13 @@ async function loadSim() {
   if (!pr || !pr.running || !pr.room) return;
   const room = pr.room, st = room.start || [room.w / 2, room.h / 2];
   const P = (xs, ys) => W((ys - st[1]) / 100, (xs - st[0]) / 100); // simulator cm (heading 0 = +x) → map metres
-  const mat = new THREE.MeshStandardMaterial({ color: 0x8fa3b8, transparent: true, opacity: 0.18 });
-  const rect = ([x1, y1, x2, y2], h) => { const c = [P(x1, y1), P(x2, y1), P(x2, y2), P(x1, y2)]; for (let i = 0; i < 4; i++) { const m = wall(c[i], c[(i + 1) % 4], h, mat); if (m) S.simGroup.add(m); } };
-  rect([0, 0, room.w, room.h], 0.5);
-  for (const b of room.boxes) rect(b, 0.35);
+  void P;
+  // the furnished practice room, turned into the map's frame (the map's "ahead" = the simulator's east)
+  const furnished = buildScene(room), g = new THREE.Group();
+  for (const c of [...furnished.children]) if (!c.isLight && !(c.isObject3D && c.type === 'DirectionalLight')) g.add(c);
+  g.rotation.y = Math.PI / 2; g.position.set(-st[1] / 100, -0.004, st[0] / 100);
+  g.traverse((o) => { if (o.material && o.position.y > 2.2) o.visible = false; }); // no ceiling and lamp from above
+  S.simGroup.add(g);
 }
 
 async function tick() {

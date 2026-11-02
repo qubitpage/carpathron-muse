@@ -4,6 +4,19 @@
 (function () {
   const rd = window.rd;
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // the AI's answers: a small, safe subset of Markdown (everything is escaped first): **bold**, `code`, headings, lists
+  const md = (t) => {
+    const lines = esc(t).split('\n'); let html = '', list = false;
+    const inline = (x) => x.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s).,!?:;]|$)/g, '$1<i>$2</i>');
+    for (const raw of lines) {
+      const l = raw.trimEnd(); const li = l.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/); const h = l.match(/^\s*#{1,4}\s+(.*)$/);
+      if (li) { if (!list) { html += '<ul>'; list = true; } html += `<li>${inline(li[1])}</li>`; continue; }
+      if (list) { html += '</ul>'; list = false; }
+      html += h ? `<b>${inline(h[1])}</b><br>` : l ? `${inline(l)}<br>` : '<br>';
+    }
+    if (list) html += '</ul>';
+    return html.replace(/(<br>)+$/, '');
+  };
   const clean = (e) => String(e && e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
   const ICON = { ask: '⏸', running: '…', done: '✓', error: '✕', denied: '–' };
 
@@ -60,7 +73,7 @@
     onEv(ev) {
       if (ev.t === 'state') this.setRunning(ev.running);
       else if (ev.t === 'thinking') this.$('.aip-status').textContent = 'Thinking…';
-      else if (ev.t === 'say') this.add(esc(ev.text).replace(/\n/g, '<br>'), 'ai');
+      else if (ev.t === 'say') this.add(md(ev.text), 'ai');
       else if (ev.t === 'info') this.add(esc(ev.text), 'note');
       else if (ev.t === 'error') this.add(esc(ev.text), 'err');
       else if (ev.t === 'done') this.$('.aip-status').textContent = 'Done';

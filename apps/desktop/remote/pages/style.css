@@ -194,3 +194,14 @@ body.ssh .aiside { width: 380px; }
 body.actual #stage { overflow: auto; }
 body.actual #stage video, body.actual #stage canvas { position: static; width: auto; height: auto; max-width: none; max-height: none; object-fit: none; display: block; }
 body.actual #stage video[hidden], body.actual #stage canvas[hidden] { display: none; }
+/* narrow windows: one compact toolbar row (it scrolls sideways if still too narrow) instead of two rows */
+@media (max-width: 1100px) {
+  #bar { gap: 6px; padding: 5px 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+  #bar > * { flex: 0 0 auto; }
+  #bar button, #bar select { padding: 4px 7px; font-size: 12px; }
+  #bar select { max-width: 120px; }
+}
+/* AI answers: lists and inline code */
+#aipanel ul { margin: 4px 0 4px 18px; padding: 0; }
+#aipanel li { margin: 2px 0; }
+#aipanel code { background: #0b0e12; border: 1px solid var(--line); padding: 0 4px; border-radius: 4px; font-size: 12px; }

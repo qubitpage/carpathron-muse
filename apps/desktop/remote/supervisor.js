@@ -27,11 +27,29 @@ const DENY = new RegExp([
 // output redirection into a file (allowed: 2>&1, >/dev/null, > $null, >nul)
 const REDIRECT = /(^|[^0-9&>])>{1,2}\s*(?!&|\/dev\/null|\$null|nul\b)\S/i;
 
+// cmd /c "..." is allowed only when every part of it starts with a known read-only cmd command
+const CMD_SAFE = new Set(['dir', 'type', 'echo', 'ver', 'vol', 'where', 'findstr', 'find', 'systeminfo', 'ipconfig', 'tasklist', 'whoami', 'hostname', 'more', 'tree', 'chcp', 'getmac', 'driverquery', 'netstat', 'route', 'arp', 'nslookup', 'ping', 'tracert', 'pathping', 'fsutil', 'manage-bde', 'powercfg', 'gpresult', 'qwinsta', 'query', 'sc', 'net', 'reg', 'wmic', 'wevtutil', 'schtasks', 'certutil', 'set', 'path']);
+const CMD_RISKY_ARGS = /\b(fsutil\b[^&|]*\b(set|create|delete|repair|setzerodata|file\s+(set|create))|powercfg\b[^&|]*\b(-?(change|set|delete|import|setactive|h(ibernate)?\s+(on|off)))|manage-bde\b[^&|]*-(on|off|lock|unlock|changekey|protectors\s+-(add|delete|disable|enable))|set\s+\w+\s*=|path\s+\S)/i;
+function cmdInnerProblem(c) {
+  const re = /\bcmd(?:\.exe)?\s+\/[cCkK]\s+("([^"]*)"|(.*))$/i; const m = c.match(re); if (!m) return null;
+  const inner = (m[2] != null ? m[2] : m[3] || '').trim();
+  for (const part of inner.replace(/\d?>&\d/g, ' ').split(/&&|\|\||&|\|/)) {
+    const p = part.trim();
+    if (/^[A-Za-z]+-[A-Za-z]+\b/.test(p)) continue; // a PowerShell cmdlet after the pipe: checked by the deny-list below
+    const w = (p.match(/^@?([\w.-]+)/) || [, ''])[1].toLowerCase().replace(/\.exe$/, '');
+    if (!w) continue;
+    if (!CMD_SAFE.has(w)) return `"cmd /c ${w}" could change the system`;
+  }
+  if (CMD_RISKY_ARGS.test(inner)) return `"cmd /c ${inner.slice(0, 30)}" could change the system`;
+  return { rest: c.slice(0, m.index) + ' ' + inner }; // the rest is checked like any other command
+}
+
 function readOnlyProblem(cmd) {
-  const c = String(cmd || '').trim();
+  let c = String(cmd || '').trim();
   if (!c) return 'empty command';
   if (c.length > 4000) return 'command too long';
   if (REDIRECT.test(c)) return 'writes output into a file';
+  const ci = cmdInnerProblem(c); if (typeof ci === 'string') return ci; if (ci) c = ci.rest;
   const m = c.match(DENY); if (m) return `"${(m[0] + ((c.slice(m.index + m[0].length).match(/^[\w-]*/) || [''])[0])).replace(/^[\s;&|({`]+/, '').trim().slice(0, 40)}" could change the system`;
   return '';
 }

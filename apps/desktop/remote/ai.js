@@ -159,14 +159,22 @@ function pruneImages(hist, keep = 2) {
 function create({ getS, save, seal, unseal, log, handle, desktop, ssh, onAiState, appAi, appName }) {
   // inside an app with its own AI (Muse Carpathron): "the app's AI" uses that app's key, address and model — no second key
   const P = appAi ? { app: { label: `${appName || 'This app'}'s AI (its own settings)`, format: 'openai', base: '', model: '', app: true }, ...PRESETS } : PRESETS;
-  const S = () => { const s = getS(); s.ai = s.ai || { provider: appAi ? 'app' : 'meta', mode: 'approve' }; if (!P[s.ai.provider]) s.ai.provider = appAi ? 'app' : 'meta'; return s.ai; };
+  // one encrypted key per AI service: switching the service never sends one service's key to another
+  const guess = (k, cur) => { const t = String(k || ''); return /^sk-ant-/.test(t) ? 'anthropic' : /^sk-or-/.test(t) ? 'openrouter' : /^sk-(proj-)?[A-Za-z0-9_-]{20,}$/.test(t) && cur !== 'meta' ? 'openai' : cur === 'anthropic' ? 'meta' : cur; };
+  const S = () => {
+    const s = getS(); s.ai = s.ai || { provider: appAi ? 'app' : 'meta', mode: 'approve' }; if (!P[s.ai.provider]) s.ai.provider = appAi ? 'app' : 'meta';
+    const a = s.ai; if (!a.keys) a.keys = {};
+    if (a.key) { const plain = unseal(a.key); const to = guess(plain, a.provider); if (plain && !a.keys[to]) a.keys[to] = a.key; delete a.key; } // older single-key settings
+    return a;
+  };
+  const keyFor = (a, prov) => unseal((a.keys || {})[prov] || '');
   const cfg = () => {
     const a = S(); const p = P[a.provider] || P.custom;
     if (p.app) { let x = {}; try { x = appAi() || {}; } catch {} return { provider: 'app', format: 'openai', base: String(x.base || 'https://api.meta.ai/v1'), model: a.model || String(x.model || 'muse-spark-1.3'), key: String(x.key || ''), noKey: false, mode: a.mode === 'auto' ? 'auto' : 'approve', supervisor: a.supervisor !== false, app: true }; }
-    return { provider: a.provider, format: p.format, base: a.base || p.base, model: a.model || p.model, key: unseal(a.key || ''), noKey: !!p.noKey, mode: a.mode === 'auto' ? 'auto' : 'approve', supervisor: a.supervisor !== false };
+    return { provider: a.provider, format: p.format, base: a.base || p.base, model: a.model || p.model, key: keyFor(a, a.provider), noKey: !!p.noKey, mode: a.mode === 'auto' ? 'auto' : 'approve', supervisor: a.supervisor !== false };
   };
   const ready = () => { const c = cfg(); return !!(c.base && c.model && (c.key || c.noKey)); };
-  const pub = () => { const a = S(); const c = cfg(); return { provider: c.provider, base: c.app ? '' : a.base || '', model: a.model || '', defBase: c.app ? c.base : (P[c.provider] || {}).base || '', defModel: c.app ? c.model : (P[c.provider] || {}).model || '', hasKey: c.app ? !!c.key : !!a.key, app: !!c.app, appName: appName || '', mode: c.mode, supervisor: c.supervisor, ready: ready(), presets: Object.fromEntries(Object.entries(P).map(([k, v]) => [k, { label: v.label, base: v.base, model: v.model, noKey: !!v.noKey, format: v.format, app: !!v.app }])) }; };
+  const pub = () => { const a = S(); const c = cfg(); return { provider: c.provider, base: c.app ? '' : a.base || '', model: a.model || '', defBase: c.app ? c.base : (P[c.provider] || {}).base || '', defModel: c.app ? c.model : (P[c.provider] || {}).model || '', hasKey: c.app ? !!c.key : !!(a.keys || {})[a.provider], keysFor: Object.keys(a.keys || {}).filter((k) => a.keys[k]), app: !!c.app, appName: appName || '', mode: c.mode, supervisor: c.supervisor, ready: ready(), presets: Object.fromEntries(Object.entries(P).map(([k, v]) => [k, { label: v.label, base: v.base, model: v.model, noKey: !!v.noKey, format: v.format, app: !!v.app }])) }; };
 
   handle('rd-ai-settings', () => pub());
   handle('rd-ai-save', (_e, p) => {
@@ -174,7 +182,7 @@ function create({ getS, save, seal, unseal, log, handle, desktop, ssh, onAiState
     if (p.provider && P[p.provider]) { if (a.provider !== p.provider) { a.base = ''; a.model = ''; } a.provider = p.provider; }
     if (p.base !== undefined) { const b = String(p.base || '').trim(); if (b && !/^https?:\/\/[^\s]+$/.test(b)) throw new Error('The API address must start with https:// (or http:// for a local model).'); a.base = b; }
     if (p.model !== undefined) a.model = String(p.model || '').trim().slice(0, 120);
-    if (p.key !== undefined) a.key = p.key ? seal(String(p.key).trim()) : '';
+    if (p.key !== undefined) { a.keys = a.keys || {}; if (p.key) a.keys[a.provider] = seal(String(p.key).trim()); else delete a.keys[a.provider]; }
     if (p.mode) a.mode = p.mode === 'auto' ? 'auto' : 'approve';
     if (p.supervisor !== undefined) a.supervisor = !!p.supervisor;
     save(); return pub();

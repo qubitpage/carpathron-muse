@@ -1,11 +1,12 @@
 // Carpathron Remote — puts the viewer's mouse and keyboard into this PC (host side, main process).
-// Windows: a small resident PowerShell helper (C#, user32 SendInput) reads one command per line from stdin, so each
-// event costs a pipe write, not a new process. Coordinates are physical pixels on the virtual desktop.
+// Windows: a small resident native helper (bin/rdinput.exe, user32 SendInput; source bin/rdinput.c) reads one command
+// per line from stdin, so each event costs a pipe write, not a new process (PowerShell + C# only as a fallback). Coordinates are physical pixels on the virtual desktop.
 // Linux (X11): a resident `xdotool -` reads one command per line (xdotool must be installed: sudo apt install xdotool).
 // Wayland desktops do not let apps move the mouse of other apps: there, log in with an X11 ("Xorg") session to be
 // controlled (viewing and controlling other PCs works everywhere). Tests: events are written to RD_INJECT_LOG.
 'use strict';
 const fs = require('fs');
+const path = require('path');
 const { spawn } = require('child_process');
 
 const IS_WIN = process.platform === 'win32';
@@ -138,10 +139,15 @@ class Injector {
     }
     if (!IS_WIN) return;
     if (this.failedAt && Date.now() - this.failedAt < 5000) return; // do not retry in a tight loop
-    const W = require('./winexe');
-    const ps = W.exe('powershell');
-    this.proc = spawn(ps, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(PS, 'utf16le').toString('base64')], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: W.env() });
-    this.proc.on('error', (e) => { this.log(`remote input helper could not start (${ps}): ${e.message}`); this.proc = null; this.failedAt = Date.now(); });
+    // Windows: the small native helper bin/rdinput.exe (SendInput); PowerShell only if it is missing
+    const exe = path.join(__dirname, 'bin', 'rdinput.exe').replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
+    let cmd, args;
+    if (fs.existsSync(exe)) { cmd = exe; args = []; }
+    else { const W = require('./winexe'); cmd = W.exe('powershell'); args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(PS, 'utf16le').toString('base64')]; }
+    this.log(`remote input helper starting: ${cmd === exe ? 'rdinput.exe' : 'PowerShell (rdinput.exe missing: ' + exe + ')'}`);
+    this.proc = spawn(cmd, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: require('./winexe').env() });
+    this.proc.stdout.on('data', (d) => { if (/ready/.test(String(d))) this.log('remote input helper ready'); });
+    this.proc.on('error', (e) => { this.log(`remote input helper could not start (${cmd}): ${e.message}`); this.proc = null; this.failedAt = Date.now(); });
     this.proc.on('exit', (c) => { this.log(`remote input helper exited (${c})`); this.proc = null; });
     this.proc.stderr.on('data', (d) => this.log(`remote input helper: ${String(d).slice(0, 300)}`));
     this.proc.stdin.on('error', () => {});

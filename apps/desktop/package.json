@@ -73,7 +73,8 @@
     ],
     "asarUnpack": [
       "node_modules/jszip/**",
-      "node_modules/ssh2/**"
+      "node_modules/ssh2/**",
+      "remote/bin/*.exe"
     ],
     "afterPack": "build/afterPack.js",
     "win": {
@@ -119,7 +120,10 @@
       {
         "from": "build/voice-engine/node_modules",
         "to": "voice-engine/node_modules",
-        "filter": ["sherpa-onnx-node/**", "sherpa-onnx-win-x64/**"]
+        "filter": [
+          "sherpa-onnx-node/**",
+          "sherpa-onnx-win-x64/**"
+        ]
       }
     ]
   },

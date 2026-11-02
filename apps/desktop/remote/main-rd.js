@@ -66,6 +66,7 @@ const sessions = new Map(); // sid -> { name, how, mode, screen, started }
 let otp = '', otpSalt = '';
 let hostState = { state: 'off' };
 let injector = null;
+const inputWarned = new Set();
 let blocker = null;
 let sshMod = null, aiMod = null;
 const agentWait = new Map(); // rid -> { wc, resolve }
@@ -490,7 +491,9 @@ function setupIpc() {
     showBanner(); broadcastState();
   }, true);
   handle('rd-input', (_e, sid, ev) => {
-    const s = sessions.get(String(sid)); if (!s || !ev || s.control === false) return;
+    const s = sessions.get(String(sid));
+    if (!s || !ev || s.control === false) { if (!inputWarned.has(String(sid))) { inputWarned.add(String(sid)); log(`remote control: input ignored (${!s ? 'unknown session' : !ev ? 'empty event' : 'view only'})`); } return; }
+    if (!s.inputSeen) { s.inputSeen = true; log(`remote control: first input from ${s.name} (${ev.k})`); }
     const ds = displays(); const d = ds[s.screen || 0] || ds[0];
     injector.handle(ev, d.phys);
   }, true);

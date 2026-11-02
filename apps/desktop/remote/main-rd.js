@@ -1,7 +1,9 @@
-// Carpathron Remote — remote desktop (like TeamViewer) for the Carpathron apps. Main-process part.
+// Carpathron Remote DevOps — remote desktop + SSH with the AI technician / DevOps agent. Main-process part.
+// (Separate product from Carpathron Remote; same relay and licenses. AI: ./ai.js, commands on this PC: ./runner.js.)
 //
 //   preReady()        call before app 'ready' (registers the carprd:// scheme for the remote pages)
-//   init(opts)        call after 'ready': { log, standalone, appName, icon, hostDefault }
+//   init(opts)        call after 'ready': { log, standalone, appName, icon, hostDefault, appAi }
+//                     appAi (optional): () => ({ key, base, model }) — the host app's own AI settings (Muse Carpathron's Meta key)
 //   openHome()        the Remote desktop window (your ID + password, connect to another PC)
 //   isHosting()       true while this PC accepts connections (keeps the app alive in the tray)
 //
@@ -16,6 +18,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { app, BrowserWindow, ipcMain, protocol, session, desktopCapturer, screen, dialog, safeStorage, powerSaveBlocker, nativeImage, clipboard, shell } = require('electron');
 const { Injector } = require('./inject');
+const runner = require('./runner');
 
 const SCHEME = 'carprd';
 const PAGES = path.join(__dirname, 'pages');
@@ -35,8 +38,24 @@ async function pickRelay() {
 }
 const OTP_ABC = 'abcdefghijkmnpqrstuvwxyz23456789';
 const ITER = 150000;
-const BUY_URL = 'https://qubitpage.com/remote/#pricing';
-const PRICE = 'Pro $3 per PC per month or $19.99 per year (3 computers) · Max $5 per month or $49.99 per year (unlimited)';
+// licenses are sold on qubitpage.com (Licențe software in the CarphaCom admin); the app only opens those pages
+const SHOP = 'https://qubitpage.com';
+const BUY_URL = SHOP + '/software/carpathron-remote';
+const ACCOUNT_URL = SHOP + '/licenses';
+// shown when qubitpage.com cannot be reached; the live plans and prices come from SHOP/api/software/plans
+const DEFAULT_PLANS = [
+  { code: 'remote-pro-monthly', tier: 'pro', period: 'monthly', months: 1, price_cents: 300, currency: 'EUR', recurring: true, max_pcs: 50 },
+  { code: 'remote-pro-quarterly', tier: 'pro', period: 'quarterly', months: 3, price_cents: 799, currency: 'EUR', recurring: true, max_pcs: 50 },
+  { code: 'remote-pro-half-yearly', tier: 'pro', period: 'half-yearly', months: 6, price_cents: 1399, currency: 'EUR', recurring: true, max_pcs: 50 },
+  { code: 'remote-pro-yearly', tier: 'pro', period: 'yearly', months: 12, price_cents: 1999, currency: 'EUR', recurring: true, max_pcs: 50 },
+  { code: 'remote-pro-two-years', tier: 'pro', period: 'two-years', months: 24, price_cents: 2999, currency: 'EUR', recurring: false, max_pcs: 50 },
+  { code: 'remote-max-monthly', tier: 'max', period: 'monthly', months: 1, price_cents: 500, currency: 'EUR', recurring: true, max_pcs: 50 },
+  { code: 'remote-max-quarterly', tier: 'max', period: 'quarterly', months: 3, price_cents: 1449, currency: 'EUR', recurring: true, max_pcs: 50 },
+  { code: 'remote-max-half-yearly', tier: 'max', period: 'half-yearly', months: 6, price_cents: 2749, currency: 'EUR', recurring: true, max_pcs: 50 },
+  { code: 'remote-max-yearly', tier: 'max', period: 'yearly', months: 12, price_cents: 4999, currency: 'EUR', recurring: true, max_pcs: 50 },
+  { code: 'remote-max-two-years', tier: 'max', period: 'two-years', months: 24, price_cents: 9399, currency: 'EUR', recurring: false, max_pcs: 50 },
+];
+const PRICE = 'Pro from €3 per PC per month or €19.99 per year (3 computers) · Max from €5 per month or €49.99 per year (unlimited) · also 3 months, 6 months and 2 years';
 
 let opts = { log: () => {}, standalone: false, appName: 'Carpathron', icon: null, hostDefault: false };
 let S = null;              // settings
@@ -48,6 +67,18 @@ let otp = '', otpSalt = '';
 let hostState = { state: 'off' };
 let injector = null;
 let blocker = null;
+let sshMod = null, aiMod = null;
+const agentWait = new Map(); // rid -> { wc, resolve }
+function agentCall(wc, op, args, ms = 0) {
+  if (!wc || wc.isDestroyed()) return Promise.reject(new Error('The viewer window was closed.'));
+  const rid = rnd(8).toString('hex');
+  const limit = ms || (op === 'run' ? 3700000 : 60000);
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => { agentWait.delete(rid); reject(new Error(`The remote computer did not answer (${op}).`)); }, limit);
+    agentWait.set(rid, { wc, resolve: (r) => { clearTimeout(t); if (r && r.error && op !== 'run') reject(new Error(r.error)); else resolve(r); } });
+    wc.send('rd-agent', rid, op, args || {});
+  });
+}
 let fails = [];             // failed password attempts (time)
 let lockedUntil = 0;
 
@@ -70,7 +101,7 @@ function save() { try { fs.mkdirSync(path.dirname(file), { recursive: true }); f
 
 // ---------------------------------------------------------------- license
 // Free (personal use): sessions up to 20 minutes, 2 hours per day, one at a time — counted on the PC that controls.
-// Pro (a key, $3 per PC per month or $19.99 per year): unlimited. The relay enforces the limits (it ends the session).
+// Pro (a key, €3 per PC per month or €19.99 per year): unlimited. The relay enforces the limits (it ends the session).
 function machineId() {
   let raw = '';
   try {
@@ -148,7 +179,7 @@ function ensureHost() {
 }
 function openHome() {
   if (homeWin && !homeWin.isDestroyed()) { if (homeWin.isMinimized()) homeWin.restore(); homeWin.show(); homeWin.focus(); return homeWin; }
-  homeWin = new BrowserWindow({ width: 1000, height: 700, minWidth: 760, minHeight: 560, title: opts.standalone ? 'Carpathron Remote' : `${opts.appName} — Remote desktop`, backgroundColor: '#0d0f12', icon: opts.icon || undefined, autoHideMenuBar: true, show: false, webPreferences: webPrefs() });
+  homeWin = new BrowserWindow({ width: 1000, height: 700, minWidth: 760, minHeight: 560, title: opts.standalone ? opts.appName : `${opts.appName} — Remote desktop`, backgroundColor: '#0d0f12', icon: opts.icon || undefined, autoHideMenuBar: true, show: false, webPreferences: webPrefs() });
   harden(homeWin);
   homeWin.once('ready-to-show', () => homeWin.show());
   homeWin.on('closed', () => { homeWin = null; });
@@ -157,7 +188,7 @@ function openHome() {
 }
 function openSsh() {
   if (sshWin && !sshWin.isDestroyed()) { if (sshWin.isMinimized()) sshWin.restore(); sshWin.show(); sshWin.focus(); return sshWin; }
-  sshWin = new BrowserWindow({ width: 1100, height: 700, minWidth: 700, minHeight: 420, title: 'Carpathron Remote — SSH terminal', backgroundColor: '#0d0f12', icon: opts.icon || undefined, autoHideMenuBar: true, show: false, webPreferences: webPrefs() });
+  sshWin = new BrowserWindow({ width: 1100, height: 700, minWidth: 700, minHeight: 420, title: `${opts.appName} — SSH terminal`, backgroundColor: '#0d0f12', icon: opts.icon || undefined, autoHideMenuBar: true, show: false, webPreferences: webPrefs() });
   harden(sshWin);
   sshWin.once('ready-to-show', () => sshWin.show());
   sshWin.on('closed', () => { sshWin = null; });
@@ -169,7 +200,7 @@ const viewerJobs = new Map(); // token -> { id, password }
 function openViewer(id, password, name, remember) {
   const token = String(++viewerSeq) + rnd(8).toString('hex');
   viewerJobs.set(token, { id: String(id).replace(/\D/g, ''), password: password || '', name: name || '', remember: !!remember });
-  const w = new BrowserWindow({ width: 1280, height: 820, minWidth: 640, minHeight: 420, title: `Carpathron Remote — ${fmtId(id)}`, backgroundColor: '#000000', icon: opts.icon || undefined, autoHideMenuBar: true, webPreferences: webPrefs() });
+  const w = new BrowserWindow({ width: 1280, height: 820, minWidth: 640, minHeight: 420, title: `${opts.appName} — ${fmtId(id)}`, backgroundColor: '#000000', icon: opts.icon || undefined, autoHideMenuBar: true, webPreferences: webPrefs() });
   harden(w);
   viewers.add(w); w.on('closed', () => { viewers.delete(w); viewerJobs.delete(token); });
   w.loadURL(pageUrl(`viewer.html#${token}`));
@@ -202,10 +233,10 @@ function showBanner() {
 let panelLog = []; // events of this run of sessions (chat, files, calls) so the panel can show them after it opens
 function panelEvent(ev) {
   ev = Object.assign({ at: Date.now() }, ev);
-  if (['chat', 'in-done', 'out-done', 'call', 'call-join', 'call-end', 'info'].includes(ev.t)) { panelLog.push(ev); if (panelLog.length > 300) panelLog.shift(); }
+  if (['chat', 'in-done', 'out-done', 'call', 'call-join', 'call-end', 'info', 'cmd', 'cmd-end', 'ai'].includes(ev.t)) { panelLog.push(ev); if (panelLog.length > 300) panelLog.shift(); }
   if (bannerWin && !bannerWin.isDestroyed()) {
     bannerWin.webContents.send('rd-panel-event', ev);
-    if (!panelOpen && ['chat', 'call', 'in-start'].includes(ev.t)) { panelOpen = true; placePanel(); bannerWin.webContents.send('rd-panel-open', true); }
+    if (!panelOpen && ['chat', 'call', 'in-start', 'ai'].includes(ev.t)) { panelOpen = true; placePanel(); bannerWin.webContents.send('rd-panel-open', true); }
   }
 }
 
@@ -231,7 +262,7 @@ function publicState() {
     relay: isAuto() ? '' : S.relay, relayNow: relay(), quality: S.quality, autostart: S.autostart, viewOnly: !!S.viewOnly, clipSync: S.clipSync !== false, standalone: !!opts.standalone, store: !!process.windowsStore,
     license: licensePublic(),
     saved: (S.saved || []).map((c) => ({ id: c.id, idFmt: fmtId(c.id), name: c.name || '', last: c.last || 0, hasPw: !!c.pw })),
-    version: app.getVersion(), app: opts.standalone ? 'Carpathron Remote' : opts.appName,
+    version: app.getVersion(), app: opts.appName, cmdUnattended: !!S.cmdUnattended, aiReady: !!(aiMod && aiMod.ready()),
   };
 }
 function broadcastState() {
@@ -245,12 +276,27 @@ async function askConsent(info) {
   const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 60000);
   try {
     const parent = (homeWin && !homeWin.isDestroyed() && homeWin.isVisible()) ? homeWin : null;
-    const o = { type: 'question', buttons: ['Allow', 'Allow viewing only', 'Deny'], defaultId: 2, cancelId: 2, noLink: true, title: 'Carpathron Remote',
+    const o = { type: 'question', buttons: ['Allow', 'Allow viewing only', 'Deny'], defaultId: 2, cancelId: 2, noLink: true, title: opts.appName,
       message: `${String(info.name || 'Someone').slice(0, 60)} wants to control this computer`,
       detail: `They used this computer's one-time password${info.pc ? ` from "${String(info.pc).slice(0, 60)}"` : ''}.\n\nAllow: they see your screen and use your mouse and keyboard.\nAllow viewing only: they only see your screen (presentation).\n\nAllow only people you trust. You can chat, call, send files or end the session any time from the bar at the top of the screen.\n\nNo answer in 60 seconds = Deny.`,
       signal: ac.signal };
     const r = parent ? await dialog.showMessageBox(parent, o) : await dialog.showMessageBox(o);
     return r.response === 0 ? 'full' : r.response === 1 ? 'view' : false;
+  } catch { return false; } finally { clearTimeout(t); }
+}
+
+async function askCmdConsent(info) {
+  const auto = process.env.RD_AUTO_CMD;
+  if (auto) return auto === 'allow';
+  if (info.how === 'personal password') return !!S.cmdUnattended; // nobody is asked on unattended sessions: the setting decides
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 60000);
+  try {
+    const o = { type: 'question', buttons: ['Allow commands', 'Deny'], defaultId: 1, cancelId: 1, noLink: true, title: opts.appName,
+      message: `${String(info.name || 'The technician').slice(0, 60)} wants to run commands on this computer${info.ai ? ' (with the AI technician)' : ''}`,
+      detail: `Commands (${process.platform === 'win32' ? 'PowerShell' : 'Terminal'}) let them check and repair this computer: disks, programs, updates, security settings.\n\nThey run with your account. Anything that needs administrator rights shows a Windows prompt here that you must accept.\n\nYou see every command in the panel at the top of the screen and can stop them there. No answer in 60 seconds = Deny.`,
+      signal: ac.signal };
+    const r = await dialog.showMessageBox(o);
+    return r.response === 0;
   } catch { return false; } finally { clearTimeout(t); }
 }
 
@@ -274,6 +320,7 @@ function setupIpc() {
     if ('unattended' in p) S.unattended = !!p.unattended && !!S.perm;
     if ('viewOnly' in p) S.viewOnly = !!p.viewOnly;
     if ('clipSync' in p) S.clipSync = !!p.clipSync;
+    if ('cmdUnattended' in p) S.cmdUnattended = !!p.cmdUnattended;
     if ('autostart' in p && opts.standalone) { S.autostart = !!p.autostart; try { app.setLoginItemSettings({ openAtLogin: S.autostart, args: ['--hidden'] }); } catch {} }
     save(); ensureHost(); broadcastState(); return publicState();
   });
@@ -304,12 +351,49 @@ function setupIpc() {
   handle('rd-open-home', () => { openHome(); return true; });
   handle('rd-open-ssh', () => { openSsh(); return true; });
   handle('rd-ssh-keyfile', async (e) => { const w = BrowserWindow.fromWebContents(e.sender); const r = await dialog.showOpenDialog(w, { title: 'Choose your private key file', defaultPath: path.join(os.homedir(), '.ssh'), properties: ['openFile', 'showHiddenFiles'] }); return r.canceled ? '' : r.filePaths[0]; });
-  require('./ssh').create({ ipcMain, BrowserWindow, getS: () => S, save, seal, unseal, log, handle });
+  sshMod = require('./ssh').create({ ipcMain, BrowserWindow, getS: () => S, save, seal, unseal, log, handle });
+
+  // ---------------------------------------------------------------- commands on THIS computer for a technician (host side)
+  handle('rd-cmd-consent', async (_e, info) => askCmdConsent(info || {}), true);
+  handle('rd-run', (_e, req) => {
+    req = req || {}; const rid = String(req.rid || '').slice(0, 160); if (!rid) throw new Error('rid');
+    const send = (k, d) => { if (hostWin && !hostWin.isDestroyed()) hostWin.webContents.send('rd-run-ev', rid, k, d); };
+    log(`command for ${String(req.who || 'technician').slice(0, 60)}${req.admin ? ' (admin)' : ''}: ${String(req.script || '').split('\n')[0].slice(0, 120)}`);
+    runner.run({ rid, shell: req.shell, script: req.script, admin: !!req.admin, timeout: req.timeout }, (d) => send('out', d)).then((r) => send('end', r));
+    return true;
+  }, true);
+  handle('rd-run-kill', (_e, rid) => runner.kill(String(rid || '')), true);
+
+  // ---------------------------------------------------------------- viewer bridge for the AI (main → viewer page → host)
+  handle('rd-agent-reply', (e, rid, result) => { const p = agentWait.get(String(rid)); if (p && p.wc === e.sender) { agentWait.delete(String(rid)); p.resolve(result); } return true; });
+  handle('rd-ai-remote-stop', (e) => { if (aiMod) aiMod.stopFromRemote(e.sender); return true; });
+  aiMod = require('./ai').create({
+    getS: () => S, save, seal, unseal, log, handle,
+    desktop: { call: agentCall },
+    ssh: { info: (tid) => sshMod.info(tid), exec: (tid, script, o) => sshMod.exec(tid, script, o) },
+    onAiState: broadcastState,
+    appAi: opts.appAi, appName: opts.appName,
+  });
   handle('rd-license-activate', async (_e, key) => { await licenseCall('activate', { key: String(key || '').trim() }); return publicState(); });
   handle('rd-license-release', async () => { await licenseCall('release'); return publicState(); });
   handle('rd-license-refresh', async () => { await licenseCall('status'); return publicState(); });
   handle('rd-license-unhost', async (_e, id) => { await licenseCall('unhost', { id: String(id || '') }); return publicState(); });
-  handle('rd-buy', () => { require('electron').shell.openExternal(BUY_URL); return true; });
+  // Plans: the live list from qubitpage.com (falls back to the built-in prices when offline)
+  handle('rd-plans', async () => {
+    try {
+      const r = await fetch(SHOP + '/api/software/plans', { signal: AbortSignal.timeout(8000) });
+      const j = await r.json();
+      if (j && j.ok && Array.isArray(j.plans) && j.plans.length) return { live: true, plans: j.plans.filter((p) => p && /^[a-z0-9-]{3,60}$/.test(p.code)).map((p) => ({ code: p.code, name: String(p.name || ''), tier: p.tier === 'max' ? 'max' : 'pro', period: p.period === 'yearly' ? 'yearly' : 'monthly', months: Number(p.months) || 1, price_cents: Number(p.price_cents) || 0, currency: String(p.currency || 'USD').slice(0, 3), recurring: !!p.recurring, max_pcs: Number(p.max_pcs) || 1 })), shop: BUY_URL, account: ACCOUNT_URL };
+    } catch (e) { log('plans:', e.message); }
+    return { live: false, plans: DEFAULT_PLANS, shop: BUY_URL, account: ACCOUNT_URL };
+  });
+  // Buy: opens the plan on qubitpage.com in the browser (PayPal checkout there), with the plan and number of PCs chosen
+  handle('rd-buy', (_e, code, pcs) => {
+    let url = BUY_URL;
+    if (code && /^[a-z0-9-]{3,60}$/.test(String(code))) url += `?plan=${encodeURIComponent(code)}&pcs=${Math.max(1, Math.min(1000, Math.floor(Number(pcs) || 1)))}#order`;
+    require('electron').shell.openExternal(url); return true;
+  });
+  handle('rd-my-licenses', () => { require('electron').shell.openExternal(ACCOUNT_URL); return true; });
   handle('rd-license-quiet', async () => { try { await licenseCall('status'); } catch {} return true; });
   handle('rd-disconnect', (_e, sid) => { if (hostWin && !hostWin.isDestroyed()) hostWin.webContents.send('rd-kill', sid ? String(sid) : '*'); return true; });
 
@@ -395,7 +479,7 @@ function setupIpc() {
     sid = String(sid);
     if (info) {
       const was = sessions.get(sid) || {};
-      sessions.set(sid, { ...was, name: String(info.name || was.name || 'Viewer').slice(0, 60), how: info.how || was.how || '', mode: info.mode || was.mode || '', screen: Number(info.screen ?? was.screen ?? 0), control: 'control' in info ? !!info.control : was.control !== false, call: 'call' in info ? String(info.call || '') : (was.call || ''), started: was.started || Date.now() });
+      sessions.set(sid, { ...was, name: String(info.name || was.name || 'Viewer').slice(0, 60), how: info.how || was.how || '', mode: info.mode || was.mode || '', screen: Number(info.screen ?? was.screen ?? 0), control: 'control' in info ? !!info.control : was.control !== false, call: 'call' in info ? String(info.call || '') : (was.call || ''), ai: 'ai' in info ? !!info.ai : !!was.ai, cmd: 'cmd' in info ? !!info.cmd : !!was.cmd, started: was.started || Date.now() });
       if (!blocker && sessions.size) { try { blocker = powerSaveBlocker.start('prevent-display-sleep'); } catch {} }
     } else {
       const s = sessions.get(sid); sessions.delete(sid);

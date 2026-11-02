@@ -1,11 +1,15 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Remote session</title><link rel="stylesheet" href="style.css"></head>
 <body class="banner">
-<div class="bbar"><span class="dot"></span><span class="txt" id="txt">Remote session</span>
+<div class="bbar"><span class="dot"></span><span class="txt" id="txt">Remote session</span><button id="aistop" class="danger" hidden title="Stop the AI technician now">Stop AI</button>
   <button id="toggle" title="Chat, voice call, files">Chat · Call · Files <span id="badge" class="badge" hidden>0</span></button><button id="end" class="danger">Disconnect</button></div>
 <div id="side" class="bside" hidden>
   <section class="sbox">
     <label class="switch small" id="ctlwrap"><input type="checkbox" id="ctl"> <span>Let them control my mouse and keyboard (off = they can only watch)</span></label>
+  </section>
+  <section class="sbox" id="cmdbox" hidden>
+    <div class="shead"><b>Commands on this computer</b><button id="cmdrevoke" class="link small">Stop commands</button></div>
+    <div id="cmdlog" class="cmdlog"></div>
   </section>
   <section class="sbox">
     <div class="shead"><b>Voice call</b><span id="callstate" class="muted small">Not in a call</span></div>

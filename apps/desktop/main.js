@@ -69,7 +69,9 @@ else {
       app.quit();
       return;
     }
-    try { remoteDesktop.init({ log, appName: 'Muse Carpathron', icon: path.join(__dirname, 'public', 'icon.png'), hostDefault: false }); } catch (e) { log(`remote desktop: ${e.stack || e.message}`); }
+    try { remoteDesktop.init({ log, appName: 'Muse Carpathron', icon: path.join(__dirname, 'public', 'icon.png'), hostDefault: false,
+      // the AI technician / AI DevOps use Muse Carpathron's own Meta API key, address and model (no second key)
+      appAi: () => { const st = srv && srv.store && srv.store.settings; return st ? { key: st.apiKey, base: st.apiBase, model: st.model } : {}; } }); } catch (e) { log(`remote desktop: ${e.stack || e.message}`); }
     // Trust exactly our own local certificate for the window (pages, API and the live WebSocket).
     try {
       const norm = (x) => String(x || '').replace(/\r/g, '').trim();

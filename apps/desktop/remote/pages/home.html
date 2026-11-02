@@ -1,13 +1,22 @@
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Carpathron Remote</title><link rel="stylesheet" href="style.css"></head>
 <body class="home"><div class="wrap">
-  <div class="top"><h1>Remote desktop</h1><span class="grow"></span><button id="sshbtn" title="SSH terminal to your servers (like PuTTY)">⌨ SSH terminal</button><span id="hstate" class="pill"></span></div>
+  <div class="top"><h1>Remote desktop</h1><span class="grow"></span><button id="sshbtn" title="SSH terminal to your servers">⌨ SSH terminal</button><span id="hstate" class="pill"></span></div>
   <section class="panel lic" id="lic">
     <div class="licrow"><div class="t"><b id="lictitle">License</b><span class="muted small" id="lictext"></span></div>
       <button class="primary" id="buy">Get a license</button></div>
     <div class="row" id="licform"><input type="text" id="lickey" placeholder="License key: CRMT-XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" style="flex:1;min-width:220px"><button id="activate">Activate</button><button id="release" hidden>Remove from this PC</button><button id="licrefresh" title="Check again">↻</button></div>
     <div id="lichosts" class="list" hidden></div>
     <div id="licmsg" class="small" hidden></div>
+  </section>
+  <section class="panel plans" id="plans" hidden>
+    <div class="licrow"><div class="t"><b>Plans</b><span class="muted small">Licenses are bought on qubitpage.com with PayPal (account or card). The key arrives by email; paste it above and click Activate.</span></div>
+      <div class="seg" id="period"></div>
+      <button id="plansclose" title="Close">✕</button></div>
+    <div class="plangrid" id="plangrid"></div>
+    <div class="row"><label class="muted small">PCs that will control other computers <input type="number" id="pcs" min="1" max="1000" value="1" style="width:80px;margin-left:6px"></label><span class="grow"></span>
+      <button id="mylic">My licenses on qubitpage.com</button></div>
+    <div class="muted small" id="plansnote" style="margin-top:8px"></div>
   </section>
   <div class="cols">
     <section class="panel">
@@ -21,7 +30,8 @@
         <div class="field"><div class="label">Unattended access (your own computers)</div>
           <label class="switch"><input type="checkbox" id="unattended"> <span>Allow connections with my personal password, without asking</span></label>
           <div class="row"><input type="password" id="ppw" placeholder="Personal password (10+ characters)" autocomplete="new-password" style="flex:1"><button id="setppw">Set</button></div>
-          <div id="ppwstate" class="muted small"></div></div>
+          <div id="ppwstate" class="muted small"></div>
+          <label class="switch"><input type="checkbox" id="cmdun"> <span>Allow commands in unattended sessions (your own PCs and servers: the AI technician can run commands without anyone clicking Allow)</span></label></div>
         <div class="field"><div class="label">Presentation</div>
           <label class="switch"><input type="checkbox" id="viewonly"> <span>Presentation mode: people who connect can only watch (no mouse or keyboard). Several people can watch at once.</span></label></div>
         <div id="lock" class="note" hidden></div>
@@ -37,6 +47,19 @@
       <div class="field"><div class="label">Recent computers</div><div class="list" id="saved"><div class="muted small" style="padding:8px 0">None yet.</div></div></div>
     </section>
   </div>
+  <section class="panel aiset" id="aiset">
+    <div class="licrow"><div class="t"><b>✦ AI technician &amp; DevOps agent</b><span class="muted small" id="aistate">Add your own API key: the AI works on remote computers (screen, mouse, commands) and on your servers over SSH.</span></div></div>
+    <div class="aigrid">
+      <label>AI service <select id="aiprov"></select></label>
+      <label><b>API key</b> <input type="password" id="aikey" autocomplete="off" placeholder="Paste your API key here" spellcheck="false"></label>
+      <label>Model <span class="row tight" style="margin:0"><input type="text" id="aimodel" list="aimodels" style="flex:1"><button type="button" id="aiload" title="Load the models of this service">↻</button></span><datalist id="aimodels"></datalist></label>
+      <label>How it works <select id="aimode"><option value="approve">Ask me before every change</option><option value="auto">Autopilot (runs on its own; you can stop it)</option></select></label>
+      <details class="wide aiadv" id="aiadv"><summary>API address — only for “Other” or a local model; leave it as it is for the others</summary><label>API address (a link like https://…/v1, not the key) <input type="text" id="aibase" placeholder="" spellcheck="false"></label></details>
+      <label class="switch wide"><input type="checkbox" id="aisup"> <span>🛡 Supervisor: after a job that changed something, an independent read-only check verifies the result (commands, ready-made checks, a screenshot) and shows a verdict with evidence. In Autopilot a failed check goes back to the AI to fix.</span></label>
+    </div>
+    <div class="row"><button class="primary" id="aisave">Save</button><button id="aitest">Test</button><button id="aidelkey" class="link small">Remove the key</button><span class="muted small" id="aimsg"></span></div>
+    <p class="muted small">The key is stored encrypted on this PC and is sent only to the AI service you choose. What the AI sees (screenshots, command output) goes to that service. In a remote session open <b>✦ AI technician</b>; in the SSH terminal open <b>✦ AI DevOps</b>.</p>
+  </section>
   <details><summary>Settings</summary>
     <div class="panel" style="margin-top:10px">
       <div class="field"><div class="label">This computer's name (shown to the other side)</div><div class="row" style="margin-top:4px"><input type="text" id="name" style="flex:1"><button id="savename">Save</button></div></div>
@@ -44,7 +67,7 @@
         <div class="muted small">Leave empty for automatic (relay.qubitpage.com, or qubitpage.com if that is not reachable). The relay only connects the two computers; the session is end-to-end encrypted and the picture goes directly between them when the network allows it.</div></div>
       <div class="field"><div class="label">Picture quality</div><select id="quality"><option value="auto">Auto</option><option value="high">High</option><option value="low">Low (slow internet)</option></select></div>
       <label class="switch" id="autowrap" hidden><input type="checkbox" id="autostart"> <span>Start with Windows (in the tray, ready for connections)</span></label>
-      <p class="muted small" id="storeauto" hidden>To start with Windows: Windows Settings → Apps → Startup → turn on <b>Carpathron Remote</b>.</p>
+      <p class="muted small" id="storeauto" hidden>To start with Windows: Windows Settings → Apps → Startup → turn on <b id="appname2">Carpathron Remote DevOps</b>.</p>
       <label class="switch"><input type="checkbox" id="clipsync"> <span>Share the clipboard during sessions (copy on one computer, paste on the other)</span></label>
       <p class="muted small" id="ver"></p>
     </div>

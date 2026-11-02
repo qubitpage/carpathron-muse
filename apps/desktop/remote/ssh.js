@@ -1,4 +1,4 @@
-// Carpathron Remote — SSH terminal (like PuTTY): saved connections, password or key login, host key check,
+// Carpathron Remote — SSH terminal: saved connections, password or key login, host key check,
 // several terminals in tabs. Main-process part; the window is pages/ssh.html.
 //
 // Secrets (passwords, private keys, passphrases) are sealed with the same DPAPI / safeStorage functions as the
@@ -89,6 +89,35 @@ function create({ ipcMain, BrowserWindow, getS, save, seal, unseal, log, handle 
   handle('rd-ssh-write', (_e, tid, data) => { const t = terms.get(String(tid)); if (t && t.stream) t.stream.write(String(data)); return true; });
   handle('rd-ssh-resize', (_e, tid, cols, rows) => { const t = terms.get(String(tid)); if (t && t.stream) { try { t.stream.setWindow(Number(rows) || 30, Number(cols) || 100, 0, 0); } catch {} } return true; });
   handle('rd-ssh-close', (_e, tid) => { const t = terms.get(String(tid)); if (t) { try { t.client.end(); } catch {} terms.delete(String(tid)); } return true; });
-  return { count: () => terms.size };
+  // ---------------------------------------------------------------- AI DevOps: run commands on an open terminal's connection
+  // (a separate exec channel, so the terminal itself is not disturbed; what runs is echoed into the terminal in colour)
+  const shq = (x) => `'${String(x).replace(/'/g, `'\\''`)}'`;
+  function info(tid, wc) {
+    const t = terms.get(String(tid)); if (!t || !t.stream || (wc && t.wc !== wc)) return null;
+    return { target: `${t.conn.user}@${t.conn.host}`, user: t.conn.user, host: t.conn.host, port: t.conn.port, root: t.conn.user === 'root', os: t.os || '' };
+  }
+  function exec(tid, script, o = {}) {
+    const t = terms.get(String(tid)); if (!t || !t.client || !t.stream) return Promise.reject(new Error('The SSH terminal is not connected any more.'));
+    const timeout = Math.max(5, Math.min(3600, Number(o.timeout) || 120)) * 1000;
+    let cmd = 'bash -c ' + shq(String(script || '')); let pre = '';
+    if (o.sudo && t.conn.user !== 'root') {
+      const pw = t.conn.auth === 'password' ? unseal(t.conn.pw) : '';
+      cmd = pw ? `sudo -S -p '' ${cmd}` : `sudo -n ${cmd}`; if (pw) pre = pw + '\n';
+    }
+    const echo = (txt) => { if (!t.wc.isDestroyed()) t.wc.send('rd-ssh-data', tid, txt); };
+    echo(`\r\n\x1b[36m[${o.label || 'AI'}${o.sudo ? ' · sudo' : ''}] ${String(script).split('\n')[0].slice(0, 160)}${String(script).includes('\n') ? ' …' : ''}\x1b[0m\r\n`);
+    return new Promise((resolve) => {
+      const t0 = Date.now(); let out = ''; let timedOut = false; const cap = 400000;
+      t.client.exec(cmd, { pty: false }, (err, stream) => {
+        if (err) return resolve({ code: -1, out: 'Could not run: ' + err.message, ms: 0 });
+        const timer = setTimeout(() => { timedOut = true; try { stream.signal('KILL'); } catch {} try { stream.close(); } catch {} }, timeout);
+        const add = (d) => { const x = d.toString('utf8'); if (out.length < cap) out += x; echo(x.replace(/\r?\n/g, '\r\n')); };
+        stream.on('data', add); stream.stderr.on('data', add);
+        stream.on('close', (code) => { clearTimeout(timer); if (pre) out = out.replace(/^\[sudo\][^\n]*\n/, ''); resolve({ code: timedOut ? -2 : code, out: out.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, ''), ms: Date.now() - t0, timedOut }); });
+        stream.end(pre + (o.stdin != null ? String(o.stdin) : '')); // sudo password first (never shown), then the input
+      });
+    });
+  }
+  return { count: () => terms.size, info, exec };
 }
 module.exports = { create };

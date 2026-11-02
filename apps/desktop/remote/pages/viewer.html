@@ -2,12 +2,13 @@
 <html><head><meta charset="utf-8"><title>Carpathron Remote</title><link rel="stylesheet" href="style.css"></head>
 <body class="viewer">
 <header id="bar">
-  <span class="brand">Carpathron Remote</span>
+  <span class="brand" id="brand">Carpathron Remote</span>
   <span id="who" class="who"></span>
   <span id="status" class="pill warn">Connecting</span>
   <span id="viewonly" class="pill warn" hidden title="The person at that computer allowed viewing only (presentation)">View only</span>
   <span id="stats" class="muted small"></span>
   <span id="limit" class="pill warn" hidden style="cursor:pointer"></span>
+  <span id="aipill" class="pill ai" hidden title="The AI technician is working">AI working</span>
   <span class="grow"></span>
   <label hidden title="Which screen of the remote computer"><select id="screen"></select></label>
   <label title="Picture quality"><select id="quality"><option value="auto">Quality: auto</option><option value="high">Quality: high</option><option value="low">Quality: low</option></select></label>
@@ -18,6 +19,7 @@
   </select>
   <button id="paste" title="Type the text from your clipboard on the remote computer">Paste text</button>
   <button id="rec" title="Record this session to a video file (Videos\Carpathron Remote)">● Record</button>
+ <button id="aibtn" title="AI technician: give it a job on the remote computer">✦ AI technician</button>
   <button id="sidebtn" title="Chat, voice call and file transfer">Chat · Call · Files <span id="badge" class="badge" hidden>0</span></button>
   <button id="full" title="Full screen (move the mouse to the top edge to see this bar)">Full screen</button>
   <button id="end" class="danger">Disconnect</button>
@@ -29,6 +31,7 @@
     <div id="drop" hidden><div>Drop files to copy them to the remote computer</div></div>
     <div id="overlay" hidden></div>
   </main>
+  <aside id="aiside" class="aiside" hidden><div id="aipanel"></div></aside>
   <aside id="side" hidden>
     <section class="sbox">
       <div class="shead"><b>Voice call</b><span id="callstate" class="muted small">Not in a call</span></div>
@@ -47,5 +50,5 @@
     </section>
   </aside>
 </div>
-<script src="common.js"></script><script src="panelui.js"></script><script src="viewer.js"></script>
+<script src="common.js"></script><script src="panelui.js"></script><script src="aipanel.js"></script><script src="viewer.js"></script>
 </body></html>

@@ -67,7 +67,7 @@
     tb.onclick = (e) => { if (e.target.tagName === 'BUTTON') closeTab(tab); else select(tab); };
     select(tab); fitNow(tab);
     term.writeln(`\x1b[90mConnecting to ${c.user}@${c.host}:${c.port}…\x1b[0m`);
-    // right-click pastes (like PuTTY); selecting text copies it
+    // right-click pastes; selecting text copies it
     el.addEventListener('contextmenu', async (e) => { e.preventDefault(); const t = await rd.clipRead().catch(() => ''); if (t && tab.id) rd.sshWrite(tab.id, t); });
     term.onSelectionChange(() => { const s = term.getSelection(); if (s) rd.clipWrite(s).catch(() => {}); });
     term.onData((d) => { if (tab.id && tab.state === 'ready') rd.sshWrite(tab.id, d); });
@@ -81,20 +81,41 @@
     }
   }
   function setState(tab, st) { tab.state = st; tab.tb.className = 'tab ' + st + (tab === active ? ' on' : ''); }
-  function select(tab) { active = tab; for (const t of [...tabs.values(), tab]) { t.el.hidden = t !== tab; t.tb.classList.toggle('on', t === tab); } setTimeout(() => { fitNow(tab); tab.term.focus(); }, 30); }
+  function select(tab) { active = tab; for (const t of [...tabs.values(), tab]) { t.el.hidden = t !== tab; t.tb.classList.toggle('on', t === tab); } showAi(); setTimeout(() => { fitNow(tab); tab.term.focus(); }, 30); }
+  // ---------------------------------------------------------------- AI DevOps (one panel per terminal)
+  const QUICK = [
+    ['Check server', 'Check this server: system, disks, memory, failed services, recent errors and security (firewall, SSH settings, updates, open ports). Report problems and recommendations. Do not change anything yet.'],
+    ['Security hardening', 'Review the security of this server and propose a hardening plan (updates, firewall allowing SSH first, fail2ban, SSH settings, unattended security updates). Do not apply it until I agree.'],
+    ['Install updates', 'Install the available system updates safely (non-interactive), then tell me if a reboot is needed. Do not reboot.'],
+    ['Disk space', 'Find what uses disk space on this server (logs, journal, Docker, caches, old kernels) and propose a safe cleanup. Do not delete data folders.'],
+  ];
+  function showAi() {
+    const open = !$('#aiside').hidden; $('#aibtn').classList.toggle('on', open);
+    for (const t of tabs.values()) if (t.aiEl) t.aiEl.hidden = t !== active;
+    $('#ainone').hidden = !!(active && active.id);
+    if (!open || !active || !active.id) return;
+    if (!active.ai) {
+      active.aiEl = document.createElement('div'); $('#aiside').appendChild(active.aiEl);
+      active.ai = new window.AIPanel({ root: active.aiEl, target: 'ssh', tid: active.id, title: `AI DevOps · ${active.c.name}`, quick: QUICK });
+    } else active.ai.refresh();
+    active.aiEl.hidden = false;
+  }
+  $('#aibtn').onclick = () => { $('#aiside').hidden = !$('#aiside').hidden; showAi(); setTimeout(() => { if (active) fitNow(active); }, 50); };
   function fitNow(tab) { try { tab.fit.fit(); } catch {} }
   function closeTab(tab) {
     if (tab.id) { rd.sshClose(tab.id).catch(() => {}); tabs.delete(tab.id); }
+    if (tab.id) rd.aiStop(tab.id).catch(() => {});
+    if (tab.aiEl) tab.aiEl.remove();
     tab.term.dispose(); tab.el.remove(); tab.tb.remove();
     const rest = [...tabs.values()]; if (rest.length) select(rest[rest.length - 1]); else { active = null; $('#empty').hidden = false; }
   }
   rd.onSshData((tid, d) => { const t = tabs.get(tid); if (t) t.term.write(d); });
-  rd.onSshReady((tid, who) => { const t = tabs.get(tid); if (!t) return; setState(t, 'ready'); t.term.focus(); window.__sshReady = (window.__sshReady || 0) + 1; });
+  rd.onSshReady((tid, who) => { const t = tabs.get(tid); if (!t) return; setState(t, 'ready'); if (t === active) showAi(); t.term.focus(); window.__sshReady = (window.__sshReady || 0) + 1; });
   rd.onSshExit((tid, why) => { const t = tabs.get(tid); if (!t) return; t.term.writeln(`\r\n\x1b[33m${why}\x1b[0m`); setState(t, 'closed'); });
   rd.onSshHostKey((tid, fp) => {
     const t = tabs.get(tid); const c = t ? t.c : { host: '?' };
     modal(`<h2>New server: check its key</h2><p>This is the first connection to <b>${esc(c.host)}</b>. Its host key fingerprint is:</p><p class="mono">${esc(fp)}</p>
-      <p class="muted small">If you know the server's fingerprint, compare it. Accept to remember it: Carpathron Remote will warn you if it ever changes.</p>
+      <p class="muted small">If you know the server's fingerprint, compare it. Accept to remember it: the app will warn you if it ever changes.</p>
       <div class="row"><button class="primary" id="h-ok">Accept and connect</button><button id="h-no">Cancel</button></div>`);
     $('#h-ok').onclick = () => { modal(null); rd.sshTrust(tid, true); loadList(); };
     $('#h-no').onclick = () => { modal(null); rd.sshTrust(tid, false); };
@@ -110,5 +131,5 @@
   $('#conns').addEventListener('dblclick', (e) => { const d = e.target.closest('.conn'); if (d) openTab(d.dataset.id); });
   window.__ssh = { openTab, tabs };
   loadList();
-  rd.state().then((s) => { $('#appver').textContent = s.app === 'Carpathron Remote' ? `Carpathron Remote ${s.version}` : `${s.app} ${s.version}`; }).catch(() => {});
+  rd.state().then((s) => { $('#appver').textContent = /^Carpathron Remote/.test(s.app) ? `${s.app} ${s.version}` : `${s.app} ${s.version}`; }).catch(() => {});
 })();

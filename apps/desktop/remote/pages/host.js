@@ -28,6 +28,15 @@
     else if (cmd.t === 'hangup') for (const s of list) s.endCall(true);
     else if (cmd.t === 'mute') { for (const s of list) if (s.voice) s.voice.muted = !!cmd.on; }
     else if (cmd.t === 'control') { for (const s of list) s.setControl(!!cmd.on); }
+    else if (cmd.t === 'cmd-revoke') { for (const s of list) s.revokeCmd(); }
+    else if (cmd.t === 'ai-stop') { for (const s of list) if (s.ai) { s.ch.send({ t: 'ai-stop' }); panel({ t: 'info', sid: s.sid, text: 'You stopped the AI technician.' }); } }
+  });
+  // output of commands run for a technician: batched, then sent through the encrypted session
+  rd.onRunEv((rid, kind, d) => {
+    const sid = rid.split(':')[0]; const s = sessions.get(sid); if (!s) return;
+    const id = rid.slice(sid.length + 1); const job = s.runs.get(id); if (!job) return;
+    if (kind === 'out') { job.buf += d; if (!job.t) job.t = setTimeout(() => s.flushRun(id), 250); }
+    else if (kind === 'end') { s.flushRun(id); s.runs.delete(id); s.ch.send({ t: 'run-end', id, code: d.code, ms: d.ms, timedOut: !!d.timedOut, truncated: !!d.truncated }); panel({ t: 'cmd-end', sid, id, code: d.code }); }
   });
   const status = (state, extra) => rd.hostStatus(Object.assign({ state }, extra || {})).catch(() => {});
 
@@ -63,7 +72,7 @@
   }
 
   class HostSession {
-    constructor(sid) { this.sid = sid; this.ch = null; this.pc = null; this.dc = null; this.stream = null; this.screen = 0; this.mode = ''; this.name = 'Viewer'; this.ended = false; this.authed = false; this.jpegQ = 0.7; this.frameW = 1600; this.control = true; this.call = ''; this.tr = null; this.voice = null; }
+    constructor(sid) { this.sid = sid; this.ch = null; this.pc = null; this.dc = null; this.stream = null; this.screen = 0; this.mode = ''; this.name = 'Viewer'; this.ended = false; this.authed = false; this.jpegQ = 0.7; this.frameW = 1600; this.control = true; this.call = ''; this.tr = null; this.voice = null; this.cmd = 'none'; this.runs = new Map(); this.ai = false; }
     async run() {
       this.locked = await rd.locked();
       cfg = await rd.hostConfig(); // latest one-time password and settings
@@ -124,7 +133,7 @@
       this.screen = Math.max(0, this.screens.findIndex((d) => d.primary));
       this.stream = await this.capture(this.screen);
       await rd.session(this.sid, { screen: this.screen });
-      await this.ch.send({ t: 'info', screens: this.screens, screen: this.screen, name: cfg.name, sys: await rd.sysinfo().catch(() => null) });
+      await this.ch.send({ t: 'info', screens: this.screens, screen: this.screen, name: cfg.name, sys: await rd.sysinfo().catch(() => null), caps: ['cmd', 'ai'] });
       // WebRTC first (direct, low latency). If no route is found in time, frames go through the relay instead.
       const pc = this.pc = new RTCPeerConnection({ iceServers: ice });
       this.sender = pc.addTrack(this.stream.getVideoTracks()[0], this.stream);
@@ -202,6 +211,19 @@
         case 'relay': this.toRelay(); break;
         case 'ping': this.ch.send({ t: 'pong', ts: m.ts }); break;
         case 'bye': this.end(); break;
+        case 'cmd-req': await this.askCmd(!!m.ai); break;
+        case 'run': {
+          const id = String(m.id || '').slice(0, 40); if (!id) break;
+          if (this.cmd !== 'allowed') { this.ch.send({ t: 'run-end', id, code: -1, error: 'not-allowed' }); break; }
+          if (this.runs.size >= 4) { this.ch.send({ t: 'run-end', id, code: -1, error: 'busy' }); break; }
+          this.runs.set(id, { buf: '', t: null });
+          const script = String(m.script || '').slice(0, 200000);
+          panel({ t: 'cmd', sid: this.sid, id, who: this.ai ? `${this.name} (AI)` : this.name, admin: !!m.admin, text: script.slice(0, 2000) });
+          rd.run({ rid: this.sid + ':' + id, shell: m.shell, script, admin: !!m.admin, timeout: m.timeout, who: this.name }).catch((e) => { this.runs.delete(id); this.ch.send({ t: 'run-end', id, code: -1, error: String(e.message || e) }); });
+          break;
+        }
+        case 'run-kill': if (this.runs.has(String(m.id))) rd.runKill(this.sid + ':' + String(m.id)); break;
+        case 'ai': this.ai = !!m.on; rd.session(this.sid, { ai: this.ai }); panel({ t: 'ai', sid: this.sid, who: this.name, on: this.ai, text: this.ai ? `${this.name} started the AI technician on this computer.` : 'The AI technician stopped.' }); break;
         default: if (this.tr) this.tr.handle(m);
       }
     }
@@ -214,11 +236,29 @@
       if (!this.ended) rd.session(this.sid, { call: '' });
       panel({ t: 'call-end', sid: this.sid, from: tell ? 'You' : this.name, was });
     }
+    async askCmd(ai) {
+      if (this.cmd === 'allowed') return this.ch.send({ t: 'cmd-perm', ok: true });
+      if (this.cmd === 'asking') return;
+      this.cmd = 'asking';
+      const ok = await rd.cmdConsent({ name: this.name, how: this.how, ai }).catch(() => false);
+      if (this.ended) return;
+      this.cmd = ok ? 'allowed' : 'none';
+      rd.session(this.sid, { cmd: !!ok });
+      this.ch.send({ t: 'cmd-perm', ok: !!ok, why: ok ? '' : (this.how === 'personal password' ? 'unattended-off' : 'declined') });
+      panel({ t: 'info', sid: this.sid, text: ok ? `${this.name} can run commands on this computer. You see each one here.` : `Commands from ${this.name} were not allowed.` });
+    }
+    flushRun(id) { const j = this.runs.get(id); if (!j) return; clearTimeout(j.t); j.t = null; if (j.buf) { const d = j.buf; j.buf = ''; this.ch.send({ t: 'run-out', id, d }); } }
+    revokeCmd() {
+      this.cmd = 'none'; for (const id of this.runs.keys()) rd.runKill(this.sid + ':' + id);
+      this.ch.send({ t: 'cmd-perm', ok: false, why: 'revoked' }); rd.session(this.sid, { cmd: false });
+      panel({ t: 'info', sid: this.sid, text: `Commands from ${this.name} are no longer allowed.` });
+    }
     setControl(on) { this.control = !!on; this.ch.send({ t: 'perm', control: this.control }); rd.session(this.sid, { control: this.control }); panel({ t: 'info', sid: this.sid, text: this.control ? `${this.name} can control this computer.` : `${this.name} can only watch now (view only).` }); }
     end(reason) {
       if (this.ended) return; this.ended = true;
       try { this.endCall(false); } catch {} try { this.tr && this.tr.cancelAll(); } catch {}
       clearTimeout(this.fallback); clearTimeout(this.limitTimer);
+      try { for (const id of this.runs.keys()) rd.runKill(this.sid + ':' + id); } catch {}
       try { if (reason && this.ch && this.ch.keys) this.ch.send({ t: 'bye', reason }); } catch {}
       setTimeout(() => { try { this.ch && this.ch.close(1000, 'end'); } catch {} }, 200);
       try { this.pc && this.pc.close(); } catch {}

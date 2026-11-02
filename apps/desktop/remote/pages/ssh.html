@@ -8,9 +8,10 @@
   <p class="appver" id="appver"></p>
 </aside>
 <section class="sterm">
-  <div id="tabs" class="tabs"></div>
-  <div id="terms" class="terms"><div id="empty" class="empty"><div class="card"><h2>SSH terminal</h2><p class="muted">Connect to your Linux servers, VPS or Raspberry Pi like with PuTTY. Click <b>+ New</b>, fill in the server, user and password (or a private key), then <b>Save &amp; connect</b>.</p></div></div></div>
+  <div class="tabbar"><div id="tabs" class="tabs"></div><button id="aibtn" class="aibtn" title="AI DevOps: give it a job on this server">✦ AI DevOps</button></div>
+  <div id="terms" class="terms"><div id="empty" class="empty"><div class="card"><h2>SSH terminal</h2><p class="muted">Connect to your Linux servers, VPS or Raspberry Pi. Click <b>+ New</b>, fill in the server, user and password (or a private key), then <b>Save &amp; connect</b>.</p></div></div></div>
 </section>
+<aside id="aiside" class="aiside" hidden><div id="ainone" class="muted small" style="padding:14px">Open a terminal (connect to a server) to use the AI DevOps agent on it.</div></aside>
 <div id="modal" class="modal" hidden></div>
-<script src="vendor/xterm.js"></script><script src="vendor/addon-fit.js"></script><script src="ssh.js"></script>
+<script src="vendor/xterm.js"></script><script src="vendor/addon-fit.js"></script><script src="aipanel.js"></script><script src="ssh.js"></script>
 </body></html>

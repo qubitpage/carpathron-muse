@@ -120,3 +120,71 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .appver { margin: 18px 0 4px; text-align: center; font-size: 11px; color: var(--muted); opacity: .8; user-select: text; }
 body.ssh .slist { display: flex; flex-direction: column; }
 body.ssh .slist .appver { margin-top: auto; padding-top: 10px; }
+
+/* plans (home → Get a license) */
+.plans .licrow { gap: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; padding: 6px 12px; }
+.seg button.on { background: var(--acc); color: #111; font-weight: 600; }
+.plangrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+@media (max-width: 720px) { .plangrid { grid-template-columns: 1fr; } }
+.plan { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; background: #12161c; }
+.plan.max { border-color: #4b3a7a; }
+.plan .pt { font-weight: 700; font-size: 16px; } .plan .pp { font: 600 24px/1.2 "Segoe UI", system-ui, sans-serif; }
+.plan button { margin-top: 6px; }
+.plans { margin-bottom: 18px; }
+
+/* ---------------------------------------------------------------- Carpathron Remote DevOps: AI panel, commands */
+:root { --ai: #8b7bff; }
+.pill.ai { color: #c9c1ff; border-color: #4b3f9a; background: #1b1838; cursor: pointer; animation: aipulse 1.6s ease-in-out infinite; }
+@keyframes aipulse { 50% { box-shadow: 0 0 10px #6c5cff88; } }
+#aibtn.on, .aibtn.on { background: #2a2456; border-color: var(--ai); }
+.aiside { width: 400px; flex: none; display: flex; flex-direction: column; background: #11131c; border-left: 1px solid #2c2650; min-height: 0; }
+.aiside > div { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.aip { padding: 10px; gap: 8px; }
+.aip-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.aip-head b { color: #c9c1ff; } .aip-head select { padding: 4px 6px; font-size: 12px; }
+.aip-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.aip-setup { background: var(--panel); border: 1px solid #4b3f9a; border-radius: 10px; padding: 12px; }
+.aip-log { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 6px; min-height: 120px; padding-right: 2px; }
+.aip-msg { border-radius: 10px; padding: 8px 10px; font-size: 13px; line-height: 1.45; background: var(--panel); border: 1px solid var(--line); word-wrap: break-word; }
+.aip-msg.me { background: #2a2456; border-color: #4b3f9a; align-self: flex-end; max-width: 92%; white-space: pre-wrap; }
+.aip-msg.ai { border-color: #2c2650; }
+.aip-msg.note { color: var(--muted); font-size: 12px; } .aip-msg.err { border-color: #5c2a31; color: #ffb3b3; }
+.aip-msg.tool { padding: 6px 8px; } .aip-msg.tool.ask { border-color: var(--acc); box-shadow: 0 0 0 1px #f5a52455; }
+.aip-msg.tool.error { border-color: #5c2a31; } .aip-msg.tool.denied { opacity: .6; }
+.aip-ct { display: flex; gap: 6px; align-items: baseline; } .aip-st { width: 14px; flex: none; color: var(--muted); }
+.aip-msg.tool.done .aip-st { color: var(--good); } .aip-msg.tool.error .aip-st { color: var(--bad); } .aip-msg.tool.ask .aip-st { color: var(--acc); }
+.aip-detail, .aip-out, .aip-cout, .cmdlog pre { margin: 6px 0 0; padding: 6px 8px; background: #0b0d10; border-radius: 6px; font: 11.5px/1.4 "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; max-height: 180px; overflow: auto; color: #d6dbe3; }
+.aip-out { color: #a9b3c1; }
+.aip-act { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.aip-img { margin-top: 6px; max-width: 100%; border-radius: 6px; border: 1px solid var(--line); cursor: zoom-in; max-height: 120px; object-fit: contain; }
+.aip-img.big { max-height: none; cursor: zoom-out; }
+.aip-quick { display: flex; gap: 6px; flex-wrap: wrap; } .aip-quick button { font-size: 12px; padding: 4px 9px; }
+.aip-form textarea, .aip-cform textarea { width: 100%; resize: vertical; font: inherit; font-size: 13px; }
+.aip-form .row, .aip-cform .row { margin-top: 6px; align-items: center; }
+.aip-console summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.aiset { border-color: #3a3270; } .aiset.ready { border-color: #4b3f9a; }
+.aigrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 10px 0; }
+.aigrid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); } .aigrid label.wide { grid-column: 1 / -1; }
+.aigrid input, .aigrid select { width: 100%; }
+.aigrid label.switch { flex-direction: row; align-items: flex-start; gap: 8px; } .aigrid label.switch input { width: auto; flex: none; margin-top: 2px; }
+.aigrid .aiadv summary { cursor: pointer; font-size: 12px; color: var(--muted); } .aigrid .aiadv label { margin-top: 6px; }
+.aigrid label b { color: var(--text, #e8ecf2); }
+.cmdlog { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; }
+.cmditem pre { max-height: 90px; }
+body.banner.ai { border-color: var(--ai); } body.banner.ai .dot { background: var(--ai); box-shadow: 0 0 8px var(--ai); }
+body.ssh .aiside { width: 380px; }
+.tabbar { display: flex; align-items: stretch; background: #12161c; border-bottom: 1px solid var(--line); }
+.tabbar .tabs { flex: 1; border-bottom: 0; }
+.tabbar .aibtn { margin: 4px 8px; font-size: 12px; }
+@media (max-width: 1000px) { .aiside { width: 320px; } }
+
+/* 🛡 Supervisor */
+.aip-msg.tool.sup { border-style: dashed; } .aip-msg.tool.sup b { color: #9fd3ff; }
+.aip-msg.verdict { border-width: 1px 1px 1px 4px; display: flex; flex-direction: column; gap: 6px; }
+.aip-msg.verdict.ok { border-color: #2f7d4f; background: #11241a; } .aip-msg.verdict.bad { border-color: #a33a45; background: #2a1316; } .aip-msg.verdict.warn { border-color: #b98a2a; background: #2a2212; }
+.aip-vh { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.aip-msg.verdict summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.aip-chk { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; margin-top: 6px; } .aip-chk.bad { border-color: #a33a45; }
+.aip-chk.ok b { color: var(--good); } .aip-chk.bad b { color: var(--bad); }

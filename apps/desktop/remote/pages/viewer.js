@@ -1,5 +1,7 @@
 // Carpathron Remote — viewer: shows a remote PC and sends it your mouse and keyboard.
 'use strict';
+let APPNAME = 'Carpathron Remote';
+window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document.getElementById('brand'); if (b) b.textContent = APPNAME; document.title = APPNAME; }).catch(() => {});
 (function () {
   const { RD } = window; const rd = window.rd;
   const $ = (s) => document.querySelector(s);
@@ -7,6 +9,7 @@
   let job = null, ch = null, pc = null, dc = null, mode = '', screenW = 0, screenH = 0, ice = [], hostName = '', ended = false, live = false;
   let frames = 0, fpsShown = 0, rtt = 0;
   let tr = null, voice = null, ui = null, call = '', control = true, lastClip = null, unread = 0, rec = null;
+  let caps = [], hostSys = null, cmdState = 'none', cmdWaiters = [], aiPanel = null, aiOn = false; const runs = new Map();
 
   const status = (text, kind) => { const el = $('#status'); el.textContent = text; el.className = 'pill ' + (kind || ''); };
   function overlay(html) { const o = $('#overlay'); if (html == null) { o.hidden = true; return; } o.innerHTML = html; o.hidden = false; }
@@ -18,8 +21,8 @@
     rate: 'Too many attempts from this network. Wait a few minutes.',
     license: 'This PC could not get its license from qubitpage.com (internet?). Check the connection and try again.',
     'session-limit': 'Free session ended: free (personal) use allows sessions of up to 20 minutes. Connect again to continue (up to 2 hours per day), or get a license for unlimited sessions.',
-    'daily-limit': 'You have used the 2 free hours for today. Get a license ($3 per PC per month or $19.99 per year) for unlimited use, or come back tomorrow.',
-    'one-session': 'Free (personal) use allows one session at a time. Close the other session first, or get a license.', 'pro-busy': 'This license already has the maximum number of sessions running. Close one, or add PCs to the license.', 'pro-hosts': 'Your Pro license controls up to 3 computers and they are all in use. Remove one in the License box of the Remote desktop window, or upgrade to Max ($5 per month or $49.99 per year) for any number of computers.', 'bad-relay': 'The relay address in Settings is not valid.',
+    'daily-limit': 'You have used the 2 free hours for today. Get a license (€3 per PC per month or €19.99 per year) for unlimited use, or come back tomorrow.',
+    'one-session': 'Free (personal) use allows one session at a time. Close the other session first, or get a license.', 'pro-busy': 'This license already has the maximum number of sessions running. Close one, or add PCs to the license.', 'pro-hosts': 'Your Pro license controls up to 3 computers and they are all in use. Remove one in the License box of the Remote desktop window, or upgrade to Max (€5 per month or €49.99 per year) for any number of computers.', 'bad-relay': 'The relay address in Settings is not valid.',
   };
 
   function askPassword(msg) {
@@ -75,7 +78,7 @@
         setupExtras();
         rd.viewerConnected(job.id, hostName).catch(() => {});
         if (job.remember) rd.remember(location.hash.slice(1), job.password).catch(() => {});
-        rd.title(`${hostName || job.idFmt} — Carpathron Remote`).catch(() => {});
+        rd.title(`${hostName || job.idFmt} — ${APPNAME}`).catch(() => {});
         $('#who').textContent = hostName ? `${hostName} · ${job.idFmt}` : job.idFmt;
         const s = $('#step'); if (s) s.textContent = 'Starting the picture';
         setInterval(() => { if (live) ch.send({ t: 'ping', ts: performance.now() }); }, 2000);
@@ -118,6 +121,7 @@
         (m.screens || []).forEach((d) => { const o = document.createElement('option'); o.value = d.index; o.textContent = `Screen ${d.label}`; sel.appendChild(o); });
         sel.value = m.screen; sel.parentElement.hidden = (m.screens || []).length < 2;
         const d = (m.screens || [])[m.screen]; if (d) { screenW = d.w; screenH = d.h; }
+        if (Array.isArray(m.caps)) caps = m.caps; if (m.sys) hostSys = m.sys;
         if (m.sys) $('#who').title = `${m.sys.os} (${m.sys.arch}) · ${m.sys.cpu} · ${m.sys.cores} cores · ${m.sys.ram} GB RAM · on for ${m.sys.up} h`;
         break;
       }
@@ -150,6 +154,10 @@
       case 'call-end': endCall(false); break;
       case 'au': if (call === 'on' && voice) voice.hear(m.d); break;
       default: if (tr) tr.handle(m); break;
+      case 'cmd-perm': cmdState = m.ok ? 'allowed' : (m.why === 'revoked' ? 'revoked' : 'denied'); cmdWaiters.splice(0).forEach((r) => r(m)); if (ui && m.why === 'revoked') ui.info('The person at the remote computer stopped your commands.', true); break;
+      case 'run-out': { const r = runs.get(m.id); if (r && typeof m.d === 'string') { if (r.out.length < 400000) r.out += m.d; if (r.onOut) r.onOut(m.d); } break; }
+      case 'run-end': { const r = runs.get(m.id); if (r) { runs.delete(m.id); r.resolve({ code: m.code, out: r.out, ms: m.ms, timedOut: !!m.timedOut, error: m.error === 'not-allowed' ? 'Commands are not allowed on that computer.' : m.error === 'busy' ? 'Too many commands are running there.' : m.error || '' }); } break; }
+      case 'ai-stop': rd.aiRemoteStop().catch(() => {}); if (ui) ui.info('The person at the remote computer stopped the AI technician.', true); break;
       case 'bye': ended = true; live = false; fail(m.reason || 'The other computer ended the session.'); break;
     }
   }
@@ -273,6 +281,66 @@
   function stopRec() { if (!rec) return; try { rec.mr.stop(); } catch {} rec = null; $('#rec').textContent = '● Record'; $('#rec').classList.remove('danger'); }
   $('#rec').onclick = () => { if (rec) stopRec(); else if (live) startRec().catch((e) => ui && ui.info('Recording could not start: ' + (e.message || e), true)); };
   setInterval(() => { if (rec && rec.mode !== mode) { stopRec(); if (live) startRec().catch(() => {}); } }, 1000);
+
+  // ------------------------------------------------------------ commands on the remote computer (after the person there allows them)
+  async function cmdAllowed(ai) {
+    if (!caps.includes('cmd')) throw new Error('That computer runs Carpathron Remote without commands: install Carpathron Remote DevOps there to allow commands, or work with the screen.');
+    if (cmdState === 'allowed') return true;
+    const ans = await new Promise((res) => { cmdWaiters.push(res); ch.send({ t: 'cmd-req', ai: !!ai }); setTimeout(() => res({ ok: false, why: 'no-answer' }), 75000); });
+    if (!ans.ok) throw new Error(ans.why === 'unattended-off' ? 'Commands are switched off for unattended sessions on that computer (Settings → "Allow commands in unattended sessions").' : ans.why === 'no-answer' ? 'Nobody at that computer allowed commands (no answer).' : 'The person at that computer did not allow commands.');
+    return true;
+  }
+  async function runCmd({ script, shell, admin, timeout, ai }, onOut) {
+    if (!live) throw new Error('Not connected.');
+    await cmdAllowed(ai);
+    const id = RD.b64(RD.rand(9)).replace(/[^A-Za-z0-9]/g, '');
+    return new Promise((resolve) => {
+      runs.set(id, { out: '', resolve, onOut });
+      ch.send({ t: 'run', id, script: String(script || ''), shell: shell || '', admin: !!admin, timeout: Number(timeout) || 120 });
+    });
+  }
+  // the AI (in the app) uses the session through these calls
+  function grab(maxw) {
+    const el = mode === 'relay' ? canvas : video;
+    const w0 = mode === 'relay' ? canvas.width : video.videoWidth, h0 = mode === 'relay' ? canvas.height : video.videoHeight;
+    if (!w0 || !h0) throw new Error('No picture yet.');
+    const sc = Math.min(1, (maxw || 1366) / w0); const w = Math.round(w0 * sc), h = Math.round(h0 * sc);
+    const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(el, 0, 0, w, h);
+    return { b64: c.toDataURL('image/jpeg', 0.72).split(',')[1], w, h };
+  }
+  rd.onAgent(async (rid, op, args) => {
+    let res;
+    try {
+      if (op === 'state') res = { live, control, cmd: cmdState, caps, name: hostName || job.idFmt, os: hostSys ? hostSys.os : '', sys: hostSys };
+      else if (op === 'shot') res = grab(args.maxw);
+      else if (op === 'input') {
+        if (!live) throw new Error('Not connected.');
+        if (!control) throw new Error('View only: the person at that computer does not let you control it. Ask them to allow control.');
+        for (const e of args.events || []) { send({ t: 'in', e }); await new Promise((r) => setTimeout(r, e.k === 'txt' ? 60 : 35)); }
+        res = { ok: true };
+      } else if (op === 'run') res = await runCmd({ ...args, ai: true }).catch((e) => ({ code: -1, out: '', error: String(e.message || e) }));
+      else if (op === 'chat') { await ch.send({ t: 'chat', text: args.text }); if (ui) ui.chat('AI technician', args.text, true); res = { ok: true }; }
+      else if (op === 'ai') { aiOn = !!args.on; if (live) ch.send({ t: 'ai', on: aiOn }); $('#aipill').hidden = !aiOn; res = { ok: true }; }
+      else res = { error: 'unknown ' + op };
+    } catch (e) { res = { error: String(e.message || e) }; }
+    rd.agentReply(rid, res).catch(() => {});
+  });
+  function openAi(on) {
+    const a = $('#aiside'); a.hidden = on === undefined ? !a.hidden : !on;
+    $('#aibtn').classList.toggle('on', !a.hidden);
+    if (!a.hidden && !aiPanel) {
+      aiPanel = new window.AIPanel({ root: $('#aipanel'), target: 'desktop', title: 'AI technician',
+        quick: [['Check health', 'Check this computer: system overview, disks, recent errors and security. Report what is wrong and what you recommend. Do not change anything yet.'],
+          ['Free disk space', 'Free up disk space on the system drive safely (temporary files, update caches, recycle bin). Do not delete the user\'s own files; show me the biggest folders instead.'],
+          ['Security check', 'Check this computer for security problems and vulnerabilities: antivirus, firewall, missing updates, outdated programs, risky settings, open ports. Report and propose fixes; do not change anything yet.'],
+          ['Update programs', 'Update all programs that have updates with winget, then report what was updated.'],
+          ['Why is it slow?', 'Find out why this computer is slow (CPU, memory, disk, startup programs, errors) and suggest fixes.']],
+        onCommand: (script, admin) => runCmd({ script, admin, timeout: 300 }) });
+    }
+    if (!a.hidden && aiPanel) aiPanel.refresh();
+  }
+  $('#aibtn').onclick = () => openAi();
+  $('#aipill').onclick = () => openAi(true);
 
   // ------------------------------------------------------------ toolbar
   $('#screen').onchange = (e) => { send({ t: 'screen', i: Number(e.target.value) }); stage.focus(); };

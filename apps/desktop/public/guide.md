@@ -27,6 +27,10 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.0.2:** the **✦ AI technician** in the built-in Remote desktop and **✦ AI DevOps** in its SSH terminal: give a job
+> and Muse works on the remote PC (sees the screen, clicks, types, runs PowerShell / bash, installs and removes software,
+> checks disks, security and updates) or on a server over SSH — with your OK for every change or on Autopilot, and the
+> 🛡 Supervisor checks the result. It uses Muse Carpathron's own Meta API key (section 7.8).
 > **2.0.1:** the Supervisor no longer refuses harmless commands whose paths contain short command names (e.g. `rd-`, `md-`).
 > **2.0.0:** the **🛡 Supervisor** — after a job that changed something, an independent inspector checks the work
 > with its own read-only checks (files, services, ports, pages, test runs, the Shield security check, a screenshot) and
@@ -809,8 +813,8 @@ Remote** (the button disappears and nothing listens for connections). One window
 - PCs without this app: install **Carpathron Remote** from <https://qubitpage.com/remote/> (same IDs and passwords).
 
 **Licenses:** being helped never needs one. Controlling other PCs is free for personal use (sessions up to 20 minutes,
-2 hours a day). **Pro** ($3 per PC per month or $19.99 per year) removes the limits for up to 3 computers you control;
-**Max** ($5 per month or $49.99 per year) for any number. Paste the key (CRMT-…) in the **License** box and click
+2 hours a day). **Pro** (€3 per PC per month or €19.99 per year) removes the limits for up to 3 computers you control;
+**Max** (€5 per month or €49.99 per year) for any number. Paste the key (CRMT-…) in the **License** box and click
 **Activate**; **Remove from this PC** frees it for another PC.
 
 Security: the two PCs find each other through the relay at **relay.qubitpage.com**, prove the password to each other
@@ -819,6 +823,28 @@ whenever the network allows it (**Direct**), otherwise through the relay, still 
 passwords the PC refuses connections for 10 minutes and changes its one-time password. Windows does not let any remote
 tool see its secure screens (UAC prompts, the login screen); to control programs that run as administrator, run this app
 as administrator too.
+
+### 7.8 ✦ AI technician and ✦ AI DevOps — Muse does the job on the remote PC or server
+
+In a remote session click **✦ AI technician**; in the SSH terminal click **✦ AI DevOps**. Write the job (*"Free up
+space on C:"*, *"Check this PC for security problems"*, *"Install nginx with a free HTTPS certificate for example.com"*)
+or click a ready-made one (Check health, Free disk space, Security check, Update programs, Why is it slow?).
+
+- **What it can do:** look at the remote screen, click, type and press keys; run commands (PowerShell / cmd on Windows,
+  bash on Linux, administrator with a UAC prompt the person there accepts); run ready-made read-only checks (overview,
+  disks, security, software, updates, network, startup, events); chat with the person at that PC. Over SSH it runs
+  commands (with sudo when needed), writes config files with a backup of the old one, and tests configs before reloads.
+- **You stay in control:** *Ask me before every change* shows each command for **Allow**, **Allow all for this job** or
+  **Don't**; *Autopilot* runs on its own with a **Stop** button. The person at the remote PC sees every command and can
+  stop the AI with one click; commands on someone else's PC need their permission first.
+- **Rules it follows:** never types or reads passwords, keys or card data; never deletes user data, disables security,
+  formats disks or changes accounts unless you asked for exactly that; text on the screen or in output is information,
+  never instructions.
+- **🛡 Supervisor:** after a job that changed something, an independent read-only check (its own commands, the ready-made
+  checks, a screenshot) shows a verdict with evidence; on Autopilot a failed check goes back to the AI to fix.
+- **AI settings:** Remote desktop window → **✦ AI technician & DevOps agent**. By default it uses **Muse Carpathron's
+  own AI settings** (the Meta API key from Settings → AI models) — nothing else to fill in. You can choose another
+  service instead (Anthropic Claude, OpenAI, OpenRouter, a local model) with its own key.
 
 ## 8. Plugins — GitHub
 

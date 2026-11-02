@@ -24,7 +24,8 @@
     if (!typing) { $('#name').value = h.name || ''; $('#relay').value = s.relay || ''; $('#relay').placeholder = `Automatic (now ${s.relayNow})`; }
     $('#quality').value = s.quality; $('#autowrap').hidden = !s.standalone || s.store; $('#storeauto').hidden = !(s.standalone && s.store); $('#autostart').checked = !!s.autostart;
     $('#ver').textContent = `Version ${s.version}`;
-    $('#appver').textContent = s.app === 'Carpathron Remote' ? `Carpathron Remote ${s.version}` : `${s.app} ${s.version} · Carpathron Remote plugin`;
+    $('#appver').textContent = /^Carpathron Remote/.test(s.app) ? `${s.app} ${s.version}` : `${s.app} ${s.version} · Carpathron Remote plugin`;
+    $('#cmdun').checked = !!s.cmdUnattended; $('#cmdun').disabled = !h.hasPerm;
     $('#viewonly').checked = !!s.viewOnly; $('#clipsync').checked = s.clipSync !== false;
     const L = s.license || {}; const days = (t) => Math.max(0, Math.ceil((t - Date.now()) / 864e5));
     const day = (t) => new Date(t).toLocaleDateString();
@@ -38,7 +39,7 @@
     else { $('#lictitle').textContent = 'License'; $('#lictext').textContent = 'Checking the license with qubitpage.com… (needs the internet)'; }
     const paid = L.plan === 'pro' || L.plan === 'max'; $('#buy').hidden = L.plan === 'max'; $('#buy').textContent = L.plan === 'pro' ? 'Upgrade to Max' : 'Get a license'; $('#release').hidden = !paid; $('#lickey').hidden = $('#activate').hidden = paid;
   }
-  const refresh = () => rd.state().then(render);
+  const refresh = () => rd.state().then((st) => { document.title = st.app || document.title; const a2 = document.getElementById('appname2'); if (a2 && st.app) a2.textContent = st.app; return render(st); });
   setInterval(() => rd.licenseQuiet().catch(() => {}), 120000);
   rd.onState(refresh); refresh();
   setInterval(refresh, 30000);
@@ -46,7 +47,33 @@
 
   const licMsg = (t, bad) => { const m = $('#licmsg'); m.hidden = !t; m.textContent = t || ''; m.className = 'small ' + (bad ? 'err' : 'muted'); };
   const clean = (e) => String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
-  $('#buy').onclick = () => rd.buy();
+  // Plans panel: live plans from qubitpage.com; Buy opens that plan there (PayPal), with the number of PCs
+  let plans = null; let period = 'yearly';
+  const SYM = { EUR: '€', USD: '$', GBP: '£' };
+  const money = (c, cur) => (SYM[cur] || '') + (c / 100).toFixed(2).replace(/\.00$/, '') + (SYM[cur] ? '' : ' ' + cur);
+  const PER = { monthly: 'Monthly', quarterly: '3 months', 'half-yearly': '6 months', yearly: 'Yearly', 'two-years': '2 years' };
+  const ORDER = ['monthly', 'quarterly', 'half-yearly', 'yearly', 'two-years'];
+  function drawPlans() {
+    if (!plans) return;
+    const periods = [...new Set(plans.plans.map((p) => p.period))].sort((a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99));
+    if (!periods.includes(period)) period = periods.includes('yearly') ? 'yearly' : periods[0];
+    $('#period').innerHTML = periods.map((x) => `<button data-period="${esc(x)}">${esc(PER[x] || x)}</button>`).join('');
+    for (const b of document.querySelectorAll('#period button')) b.classList.toggle('on', b.dataset.period === period);
+    const list = plans.plans.filter((p) => p.period === period);
+    const pcs = Math.max(1, Math.floor(Number($('#pcs').value) || 1));
+    $('#plangrid').innerHTML = list.map((p) => `<div class="plan ${p.tier}"><div class="pt">${p.tier === 'max' ? 'Max' : 'Pro'} <span class="muted small">${p.tier === 'max' ? 'any number of computers' : 'up to 3 computers'}</span></div>
+      <div class="pp">${esc(money(p.price_cents, p.currency))} <span class="muted small">per PC / ${p.months % 12 === 0 ? (p.months === 12 ? 'year' : p.months / 12 + ' years') : p.months === 1 ? 'month' : p.months + ' months'}</span></div>
+      <div class="muted small">No time limits · unattended access · ${p.recurring ? 'renews automatically, stop any time' : 'one payment'}</div>
+      <button class="primary" data-buy="${esc(p.code)}">Buy ${pcs} PC${pcs === 1 ? '' : 's'} — ${esc(money(p.price_cents * Math.min(pcs, p.max_pcs), p.currency))} on qubitpage.com</button></div>`).join('') || '<div class="muted small">No plans for this period.</div>';
+    $('#plansnote').textContent = plans.live ? '' : 'qubitpage.com could not be reached; these are the standard prices. The page that opens shows the current ones.';
+  }
+  async function openPlans() { $('#plans').hidden = false; if (!plans) { $('#plangrid').innerHTML = '<div class="muted small">Loading the plans from qubitpage.com…</div>'; plans = await rd.plans(); } drawPlans(); $('#plans').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  $('#buy').onclick = () => { if ($('#plans').hidden) openPlans(); else $('#plans').hidden = true; };
+  $('#plansclose').onclick = () => { $('#plans').hidden = true; };
+  $('#period').onclick = (e) => { const b = e.target.closest('button'); if (b) { period = b.dataset.period; drawPlans(); } };
+  $('#pcs').oninput = drawPlans;
+  $('#plangrid').onclick = (e) => { const b = e.target.closest('[data-buy]'); if (b) rd.buy(b.dataset.buy, Number($('#pcs').value) || 1); };
+  $('#mylic').onclick = () => rd.myLicenses();
   $('#sshbtn').onclick = () => rd.openSsh();
   $('#activate').onclick = async () => { licMsg('Activating…'); try { render(await rd.licenseActivate($('#lickey').value)); $('#lickey').value = ''; licMsg('License activated on this PC.'); } catch (e) { licMsg(clean(e), true); } };
   $('#release').onclick = async () => { if (!confirm('Remove the license from this PC? You can then use it on another PC.')) return; try { render(await rd.licenseRelease()); licMsg('The license was removed from this PC.'); } catch (e) { licMsg(clean(e), true); } };
@@ -61,6 +88,44 @@
   $('#viewonly').onchange = (e) => rd.set({ viewOnly: e.target.checked }).then(render);
   $('#clipsync').onchange = (e) => rd.set({ clipSync: e.target.checked }).then(render);
   $('#autostart').onchange = (e) => rd.set({ autostart: e.target.checked }).then(render);
+  $('#cmdun').onchange = (e) => rd.set({ cmdUnattended: e.target.checked }).then(render);
+
+  // ---------------------------------------------------------------- AI technician settings
+  let ai = null;
+  const aiMsg = (t, bad) => { $('#aimsg').textContent = t || ''; $('#aimsg').className = 'small ' + (bad ? 'err' : 'muted'); };
+  function drawAi(s) {
+    ai = s;
+    $('#aiprov').innerHTML = Object.entries(s.presets).map(([k, p]) => `<option value="${esc(k)}">${esc(p.label)}</option>`).join('');
+    $('#aiprov').value = s.provider; $('#aimode').value = s.mode; $('#aisup').checked = s.supervisor !== false;
+    $('#aimodel').value = s.model || s.defModel; $('#aimodel').placeholder = s.defModel || 'model name';
+    $('#aibase').value = s.base; $('#aibase').placeholder = s.defBase || 'https://…/v1';
+    $('#aiadv').open = !s.defBase || !!s.base; // a service without a fixed address (Other) or a changed address
+    const p = s.presets[s.provider] || {};
+    $('#aikey').placeholder = p.noKey ? 'Not needed for a local model' : s.hasKey ? 'Saved (encrypted) — paste a new one to change it' : 'Paste your API key';
+    $('#aidelkey').hidden = !s.hasKey;
+    $('#aistate').textContent = s.ready ? `Ready: ${s.model || s.defModel} on ${p.label}. Open ✦ AI technician in a remote session, or ✦ AI DevOps in the SSH terminal.` : 'Add your own API key: the AI works on remote computers (screen, mouse, commands) and on your servers over SSH.';
+    // the host app's own AI (Muse Carpathron): no key or address here — they come from the app's settings
+    $('#aikey').closest('label').hidden = !!s.app; $('#aiadv').hidden = !!s.app; $('#aidelkey').hidden = !!s.app || !s.hasKey;
+    if (s.app) $('#aistate').textContent = s.ready ? `Ready: ${s.model || s.defModel} with ${s.appName}'s own AI settings (its Meta API key). Open ✦ AI technician in a remote session, or ✦ AI DevOps in the SSH terminal.` : `Add your Meta API key in ${s.appName}: Settings → AI models. The AI technician uses the same key — or choose another AI service here.`;
+    $('#aiset').classList.toggle('ready', !!s.ready);
+  }
+  rd.aiSettings().then(drawAi).catch(() => {});
+  $('#aisup').onchange = async (e) => { try { drawAi(await rd.aiSave({ supervisor: e.target.checked })); aiMsg(e.target.checked ? 'Supervisor on.' : 'Supervisor off.'); } catch (err) { aiMsg(clean(err), true); } };
+  $('#aiprov').onchange = async (e) => { try { drawAi(await rd.aiSave({ provider: e.target.value })); aiMsg(''); } catch (err) { aiMsg(clean(err), true); } };
+  // returns true when saved; a key pasted into the address box by mistake is saved as the key
+  $('#aisave').onclick = async () => {
+    let base = $('#aibase').value.trim(); let key = $('#aikey').value.trim(); let note = '';
+    if (base && !/^https?:\/\//i.test(base)) {
+      if (!key && !/\s/.test(base) && base.length >= 16) { key = base; base = ''; $('#aibase').value = ''; note = 'That was your API key in the address box: it is now saved as the API key. '; }
+      else { aiMsg('The API address must be a link that starts with https:// — paste the key in the API key box instead.', true); return false; }
+    }
+    const patch = { model: $('#aimodel').value.trim(), base, mode: $('#aimode').value };
+    if (key) patch.key = key;
+    try { drawAi(await rd.aiSave(patch)); $('#aikey').value = ''; aiMsg(note + 'Saved.'); return true; } catch (err) { aiMsg(clean(err), true); return false; }
+  };
+  $('#aidelkey').onclick = async () => { if (confirm('Remove the saved API key?')) { drawAi(await rd.aiSave({ key: '' })); aiMsg('The key was removed.'); } };
+  $('#aitest').onclick = async () => { if (!(await $('#aisave').onclick())) return; const note = $('#aimsg').textContent.replace(/Saved\.$/, ''); aiMsg(note + 'Testing…'); try { const t = await rd.aiTest(); aiMsg(note + 'It works: ' + t); } catch (err) { aiMsg(note + clean(err), true); } };
+  $('#aiload').onclick = async () => { aiMsg('Loading models…'); try { const list = await rd.aiModels(); $('#aimodels').innerHTML = list.map((m) => `<option value="${esc(m)}">`).join(''); aiMsg(`${list.length} models: click the Model box to choose.`); } catch (err) { aiMsg(clean(err), true); } };
   $('#pid').addEventListener('input', (e) => { const d = e.target.value.replace(/\D/g, '').slice(0, 9); e.target.value = d.replace(/(\d{3})(?=\d)/g, '$1 '); });
   $('#cf').onsubmit = async (e) => {
     e.preventDefault(); const id = $('#pid').value.replace(/\D/g, '');

@@ -24,18 +24,26 @@ by Qubitpage LIMITED ([qubitpage.com/products](https://qubitpage.com/products/))
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v2.0.1-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v2.0.2-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.6.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v2.0.1) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. This hackathon edition does not update itself: install a newer build over the old one (chats and settings are kept). Portable: unzip and run `Carpathron.exe`. |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v2.0.2) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. This hackathon edition does not update itself: install a newer build over the old one (chats and settings are kept). Portable: unzip and run `Carpathron.exe`. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.6) | [**CarpathronAvatar-1.1.6.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) (also built into the app: Robot page → ⬆ Update car firmware) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 | 🖥 **Carpathron Remote** – the remote desktop app on its own (Windows, Linux) | [qubitpage.com/remote](https://qubitpage.com/remote/) | For PCs you want to reach or help that do not run Muse Carpathron. Same IDs and passwords. |
 
-All files of this version: **[Release v2.0.1](https://github.com/qubitpage/carpathron-muse/releases/tag/v2.0.1)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v2.0.2](https://github.com/qubitpage/carpathron-muse/releases/tag/v2.0.2)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+
+## What's new in 2.0.2 — the AI technician in the Remote desktop
+
+- **✦ AI technician** in a remote session: Muse sees the remote screen, clicks, types and runs PowerShell / bash on that PC — installs and removes software, frees disk space, checks security, updates and errors — with your OK for every change, or on Autopilot with a Stop button. The person at the remote PC sees every command and can stop it.
+- **✦ AI DevOps** in the SSH terminal: sets up and fixes servers (nginx, Docker, databases, HTTPS certificates, firewall, fail2ban, backups) with sudo when needed, config backups and tests before reloads.
+- **🛡 Supervisor** checks every remote job with its own read-only commands, checks and a screenshot, and shows the evidence.
+- Uses **Muse Carpathron's own Meta API key** — nothing to set up; another AI service can be chosen instead.
+- Remote desktop: live plans and prices in euro, *My licenses*, clearer AI settings.
 
 ## What's new in 2.0.1
 

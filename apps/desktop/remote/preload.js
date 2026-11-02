@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('rd', {
   state: inv('rd-state'), set: inv('rd-set'), newOtp: inv('rd-new-otp'), setPassword: inv('rd-set-password'),
   openViewer: inv('rd-open-viewer'), forget: inv('rd-forget'), renameSaved: inv('rd-rename-saved'), openHome: inv('rd-open-home'),
   disconnect: inv('rd-disconnect'), onState: on('rd-state'),
-  licenseActivate: inv('rd-license-activate'), licenseRelease: inv('rd-license-release'), licenseRefresh: inv('rd-license-refresh'), buy: inv('rd-buy'), licenseQuiet: inv('rd-license-quiet'), licenseUnhost: inv('rd-license-unhost'),
+  licenseActivate: inv('rd-license-activate'), licenseRelease: inv('rd-license-release'), licenseRefresh: inv('rd-license-refresh'), buy: inv('rd-buy'), plans: inv('rd-plans'), myLicenses: inv('rd-my-licenses'), licenseQuiet: inv('rd-license-quiet'), licenseUnhost: inv('rd-license-unhost'),
   // viewer
   viewerJob: inv('rd-viewer-job'), remember: inv('rd-remember'), viewerConnected: inv('rd-viewer-connected'), title: inv('rd-title'), fullscreen: inv('rd-fullscreen'), clipboard: inv('rd-clipboard'),
   // files (drag and drop / "Send file"), clipboard sync, recordings
@@ -26,5 +26,11 @@ contextBridge.exposeInMainWorld('rd', {
   // SSH terminal
   openSsh: inv('rd-open-ssh'), sshList: inv('rd-ssh-list'), sshSave: inv('rd-ssh-save'), sshDelete: inv('rd-ssh-delete'), sshForgetKey: inv('rd-ssh-forget-key'),
   sshOpen: inv('rd-ssh-open'), sshTrust: inv('rd-ssh-trust'), sshWrite: inv('rd-ssh-write'), sshResize: inv('rd-ssh-resize'), sshClose: inv('rd-ssh-close'), sshKeyFile: inv('rd-ssh-keyfile'),
+  // AI technician / DevOps agent (the API key never reaches the pages)
+  aiSettings: inv('rd-ai-settings'), aiSave: inv('rd-ai-save'), aiModels: inv('rd-ai-models'), aiTest: inv('rd-ai-test'),
+  aiStart: inv('rd-ai-start'), aiStop: inv('rd-ai-stop'), aiReset: inv('rd-ai-reset'), aiApprove: inv('rd-ai-approve'), onAiEv: on('rd-ai-ev'),
+  onAgent: on('rd-agent'), agentReply: inv('rd-agent-reply'), aiRemoteStop: inv('rd-ai-remote-stop'),
+  // commands on this computer for a technician (host page)
+  cmdConsent: inv('rd-cmd-consent'), run: inv('rd-run'), runKill: inv('rd-run-kill'), onRunEv: on('rd-run-ev'),
   onSshData: on('rd-ssh-data'), onSshExit: on('rd-ssh-exit'), onSshHostKey: on('rd-ssh-hostkey'), onSshReady: on('rd-ssh-ready'),
 });

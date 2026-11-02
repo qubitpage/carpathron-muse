@@ -283,7 +283,7 @@ function create({ getS, save, seal, unseal, log, handle, desktop, ssh, onAiState
           if (run.changed && c.supervisor && !run.stopped && (run.supervised || 0) < 2) {
             run.supervised = (run.supervised || 0) + 1; run.changed = false;
             const v = await supervise(run, c, info);
-            if (!run.stopped && v && (v.verdict === 'failed' || v.verdict === 'partly') && run.mode === 'auto' && run.supervised < 2) {
+            if (!run.stopped && v && (v.verdict === 'failed' || v.verdict === 'partly') && run.supervised < 2) { // both modes: the AI corrects itself; any change still follows the mode (asks in "Ask before changes")
               run.hist.push({ role: 'user', text: `[Supervisor report — ${v.verdict}] An independent check found that the job is not done: ${v.summary}\n${(v.checks || []).filter((x) => !x.pass).map((x) => `- ${x.requirement}: ${x.evidence}`).join('\n')}\nFix exactly this, then check it yourself: ${v.fix || 'see the failed checks'}` });
               ev(run, { t: 'info', text: 'The Supervisor found problems — the AI is fixing them.' });
               continue;

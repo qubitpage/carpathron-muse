@@ -27,6 +27,7 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.0.1:** the Supervisor no longer refuses harmless commands whose paths contain short command names (e.g. `rd-`, `md-`).
 > **2.0.0:** the **🛡 Supervisor** — after a job that changed something, an independent inspector checks the work
 > with its own read-only checks (files, services, ports, pages, test runs, the Shield security check, a screenshot) and
 > shows a verdict with evidence: *Verified*, *Partly*, *Not verified* or *Can't verify*. It never trusts the agent's own

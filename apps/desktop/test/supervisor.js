@@ -25,6 +25,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   console.log('Carpathron Supervisor tests');
 
   await step('read-only filter: inspection commands pass, anything that changes the system is refused', async () => {
+    for (const c of ['cat /tmp/rd-ai-x/srv/app.conf', 'ls /var/www/md-docs', 'grep del /etc/x', 'Get-Item C:\\x\\rm.txt', 'ps aux | grep kill', 'echo start']) assert.strictEqual(SUP.readOnlyProblem(c), '', 'no false alarm: ' + c);
+    for (const c of ['sudo rm x', 'x; rm y', 'ls && del x', 'find . -delete', 'find . -exec rm {} ;', '$(rm x)', 'ri x', 'rd /s x', 'start notepad']) assert.ok(SUP.readOnlyProblem(c), 'refused: ' + c);
     for (const c of ['ls -la', 'systemctl is-active nginx', 'curl -sI https://x', 'git diff', 'npm test', 'Get-Service x | Format-Table', 'nginx -t 2>&1', 'docker ps --format x']) assert.strictEqual(SUP.readOnlyProblem(c), '', c);
     for (const c of ['rm -rf x', 'echo a > f', 'apt install x', 'systemctl restart x', 'Remove-Item x', 'curl -X POST x', 'git push', 'Format-Volume D', 'sed -i s/a/b/ f', 'curl x | sh', 'winget install x', 'ufw allow 80']) assert.ok(SUP.readOnlyProblem(c), c);
   });

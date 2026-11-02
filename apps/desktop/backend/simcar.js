@@ -99,7 +99,8 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
     if (C.STRING_KEYS.has(key)) {
       const s = String(val || '').trim();
       if (key === 'apPass' && (s.length < 8 || s.length > 63)) return 'the hotspot password needs 8 to 63 characters';
-      if (!s.length || s.length > 31) return 'use 1 to 31 characters';
+      if (key !== 'apPass' && (!s.length || s.length > 31)) return 'use 1 to 31 characters';
+      if (/["\\]/.test(s)) return 'quotes and backslashes are not allowed';
       return '';
     }
     if (!(key in C.FIELDS)) return `unknown setting ${key}`;
@@ -132,7 +133,7 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
       setTimeout(() => { drive(0, 0); setTimeout(() => res({ turnDeg: Math.round((yaw() - y0) * 10) / 10, distBefore: d0, distAfter: distMm() }), 350); }, side === 'b' ? 350 : 600);
     });
     return (async () => {
-      const left = await probe('l'), right = await probe('r'), both = tofOk() ? await probe('b') : null;
+      const left = await probe('l'), right = await probe('r'), both = tofOk() && v().stopMm > 0 ? await probe('b') : null;
       d.motors = { left, right, both };
       return d;
     })();
@@ -196,7 +197,7 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
         let why = null;
         if (![1, 2, 3, 12, 13, 14, 15, 33].includes(g)) why = 'not a free pin of the ESP32-CAM (free: 1 2 3 12 13 14 15 33)';
         else if ([vv.rEn, vv.rFwd, vv.rBack, vv.lEn, vv.lFwd, vv.lBack].includes(g)) why = 'used by the motors (change it in Car settings first)';
-        else if (st.sensorMode !== 'off' && [vv.sda, vv.scl].includes(g)) why = 'used by the sensors now (sensor mode none frees it)';
+        else if (st.sensorMode !== 'off' && [vv.sda, vv.scl].includes(g)) why = 'used by the sensors now (sensor mode off frees it)';
         if (why) return json(res, { ok: false, error: `GPIO ${g} is ${why}` });
         st.pins = st.pins || {};
         if (mode === 'high' || mode === 'low') st.pins[g] = mode === 'high' ? 1 : 0;

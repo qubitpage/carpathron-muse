@@ -579,15 +579,20 @@ static String settingsJson(const char* extra) {
   return j + "}";
 }
 static esp_err_t settings_handler(httpd_req_t* req) {
-  char q[400], key[16] = "", v[300] = "";
+  char q[600], key[16] = "", v[400] = "";
   String extra = "";
-  if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+  esp_err_t qe = httpd_req_get_url_query_str(req, q, sizeof(q));
+  if (qe == ESP_ERR_HTTPD_RESULT_TRUNC) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"too many changes at once\"}");
+  if (qe == ESP_OK) {
     if (httpd_query_key_value(q, "restart", v, sizeof(v)) == ESP_OK) { send_text(req, "application/json", "{\"ok\":true,\"restarting\":true}"); drive(0, 0); delay(400); ESP.restart(); }
     if (httpd_query_key_value(q, "reset", v, sizeof(v)) == ESP_OK) {
       Preferences c; c.begin("cfg", false); c.clear(); c.end();
       send_text(req, "application/json", "{\"ok\":true,\"restarting\":true}"); drive(0, 0); delay(400); ESP.restart();
     }
-    if (httpd_query_key_value(q, "many", v, sizeof(v)) == ESP_OK) {
+    esp_err_t me = httpd_query_key_value(q, "many", v, sizeof(v));
+    if (me == ESP_ERR_HTTPD_RESULT_TRUNC) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"too many changes at once\"}");
+    if (me == ESP_OK) {
+      { String dm = urlDecode(v); strlcpy(v, dm.c_str(), sizeof(v)); }  // the app may send it URL-encoded
       int tmp[S_COUNT]; memcpy(tmp, savedv, sizeof(tmp));
       bool touched[S_COUNT] = {}; String err; char* save = nullptr;
       for (char* tok = strtok_r(v, ",", &save); tok && !err.length(); tok = strtok_r(nullptr, ",", &save)) {
@@ -610,9 +615,11 @@ static esp_err_t settings_handler(httpd_req_t* req) {
       String err; bool restart = false;
       if (!strcmp(key, "name") || !strcmp(key, "apSsid") || !strcmp(key, "apPass")) {
         String val = httpd_query_key_value(q, "s", v, sizeof(v)) == ESP_OK ? urlDecode(v) : "";
-        val.trim();
-        if (!strcmp(key, "apPass") && (val.length() < 8 || val.length() > 63)) err = "the hotspot password needs 8 to 63 characters";
-        else if (!val.length() || val.length() > 31) err = "use 1 to 31 characters";
+        bool pass = !strcmp(key, "apPass");
+        if (!pass) val.trim();
+        if (pass && (val.length() < 8 || val.length() > 63)) err = "the hotspot password needs 8 to 63 characters";
+        else if (!pass && (!val.length() || val.length() > 31)) err = "use 1 to 31 characters";
+        else if (val.indexOf('"') >= 0 || val.indexOf('\\') >= 0) err = "quotes and backslashes are not allowed";
         else {
           Preferences c; c.begin("cfg", false); c.putString(key, val); c.end();
           if (!strcmp(key, "name")) robotName = val; else restart = restartPending = true;
@@ -655,6 +662,8 @@ static const char* resetName(int r) {
 }
 static String motorProbe(char side) {
   if (!imuOk) return "null";
+  if (side == 'b' && safetyMm <= 0) return "null";  // forward without the laser stop: not without the safety distance
+  turning = false;
   float y0 = yawDeg; int d0 = distMm;
   // 'l' / 'r' = one side forward (the car should pivot right / left); 'b' = both forward briefly (closer to the wall)
   drive(side != 'r' ? 70 : 0, side != 'l' ? 70 : 0); lastDrive = millis();
@@ -733,7 +742,7 @@ static esp_err_t pin_handler(httpd_req_t* req) {
   const char* why = nullptr;
   if (g < 0 || g > 39 || !freePin(g)) why = "not a free pin of the ESP32-CAM (free: 1 2 3 12 13 14 15 33)";
   else if (g == R_EN || g == R_FWD || g == R_BACK || g == L_EN || g == L_FWD || g == L_BACK) why = "used by the motors (change it in Car settings first)";
-  else if ((wireOn || irOk) && (g == I2C_SDA || g == I2C_SCL)) why = "used by the sensors now (sensor mode none frees it)";
+  else if ((wireOn || irOk) && (g == I2C_SDA || g == I2C_SCL)) why = "used by the sensors now (sensor mode off frees it)";
   if (why) { String e = String("{\"ok\":false,\"error\":\"GPIO ") + g + " is " + why + "\"}"; return send_text(req, "application/json", e.c_str()); }
   if (!strcmp(mode, "high") || !strcmp(mode, "low")) {
     pinMode(g, OUTPUT); digitalWrite(g, !strcmp(mode, "high") ? HIGH : LOW); pinReleaseAt[g] = millis() + 3000;
@@ -741,6 +750,7 @@ static esp_err_t pin_handler(httpd_req_t* req) {
     pinMode(g, OUTPUT);
     for (int i = 0; i < 12; i++) { digitalWrite(g, i % 2 ? LOW : HIGH); delay(100); }
     pinMode(g, INPUT);
+    if (g == 1 || g == 3) Serial.begin(115200);
   } else { pinMode(g, INPUT_PULLUP); delay(2); }
   int level = digitalRead(g);
   char b[96]; snprintf(b, sizeof(b), "{\"ok\":true,\"gpio\":%d,\"mode\":\"%s\",\"level\":%d}", g, mode, level);
@@ -1207,7 +1217,10 @@ void setup() {
 
 void loop() {
   handleSerial();
-  for (int g = 0; g < 40; g++) if (pinReleaseAt[g] && (long)(millis() - pinReleaseAt[g]) > 0) { pinMode(g, INPUT); pinReleaseAt[g] = 0; }
+  for (int g = 0; g < 40; g++) if (pinReleaseAt[g] && (long)(millis() - pinReleaseAt[g]) > 0) {
+    pinMode(g, INPUT); pinReleaseAt[g] = 0;
+    if ((g == 1 || g == 3) && !wireOn && !irOk) Serial.begin(115200);  // give RX/TX back to the USB serial monitor
+  }
   if ((curL || curR) && millis() - lastDrive > FAILSAFE_MS) {
     drive(0, 0);
     Serial.printf("[failsafe] no command for %lu ms (Wi-Fi too weak or app closed), stopped. Signal %d dBm\n", millis() - lastDrive, WiFi.RSSI());

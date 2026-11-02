@@ -72,8 +72,9 @@ function check(values, key, value, board = BOARDS.esp32cam) {
   if (!f) return { errors: [`Unknown setting "${key}".`], warnings: [] };
   if (STRING_KEYS.has(key)) {
     const v = String(value == null ? '' : value).trim();
-    if (key === 'apPass' && (v.length < 8 || v.length > 63)) return { errors: ['The hotspot password needs 8 to 63 characters.'], warnings: [] };
+    if (key === 'apPass') return { errors: v.length < 8 || v.length > 63 ? ['The hotspot password needs 8 to 63 characters.'] : /["\\]/.test(v) ? ['Quotes and backslashes are not allowed.'] : [], warnings: [] };
     if (!v.length || v.length > 31) return { errors: ['Use 1 to 31 characters.'], warnings: [] };
+    if (/["\\]/.test(v)) return { errors: ['Quotes and backslashes are not allowed.'], warnings: [] };
     return { errors: [], warnings: [] };
   }
   const n = Number(value);
@@ -116,8 +117,8 @@ const getSettings = (ip) => carJson(ip, '/settings');
 async function setMany(ip, changes) {
   const parts = Object.entries(changes).filter(([k]) => !STRING_KEYS.has(k)).map(([k, v]) => `${k}:${Math.round(Number(v))}`);
   if (!parts.length) return getSettings(ip);
-  const r = await carJson(ip, `/settings?many=${encodeURIComponent(parts.join(','))}`);
-  if (r.ok === false) throw new Error(r.error || 'refused by the car');
+  const r = await carJson(ip, `/settings?many=${parts.join(',')}`); // keys and numbers only: no encoding needed
+  if (r.ok !== true) throw new Error(r.error || 'the car did not confirm the change (older firmware?)');
   return r;
 }
 // Check a set of changes together. → { errors: {key: [..]}, warnings: {key: [..]}, ok }

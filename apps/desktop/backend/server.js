@@ -12,6 +12,7 @@ const { pipeline } = require('stream');
 const { WebSocketServer } = require('ws');
 const selfsigned = require('selfsigned');
 const { Store } = require('./store');
+const { Tts } = require('./tts');
 const { Robot } = require('./robot');
 const { Mapper } = require('./mapper');
 const { Vision } = require('./vision');
@@ -94,7 +95,20 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
 
   let wa = null;
   const logLines = [];
+  let tts = null, sayChain = Promise.resolve();
   const emit = (event, data) => {
+    // the robot speaks with its own neural voice when it is installed: make the sound first (in order), then send
+    if (event === 'robot:say' && tts && data && data.text && !data.audio && !data.plain && tts.ready()) {
+      // long answers are spoken sentence by sentence: the first one plays while the next is being made
+      const parts = [];
+      for (const sn of String(data.text).split(/(?<=[.!?…])\s+/)) { if (parts.length && (parts[parts.length - 1] + ' ' + sn).length < 90) parts[parts.length - 1] += ' ' + sn; else parts.push(sn); }
+      parts.forEach((part, i) => {
+        sayChain = sayChain.then(() => tts.speak(part).then(
+          (r) => emit(event, i === 0 ? { ...data, audio: r.url, secs: r.secs } : { text: part, by: data.by, audio: r.url, secs: r.secs, more: true }),
+          (e) => { logFn(`Robot voice: ${e.message}`); emit(event, i === 0 ? { ...data, plain: true } : { text: part, by: data.by, plain: true, more: true }); }));
+      });
+      return;
+    }
     const msg = JSON.stringify({ event, data });
     for (const c of clients) if (c.readyState === 1) c.send(msg);
     if (wa) try { wa.onEvent(event, data); } catch {}
@@ -106,6 +120,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     emit('log', { text, ts: Date.now() });
   };
 
+  tts = new Tts({ dataDir, getSettings: () => store.settings, log: logFn });
   const robot = new Robot({ getCfg: () => store.settings.robot || {}, getIp: () => store.settings.robot.carIp, emit: (e, d) => (e === 'log' ? logFn(d) : emit(e, d)) });
   const mcp = new McpManager({ log: logFn, dataDir });
   // First run with this version: set up the built-in MCP servers (they need nothing installed).
@@ -865,6 +880,29 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         return send(res, 200, { heard, command: cmd, replies });
       } catch (e) { return send(res, 200, { error: e.message }); }
     }
+    // The robot's own voice: list voices, download one (once), pick one, hear a sample, fetch the sound files
+    if (p === '/api/robot/voice/status' && m === 'GET') return send(res, 200, tts.status());
+    if (p === '/api/robot/voice/download' && m === 'POST') {
+      const b = await readJson(req);
+      tts.download(b.model, (pct) => emit('voice:download', { model: b.model, pct })).then(() => emit('voice:download', { model: b.model, done: true }), (e) => emit('voice:download', { model: b.model, error: e.message }));
+      return send(res, 200, { ok: true, started: true });
+    }
+    if (p === '/api/robot/voice/choose' && m === 'POST') {
+      const b = await readJson(req);
+      if (!require('./tts').VOICES[b.voice]) return send(res, 200, { error: 'Unknown voice.' });
+      store.settings.robot = { ...(store.settings.robot || {}), voice: b.voice }; store.saveSettings();
+      return send(res, 200, { ok: true, voice: b.voice });
+    }
+    if (p === '/api/robot/voice/sample' && m === 'POST') {
+      const b = await readJson(req);
+      try { const r = await tts.speak(String(b.text || 'Hello! I am Baby Carpathron. Where shall we go today?').slice(0, 300), { voice: b.voice }); return send(res, 200, { ok: true, audio: r.url, secs: r.secs, ms: r.ms }); }
+      catch (e) { return send(res, 200, { error: e.message }); }
+    }
+    if (p.startsWith('/api/robot/voice/audio/') && m === 'GET') {
+      const f = tts.file(p.slice('/api/robot/voice/audio/'.length));
+      if (!f) return send(res, 404, { error: 'not found' });
+      return sendFile(res, f, 'audio/wav');
+    }
     if (p === '/api/robot/say' && m === 'POST') {
       const b = await readJson(req);
       const text = String(b.text || '').trim().slice(0, 400);
@@ -1263,6 +1301,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       await new Promise((r) => front.close(r));
       server.close(); redirect.close();
       robot.close();
+      tts.close();
       if (practice) practice.close();
       shield.stopAll();
       remote.closeAll();

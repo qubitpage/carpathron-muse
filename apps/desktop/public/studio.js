@@ -203,7 +203,34 @@
     const hl = h('pre', { class: 'studio-hl', 'aria-hidden': 'true' });
     const edWrap = h('div', { class: 'studio-edwrap' }, hl, ed);
     const sug = h('div', { class: 'studio-sug', hidden: true, role: 'listbox' });
-    const paint = () => { hl.innerHTML = highlight(ed.value) + '\n'; hl.scrollTop = ed.scrollTop; hl.scrollLeft = ed.scrollLeft; };
+    const paint = () => { hl.innerHTML = highlight(ed.value) + '\n'; hl.scrollTop = ed.scrollTop; hl.scrollLeft = ed.scrollLeft; drawExplain(); };
+    // 📖 Explain: every line in everyday words, beside the code (follows the scrolling; click a note to jump to the line)
+    let explainOn = true; try { explainOn = localStorage.getItem('mc.studioExplain') !== '0'; } catch {}
+    const exPanel = h('div', { class: 'studio-explain', 'aria-label': 'What the code does, in everyday words' });
+    const exBtn = h('button', { class: 'btn' + (explainOn ? ' on' : ''), title: 'Show what each line does, in everyday words', onclick: () => { explainOn = !explainOn; try { localStorage.setItem('mc.studioExplain', explainOn ? '1' : '0'); } catch {} exBtn.classList.toggle('on', explainOn); const sp = exPanel.parentElement; if (sp) sp.classList.toggle('noex', !explainOn); drawExplain(); } }, '📖 Explain');
+    let exT = 0;
+    function drawExplain() {
+      exPanel.hidden = !explainOn || !window.MCexplain;
+      if (exPanel.hidden) return;
+      clearTimeout(exT);
+      exT = setTimeout(() => {
+        const r = window.MCexplain.explain(ed.value);
+        exPanel.innerHTML = '';
+        exPanel.append(h('div', { class: 'ex-sum' }, h('b', {}, 'In short: '), r.summary, h('div', { class: 'muted' }, '▶ setup runs once at power-on, then 🔁 loop repeats forever. Click a note to see its line.')));
+        for (const n of r.notes) exPanel.append(h('div', { class: `ex-note ${n.kind}`, 'data-line': n.line, onclick: () => goto(n.line) }, h('span', { class: 'ex-ln' }, n.line), h('span', {}, n.text)));
+        if (!r.notes.length) exPanel.append(h('p', { class: 'muted small' }, 'Nothing to explain yet — write some code, or build it with Robot → Blocks.'));
+        follow();
+      }, 150);
+    }
+    function follow() {
+      if (exPanel.hidden) return;
+      const top = Math.floor(ed.scrollTop / 18) + 1, cur = ed.value.slice(0, ed.selectionStart).split('\n').length;
+      let first = null;
+      for (const el of exPanel.querySelectorAll('.ex-note')) { const ln = +el.dataset.line; el.classList.toggle('cur', ln === cur); if (!first && ln >= top) first = el; }
+      if (first) exPanel.scrollTop = first.offsetTop - exPanel.querySelector('.ex-sum').offsetHeight - 4;
+    }
+    ed.addEventListener('scroll', () => { clearTimeout(follow.t); follow.t = setTimeout(follow, 60); });
+    ed.addEventListener('click', () => follow()); ed.addEventListener('keyup', (e) => { if (/Arrow|Page|Home|End/.test(e.key)) follow(); });
     const drawGutter = () => { const n = ed.value.split('\n').length; const bad = new Set(st.problems.filter((x) => x.file === st.file).map((x) => x.line)); gutter.innerHTML = ''; for (let i = 1; i <= n; i++) gutter.append(h('span', { class: bad.has(i) ? 'bad' : '' }, `${i}\n`)); };
     const drawEditor = () => { ed.value = st.content; ed.disabled = !st.file; drawGutter(); paint(); };
     ed.oninput = (e) => { const was = st.content === st.saved; st.content = ed.value; if (was !== (st.content === st.saved)) drawTabs(); drawGutter(); paint(); if (e && e.inputType && e.inputType.startsWith('insert')) suggest(false); else hideSug(); };
@@ -306,10 +333,10 @@
     el.append(boardList,
       h('div', { class: 'card studio' },
         h('div', { class: 'row studio-bar' }, h('b', {}, 'Project'), projSel, newBtn, h('b', {}, 'Board'), board, h('b', {}, 'Port'), port, refresh),
-        h('div', { class: 'row studio-bar' }, saveBtn, compileBtn, uploadBtn, stopBtn, serialBtn, libBtn, histSel, status),
+        h('div', { class: 'row studio-bar' }, saveBtn, compileBtn, uploadBtn, stopBtn, serialBtn, libBtn, exBtn, histSel, status),
         st.project ? h('div', { class: 'small muted' }, `📁 ${st.dir}`) : h('p', {}, 'No firmware projects yet. Press ＋ New (or open the car firmware from the Devices tab).'),
         tabs,
-        h('div', { class: 'studio-code' }, gutter, edWrap, sug),
+        h('div', { class: 'studio-split' + (explainOn ? '' : ' noex') }, h('div', { class: 'studio-code' }, gutter, edWrap, sug), exPanel),
         probs, pinNoteEl,
         h('div', { class: 'row' }, aiBox, aiBtn),
         outTabs, out, plot, serialRow));

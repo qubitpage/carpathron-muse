@@ -16,11 +16,47 @@
     return vs.find((v) => v.name === st.voice) || vs.find((v) => /en(-|_)(US|GB)/i.test(v.lang) && /david|mark|guy|zira|google/i.test(v.name)) || vs.find((v) => /^en/i.test(v.lang)) || vs[0] || null;
   }
   let mouthT = null;
-  function say(text, by) {
+  // The robot's own voice: a WAV made on the PC by the offline neural voice (+ the robot effect). Played one after
+  // another; the mouth follows the loudness of the sound. Without the neural voice, the browser's voice is used.
+  const play = { ctx: null, queue: [], busy: false };
+  function say(text, by, audio, more) {
     const t = String(text || '').trim();
     if (!t) return;
-    log(by === 'you' ? '🔊 (you)' : '🔊 Robot', t);
-    if (!st.speaker || !window.speechSynthesis) return;
+    if (!more) log(by === 'you' ? '🔊 (you)' : '🔊 Robot', t); // "more" = the next sentence of a line already shown
+    if (!st.speaker) return;
+    if (audio) { play.queue.push(audio); playNext(); return; }
+    browserSay(t);
+  }
+  async function playNext() {
+    if (play.busy || !play.queue.length) return;
+    play.busy = true;
+    const url = play.queue.shift();
+    try {
+      play.ctx = play.ctx || new (window.AudioContext || window.webkitAudioContext)();
+      if (play.ctx.state === 'suspended') await play.ctx.resume().catch(() => {});
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buf = await play.ctx.decodeAudioData(await res.arrayBuffer());
+      const src = play.ctx.createBufferSource(), an = play.ctx.createAnalyser();
+      an.fftSize = 512; src.buffer = buf; src.connect(an); an.connect(play.ctx.destination);
+      const data = new Uint8Array(an.fftSize);
+      mouth(true, true);
+      let raf = 0;
+      const tick = () => {
+        an.getByteTimeDomainData(data); let m = 0; for (const v of data) m = Math.max(m, Math.abs(v - 128));
+        const open = Math.min(1, m / 70);
+        document.querySelectorAll('.robot-face .mouth').forEach((el) => { el.style.height = `${3 + Math.round(open * 13)}px`; });
+        raf = requestAnimationFrame(tick);
+      };
+      tick();
+      await new Promise((r) => { src.onended = r; src.start(); });
+      cancelAnimationFrame(raf);
+      document.querySelectorAll('.robot-face .mouth').forEach((el) => { el.style.height = ''; });
+    } catch (e) { console.warn('robot voice', e); }
+    mouth(false); play.busy = false; playNext();
+  }
+  function browserSay(t) {
+    if (!window.speechSynthesis) return;
     const u = new SpeechSynthesisUtterance(t);
     const v = pickVoice(); if (v) { u.voice = v; u.lang = v.lang; }
     u.rate = st.rate; u.pitch = st.pitch;
@@ -28,9 +64,9 @@
     u.onboundary = () => { const m = document.querySelector('.robot-face .mouth'); if (m) { m.classList.remove('pulse'); void m.offsetWidth; m.classList.add('pulse'); } };
     speechSynthesis.speak(u);
   }
-  function mouth(on) {
+  function mouth(on, live) {
     st.speaking = on;
-    document.querySelectorAll('.robot-face').forEach((f) => f.classList.toggle('talking', on));
+    document.querySelectorAll('.robot-face').forEach((f) => { f.classList.toggle('talking', on && !live); f.classList.toggle('live', on && !!live); });
     clearTimeout(mouthT); if (on) mouthT = setTimeout(() => mouth(false), 20000);
   }
 
@@ -93,7 +129,7 @@
   }
 
   // ---------------------------------------------------------------- the card
-  let els = null;
+  let els = null, onDownloadUi = null;
   const status = (t) => { if (els) els.status.textContent = t; };
   const meter = (rms) => { if (els) els.meter.style.width = `${Math.min(100, Math.round(rms * 900))}%`; };
   function log(who, text) {
@@ -127,10 +163,48 @@
     const sayIn = h('input', { placeholder: 'Type what the robot should say…', maxlength: 400 });
     const sayIt = async () => { const t = sayIn.value.trim(); if (!t) return; const r = await api('/api/robot/say', { body: { text: t } }).catch((e) => ({ error: e.message })); if (r.error) toast(r.error, true); else sayIn.value = ''; };
     sayIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sayIt(); } });
-    const voiceSel = h('select', { 'aria-label': 'Robot voice', onchange: (e) => { st.voice = e.target.value; LS.set('mc.robotVoice', st.voice); } });
-    const fillVoices = () => { const vs = window.speechSynthesis ? speechSynthesis.getVoices() : []; voiceSel.innerHTML = ''; const cur = pickVoice(); for (const v of vs) voiceSel.append(h('option', { value: v.name, selected: cur && cur.name === v.name ? '' : null }, `${v.name} (${v.lang})`)); if (!vs.length) voiceSel.append(h('option', { value: '' }, 'default voice')); };
-    fillVoices(); if (window.speechSynthesis) speechSynthesis.onvoiceschanged = fillVoices;
-    const slider = (label, key, lo, hi, step) => h('label', { class: 'inline small' }, label, ' ', h('input', { type: 'range', min: lo, max: hi, step, value: st[key], oninput: (e) => { st[key] = Number(e.target.value); LS.set(key === 'rate' ? 'mc.robotRate' : 'mc.robotPitch', String(st[key])); } }));
+    // --- choose the robot's voice
+    const voiceBox = h('div', { class: 'voicebox' });
+    const browserRow = (() => {
+      const voiceSel = h('select', { 'aria-label': 'Browser voice', onchange: (e) => { st.voice = e.target.value; LS.set('mc.robotVoice', st.voice); } });
+      const fillVoices = () => { const vs = window.speechSynthesis ? speechSynthesis.getVoices() : []; voiceSel.innerHTML = ''; const cur = pickVoice(); for (const v of vs) voiceSel.append(h('option', { value: v.name, selected: cur && cur.name === v.name ? '' : null }, `${v.name} (${v.lang})`)); if (!vs.length) voiceSel.append(h('option', { value: '' }, 'default voice')); };
+      fillVoices(); if (window.speechSynthesis) speechSynthesis.onvoiceschanged = fillVoices;
+      const slider = (label, key, lo, hi, step) => h('label', { class: 'inline small' }, label, ' ', h('input', { type: 'range', min: lo, max: hi, step, value: st[key], oninput: (e) => { st[key] = Number(e.target.value); LS.set(key === 'rate' ? 'mc.robotRate' : 'mc.robotPitch', String(st[key])); } }));
+      return h('details', { class: 'small' }, h('summary', {}, 'Backup voice (used only while the robot voice is not downloaded)'),
+        h('div', { class: 'row small' }, voiceSel, slider('Speed', 'rate', 0.6, 1.6, 0.05), slider('Pitch', 'pitch', 0.5, 2, 0.05), h('button', { class: 'btn tiny', onclick: () => browserSay('Hello! This is my backup voice.') }, '▶ Test')));
+    })();
+    const fillVoiceBox = async () => {
+      const s = await api('/api/robot/voice/status').catch(() => null);
+      voiceBox.innerHTML = '';
+      if (!s) return;
+      if (!s.engine) { voiceBox.append(h('p', { class: 'small muted' }, 'The robot voice engine is not part of this installation — the backup voice is used.')); return; }
+      const need = s.voices.find((v) => v.id === s.voice) || s.voices[0];
+      const ready = s.voices.filter((v) => v.ready);
+      voiceBox.append(h('p', { class: 'small muted' }, 'The robot speaks with an offline voice made on this PC (no internet needed once downloaded), with a small-robot sound effect. Pick the one you like and press ▶ to hear it.'));
+      for (const [id, m] of Object.entries(s.models)) {
+        if (m.installed) continue;
+        const bar = h('div', { class: 'vmeter' }, h('div', { style: `width:${m.downloading ? m.downloading.pct : 0}%` }));
+        const btn = h('button', { class: 'btn' + (id === need.model ? ' primary' : ''), disabled: m.downloading ? '' : null, onclick: async () => { btn.disabled = true; btn.textContent = 'Downloading…'; const r = await api('/api/robot/voice/download', { body: { model: id } }).catch((e) => ({ error: e.message })); if (r.error) { toast(r.error, true); btn.disabled = false; } } }, m.downloading ? 'Downloading…' : `⬇ Download ${m.label}`);
+        voiceBox.append(h('div', { class: 'row small', 'data-model': id }, btn, bar));
+      }
+      const list = h('div', { class: 'voice-list' });
+      for (const v of s.voices) {
+        const row = h('label', { class: 'voice-opt' + (v.ready ? '' : ' off') },
+          h('input', { type: 'radio', name: 'robotVoice', value: v.id, checked: v.id === s.voice ? '' : null, disabled: v.ready ? null : '', onchange: async () => { const r = await api('/api/robot/voice/choose', { body: { voice: v.id } }).catch((e) => ({ error: e.message })); if (r.error) toast(r.error, true); else toast(`Robot voice: ${v.label}`); } }),
+          h('span', { class: 'grow' }, v.label, v.ready ? '' : h('span', { class: 'muted' }, ' — download first')),
+          h('button', { class: 'btn tiny', disabled: v.ready ? null : '', title: 'Hear this voice', onclick: async (e) => { e.preventDefault(); const b = e.currentTarget; b.textContent = '…'; const r = await api('/api/robot/voice/sample', { body: { voice: v.id } }).catch((er) => ({ error: er.message })); b.textContent = '▶'; if (r.error) toast(r.error, true); else { play.queue.push(r.audio); playNext(); } } }, '▶'));
+        list.append(row);
+      }
+      voiceBox.append(list);
+      if (!ready.length) voiceBox.append(h('p', { class: 'small muted' }, 'Until a voice is downloaded, the robot uses the backup voice below.'));
+    };
+    fillVoiceBox();
+    onDownloadUi = (d) => {
+      const row = voiceBox.querySelector(`[data-model="${d.model}"]`);
+      if (d.error) { toast(`Voice download: ${d.error}`, true); fillVoiceBox(); return; }
+      if (d.done) { toast('Robot voice installed — it speaks with it now.'); fillVoiceBox(); return; }
+      if (row) { const bar = row.querySelector('.vmeter > div'); if (bar) bar.style.width = `${d.pct}%`; const b = row.querySelector('button'); if (b) { b.disabled = true; b.textContent = d.pct >= 100 ? 'Unpacking…' : `Downloading… ${d.pct}%`; } }
+    };
     const logEl = h('div', { class: 'vlogs' });
     card.append(h('h3', {}, '🗣 Voice'),
       h('div', { class: 'voice-top' }, face, h('div', { class: 'grow' },
@@ -139,13 +213,13 @@
       h('h4', {}, '🔊 The robot\'s voice'),
       h('div', { class: 'row' }, sayIn, h('button', { class: 'btn', onclick: sayIt }, 'Say')),
       h('div', { class: 'chips' }, ...PHRASES.map((p) => h('button', { class: 'chip', onclick: () => api('/api/robot/say', { body: { text: p } }) }, p))),
-      h('div', { class: 'row small' }, voiceSel, slider('Speed', 'rate', 0.6, 1.6, 0.05), slider('Pitch', 'pitch', 0.5, 2, 0.05), h('button', { class: 'btn tiny', onclick: () => say('Hello! This is my voice.', 'test') }, '▶ Test')),
+      voiceBox, browserRow,
       h('label', { class: 'toggle small' }, spk, h('span', {}, 'This device is the robot\'s speaker (on a phone fixed on the car, the phone is the robot\'s mouth; with hands-free, also its ears)')),
       h('label', { class: 'toggle small' }, rep, h('span', {}, 'Speak Muse\'s answers to voice commands')),
       logEl);
     els = { status: statusEl, meter: meterEl.firstChild, log: logEl };
   }
-  window.MCvoice = { say, render };
+  window.MCvoice = { say, render, onDownload: (d) => onDownloadUi && onDownloadUi(d) };
   const tryRender = () => { if (window.MCui && document.getElementById('voiceCard')) render(); else setTimeout(tryRender, 300); };
   tryRender();
 })();

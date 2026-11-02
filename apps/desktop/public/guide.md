@@ -27,6 +27,15 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **1.9.8:** easier to understand, better to look at and to hear. The robot has its **own voice** — an offline neural
+> voice made on your PC with a small-robot sound (pick *Bella — cute robot*, *Michael — WALL-E style workbot*, *Emma*,
+> *Sky* or the light *Kitten* voices; one download, then no internet needed), and its face moves its mouth with the sound.
+> **🧱 Blocks** speak everyday words (*turn the light ON*, *wait 1 second*, *when the button is pressed*) and show *What it
+> does*, *What to connect* and the code side by side; the Firmware studio has **📖 Explain** — every line of a program in
+> plain English next to the code. **🔌 Wiring** is a real electrical diagram (each board pin, each module's connector and
+> screw terminal, coloured wires: red +, black GND, blue SDA, yellow SCL…). The practice car drives in a **furnished 3D
+> room** (camera view from the car, chase / top / room views) that moves with the car (sections 3.4.6 – 3.4.8).
+>
 > **1.9.7:** robot tools upgrade, part 1. Car firmware **2.2**: every setting of the car can be changed from the app
 > (🛠 **Car settings**, explained like a modern BIOS, checked before they are saved), the car **tests itself** (🩺 **Health**:
 > camera, memory, Wi-Fi, sensors, each side of wheels — with the likely cause and a one-click fix), firmware **over Wi-Fi**
@@ -278,8 +287,10 @@ kit values (your Wi-Fi stays).
 | Name and hotspot | the robot's name, the hotspot name and password |
 
 **Practice car** — no car at hand? Press **🧪 Use the practice car**: a simulated Baby Carpathron (same firmware 2.2
-commands) drives in a virtual room with walls and boxes, with a camera, laser and gyro. Everything works on it — driving,
-settings, the health check. *Practise a fault* breaks it on purpose (camera not found, a dead motor, reversed or swapped
+commands) drives in a furnished 3D room (sofa, armchair, table, plant, rug, door, window, a ball), with a camera, laser
+and gyro. On the Control tab the live video becomes the **view from the car's camera** — it moves and turns as you drive
+— and the practice card shows the car from behind (**chase**), from **above** or from the room's corner; the photos, the
+laser and the room scan see the same room. Everything works on it — driving, settings, the health check. *Practise a fault* breaks it on purpose (camera not found, a dead motor, reversed or swapped
 motor wires, a noisy laser, a drifting gyro, weak Wi-Fi, no PSRAM) so you can learn to find and fix problems.
 
 ### 3.4.5 Health check and robot passport
@@ -317,8 +328,12 @@ the drawing.
 encoders, climate, battery monitor, extra analog inputs, OLED display, 16-servo driver, I2S speaker and microphone, RGB
 LEDs, buzzer, GPS). Muse picks free pins that can do the job (plain pins before boot pins, I2C parts share the I2C bus at
 their own address), shows the power it needs, tips, how to test it and what to search for on eMAG. You can change any pin;
-the choice is checked at once. **🔌 Wiring** draws every wire from the board to each part (red power, grey ground, blue
-I2C, purple PWM, green signal — hover a part to follow its wires). **📋 Starter code** writes the pin definitions and the
+the choice is checked at once. **🔌 Wiring diagram** is drawn like an electrical diagram: the board with its real pin
+headers, each module with its own connector (the L298N with its screw terminals and pins, the servo plug, the HC-SR04, I2C
+modules), the battery and the motors for the car, and every wire in its usual colour — **red** +5 V / 3.3 V / battery +,
+**black** GND, **blue** SDA, **yellow** SCL, others by signal — routed around the board. Hover a wire, a pin or a module
+to light up everything connected to it; the **wire table** under it lists *from → to, colour* for each wire, to tick off
+while you build. **📋 Starter code** writes the pin definitions and the
 setup lines for your board; **🤖 Ask Muse to write the firmware** hands the wiring to the agent. On the ESP32-CAM the car's
 own wiring (from Car settings) is already in, and a free pin can be **tested on the car**: Read (a button or sensor output
 changes the level), HIGH / LOW for 3 s, Blink (an LED or buzzer on it shows the wire is right). Pins used by the motors or
@@ -341,10 +356,24 @@ commands run at once without the AI: *"forward two seconds"*, *"back"*, *"turn r
 Voice Transcribe (the Meta API key). Space and STOP always stop at once.
 
 **The robot's voice** — type a sentence (or pick a ready one) and the robot says it; Muse can also talk through the robot
-(*"say hello to the visitors"* → robot_say) and speak its answers to voice commands. It uses the voices of Windows (or of
-the phone), offline; pick the voice, speed and pitch. Every device with **This device is the robot's speaker** on speaks:
+(*"say hello to the visitors"* → robot_say), missions can *say …*, and Muse's answers to voice commands are spoken. The
+robot speaks with its **own offline neural voice** (Kokoro or KittenTTS, made on this PC — nothing is sent anywhere) with
+a small-robot sound added: a bit higher, a light metal shell, a small speaker — and still clear English. Under **🔊 The
+robot's voice** pick one and press **▶** to hear it:
+
+| Voice | Sounds like | Needs |
+|---|---|---|
+| Bella — cute robot (default) | a cheerful little robot | Kokoro, 100 MB, once |
+| Michael — WALL-E style workbot | a small worker robot, a bit metallic | Kokoro |
+| Emma — British cute robot | a polite British little robot | Kokoro |
+| Sky — clear robot | the clearest, lightest effect | Kokoro |
+| Kitten — light and fast workbot / female | quicker to make on slow PCs | KittenTTS, 27 MB, once |
+
+Press **⬇ Download** once (progress shown; saved in the app's data folder, `voices`). Long answers are spoken sentence by
+sentence, so the robot starts talking quickly. Until a voice is downloaded the **backup voice** (the voices of Windows or
+the phone, with speed and pitch) is used. Every device with **This device is the robot's speaker** on plays the voice:
 open Muse Carpathron on a phone fixed on the car and the phone becomes the robot's **mouth** — with Hands-free on the
-phone, also its **ears**. The face next to the button moves its mouth while the robot talks.
+phone, also its **ears**. The face next to the button opens its mouth with the loudness of the sound.
 
 **🧊 3D plan view** (Control tab) — the room as the car knows it: a floor grid in 1 m squares, the **laser outline** of the
 last room scan as low orange walls, the objects the camera named (orange pins = distance measured by the laser, purple =
@@ -365,7 +394,9 @@ forward (strongly when the car refuses to go on).
 
 ### 3.4.8 Blocks, missions and the Firmware studio
 
-Robot → **🧱 Blocks** — snap blocks together instead of typing code (Blockly, the same blocks as Scratch-style lessons).
+Robot → **🧱 Blocks** — snap blocks together instead of typing code. The blocks use everyday words, and next to them
+three tabs show **What it does** (the program told as a short story), **What to connect** (each part and the pin it goes
+to) and **The code** (with a comment on every line).
 
 - **🚗 Mission** — blocks that drive the car now: *drive forward 30 cm*, *turn right 90 degrees*, *set speed*, *wait*,
   *repeat 4 times*, *while / if the distance ahead is less than 30 cm*, *something blocks the way*, *say …*, *take a photo*,
@@ -374,10 +405,12 @@ Robot → **🧱 Blocks** — snap blocks together instead of typing code (Block
   lists of steps (never code), at most 600 steps and 10 minutes.
 - **⏺ Teach & repeat** — press *Teach by driving*, drive the car by hand on the Control tab (keys, pad or controller), press
   again: the drive is saved as a mission and the car repeats it with ▶.
-- **🔌 Firmware** — blocks that become Arduino C++ for a board you pick (ESP32 DevKit, ESP32-CAM, XIAO ESP32S3, Uno, Mega,
-  Pico): *pin is an output*, *set pin HIGH*, *power 0–255*, *pin is HIGH*, *analog value*, *wait ms*, *print*, *servo to
-  90°*, *beep*, if / repeat / while, maths and variables. The code appears live next to the blocks and its pins are checked
-  for the board. **🧩 Open in Firmware studio** makes it a project you can compile and upload.
+- **🔌 A program for a board** (ESP32 DevKit, ESP32-CAM, XIAO ESP32S3, Uno, Mega, Pico) — the big block reads *▶ At start,
+  once: … 🔁 Then forever: …*. Inside: *turn the light on pin 2 ON*, *dim the light to 50 %*, *when the button on pin 4 is
+  pressed*, *the sensor on pin 34 (0–100 %)*, *move the servo to 90°*, *beep*, *wait 1 second*, *repeat*, *if*, *show a
+  message on the PC*. **Examples** to start from: blink a light, light while a button is pressed, night light, sweep a
+  servo, beep. **Put it on the board…** opens it in the Firmware studio (and installs a needed library such as
+  ESP32Servo), ready for Upload.
 
 **✅ Make my robot ready** (Health & calibration tab) — one button checks the connection, the firmware (newer one bundled?),
 Wi-Fi updates, the health of every part, the optional sensors, whether the calibration was done and whether there is a
@@ -388,7 +421,11 @@ room map, each with the next thing to do.
 file; ↑ ↓ Enter / Tab to pick). **Before every upload the pins are checked** for the board (from pinMode / digitalWrite /
 analogRead / analogWrite / tone / attach / Wire.begin and #define / const int names): a pin the board cannot use stops the
 upload once with the reason (press Upload again to upload anyway); boot pins and analog pins that do not work with Wi-Fi get
-a warning. **📈 Plotter** draws the numbers the board prints on the serial port as lines (e.g. `Serial.println(analogRead(34));`
+a warning. **📖 Explain** (on by default) shows, beside the code, what every line does in plain English — *"Make pin 4 an output: the
+board will switch it on and off"*, *"If pin 13 reads LOW (pressed): …"*, *"Wait 1.5 seconds"*, *"Repeat 3 times"* — with a
+one-line summary on top (*"This program uses pins 4 (LED), 13 (BUTTON), Wi-Fi and messages to the PC"*). The notes follow
+the code as you scroll; click one to select its line. It works offline and at once (no AI), for any program, including
+the car's own firmware. **📈 Plotter** draws the numbers the board prints on the serial port as lines (e.g. `Serial.println(analogRead(34));`
 or `temp:21.5 hum:40`). **📚 Libraries** searches and installs Arduino libraries (arduino-cli).
 
 ### 3.5 Faster agent: only the tools a chat needs

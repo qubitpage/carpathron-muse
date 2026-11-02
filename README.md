@@ -24,18 +24,27 @@ by Qubitpage LIMITED ([qubitpage.com/products](https://qubitpage.com/products/))
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.9.7-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.9.8-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.6.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.9.7) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. This hackathon edition does not update itself: install a newer build over the old one (chats and settings are kept). Portable: unzip and run `Carpathron.exe`. |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.9.8) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. This hackathon edition does not update itself: install a newer build over the old one (chats and settings are kept). Portable: unzip and run `Carpathron.exe`. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.6) | [**CarpathronAvatar-1.1.6.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) (also built into the app: Robot page → ⬆ Update car firmware) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 | 🖥 **Carpathron Remote** – the remote desktop app on its own (Windows, Linux) | [qubitpage.com/remote](https://qubitpage.com/remote/) | For PCs you want to reach or help that do not run Muse Carpathron. Same IDs and passwords. |
 
-All files of this version: **[Release v1.9.7](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.9.7)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.9.8](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.9.8)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+
+## What's new in 1.9.8 — easier to understand, better to see and hear
+
+- **🔊 The robot's own voice:** an offline neural voice made on your PC (Kokoro / KittenTTS via sherpa-onnx, Apache-2.0) with a small-robot sound — *Bella — cute robot*, *Michael — WALL-E style workbot*, *Emma*, *Sky*, *Kitten*. One download, then no internet; the robot's face moves its mouth with the sound; long answers start speaking after the first sentence.
+- **🧱 Blocks in everyday words:** *turn the light ON*, *wait 1 second*, *when the button is pressed*, *move the servo to 90°*, with *What it does*, *What to connect* and *The code* side by side, 5 board examples, and *Put it on the board…* (installs needed libraries).
+- **📖 Explain in the Firmware studio:** every line of a program in plain English next to the code, with a summary of the pins, Wi-Fi and parts it uses — offline and instant, also for the car's own firmware.
+- **🔌 A real wiring diagram:** board pin headers, each module's connector and screw terminals, battery and motors, wires in their usual colours (red +, black GND, blue SDA, yellow SCL), hover to follow a wire, and a wire table.
+- **🧪 The practice car in a furnished 3D room:** the live video becomes the view from the car's camera and moves with it; chase, top and room views; the 3D plan view shows the same room.
+- **Tested:** every voice is generated and checked by speech recognition; blocks, wiring, the 3D views, Explain and the voice card have UI tests.
 
 ## What's new in 1.9.7 — robot tools
 

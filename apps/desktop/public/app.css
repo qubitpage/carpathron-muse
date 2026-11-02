@@ -642,3 +642,24 @@ button.chip { cursor: pointer; }
 .sim3d-tp { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5; }
 .sim3d-bar { position: absolute; left: 10px; bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
 .sim-card.sim3d-on .sim-label { z-index: 2; color: #fff; text-shadow: 0 1px 2px #000; }
+.robot-face.live .mouth { transition: height .04s; }
+.voicebox { margin: 6px 0; }
+.voice-list { display: grid; gap: 4px; margin: 6px 0; }
+.voice-opt { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line, #2a3542); border-radius: 8px; cursor: pointer; }
+.voice-opt.off { opacity: .6; cursor: default; }
+.voice-opt input { margin: 0; }
+/* 📖 Explain: everyday-words notes beside the firmware code */
+.studio-split { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, 1fr); gap: 8px; }
+.studio-split.noex { grid-template-columns: 1fr; }
+.studio-explain { height: min(56vh, 620px); overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--card, #12161c); padding: 0 8px 8px; font-size: 13px; line-height: 1.4; position: relative; }
+.studio-explain .ex-sum { position: sticky; top: 0; background: inherit; padding: 8px 2px; border-bottom: 1px solid var(--line); margin-bottom: 4px; z-index: 1; }
+.studio-explain .ex-sum .muted { font-size: 12px; margin-top: 2px; }
+.ex-note { display: flex; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.ex-note:hover { background: rgba(79,140,255,.10); }
+.ex-note.cur { background: rgba(79,140,255,.20); outline: 1px solid rgba(79,140,255,.45); }
+.ex-note .ex-ln { flex: none; min-width: 30px; text-align: right; color: #6b7685; font: 12px/1.6 var(--mono); }
+.ex-note.part { font-weight: 600; margin-top: 6px; color: #9fd3ff; }
+.ex-note.flow { color: #ffd58a; }
+.ex-note.lib, .ex-note.name { color: #b9c3cf; }
+.studio-bar .btn.on { background: rgba(79,140,255,.22); border-color: #4f8cff; }
+@media (max-width: 900px) { .studio-split { grid-template-columns: 1fr; } .studio-explain { height: 36vh; } }

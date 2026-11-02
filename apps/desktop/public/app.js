@@ -121,7 +121,8 @@
       case 'camera:photo': window.MCRobot && window.MCRobot.onPhoto && window.MCRobot.onPhoto(d); break;
       case 'robot:status': case 'robot:motors': case 'robot:scan': case 'robot:map': window.MCRobot && window.MCRobot.onEvent(ev, d); break;
       case 'robot:firmware': window.MCfirmware && window.MCfirmware(d.text); break;
-      case 'robot:say': window.MCvoice && window.MCvoice.say(d.text, d.by); break;
+      case 'robot:say': window.MCvoice && window.MCvoice.say(d.text, d.by, d.audio, d.more); break;
+      case 'voice:download': window.MCvoice && window.MCvoice.onDownload && window.MCvoice.onDownload(d); break;
       case 'robot:mission': window.MCblocks && window.MCblocks.onMission && window.MCblocks.onMission(d); break;
       case 'studio:log': case 'studio:serial': window.MCstudio && window.MCstudio.onEvent(ev, d); break;
       case 'avatar:link': avatarLinkPrompt(d); break;

@@ -184,8 +184,15 @@ const { chromium } = require(process.env.PW || 'playwright');
   await p.click('#robotStudio .seg button:has-text("Plotter")');
   await p.waitForTimeout(300);
   const plotShown = await p.locator('#robotStudio .studio-plot').isVisible();
-  const studioOk = /GPIO 16/.test(pinNote) && /PSRAM/.test(pinNote) && /pinMode/.test(sugText) && plotShown;
-  console.log(JSON.stringify({ pinNote: pinNote.slice(0, 160), sugText, plotShown, studioOk }));
+  // 📖 Explain beside the code: summary + a note per line, click a note → its line is selected
+  const exNotes = await p.locator('#robotStudio .ex-note').allTextContents();
+  const exSum = await p.locator('#robotStudio .ex-sum').textContent();
+  await p.locator('#robotStudio .ex-note', { hasText: 'Wait 500' }).click();
+  const selLine = await p.evaluate(() => { const e = document.querySelector('#robotStudio .studio-editor'); return e.value.slice(0, e.selectionStart).split('\n').length; });
+  await p.locator('#robotStudio .studio-split').screenshot({ path: `${out}/s3-explain.png` });
+  const exOk = /pins 16 \(LED\)/.test(exSum) && exNotes.some((t) => /output/.test(t)) && exNotes.some((t) => /Switch pin 16 \("LED"\) ON/.test(t)) && selLine === 4;
+  const studioOk = /GPIO 16/.test(pinNote) && /PSRAM/.test(pinNote) && /pinMode/.test(sugText) && plotShown && exOk;
+  console.log(JSON.stringify({ pinNote: pinNote.slice(0, 160), sugText, plotShown, exSum, exNotes, selLine, studioOk }));
   console.log(JSON.stringify({ out, errs, err, disabled, saved, fixBtns, problemsAfterFix: after, calText }));
   await b.close(); await srv.close(); process.exit(errs.length || !err || !disabled || saved !== 250 || !fixBtns || after || !/✓/.test(calText) || !partsOk || !ctlOk || !blocksOk || !studioOk ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -10,3 +10,4 @@ apps/quest-avatar/build/
 *.jar
 .env
 firmware/*/ota_key.h
+apps/desktop/build/voice-engine/

@@ -74,3 +74,14 @@ static unsigned long dirId(const WCHAR *dir) {
   unsigned long h = 2166136261u; for (const WCHAR *p = dir; *p; p++) { WCHAR c = *p; if (c >= L'A' && c <= L'Z') c += 32; h = (h ^ (unsigned long)c) * 16777619u; }
   return h & 0xFFFFFFFFu;
 }
+
+/* pipe I/O that never blocks the other direction: on Windows, a waiting read on a normal (synchronous) handle holds back
+   every write on the same handle, so both helpers open their pipe "overlapped" and wait for each operation here */
+static BOOL ovIo(HANDLE h, void *buf, DWORD n, DWORD *done, int write) {
+  OVERLAPPED o; ZeroMemory(&o, sizeof o); o.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL); if (!o.hEvent) return FALSE;
+  DWORD k = 0; BOOL r = write ? WriteFile(h, buf, n, NULL, &o) : ReadFile(h, buf, n, NULL, &o);
+  if (r || GetLastError() == ERROR_IO_PENDING) r = GetOverlappedResult(h, &o, &k, TRUE);
+  CloseHandle(o.hEvent); if (done) *done = k; return r;
+}
+static BOOL ovRead(HANDLE h, void *buf, DWORD n, DWORD *got) { return ovIo(h, buf, n, got, 0); }
+static BOOL ovWrite(HANDLE h, const void *buf, DWORD n) { DWORD w = 0; return ovIo(h, (void *)buf, n, &w, 1) && w == n; }

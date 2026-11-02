@@ -12,6 +12,7 @@
      elevated 1 / 0        the window in front belongs to a program running as administrator: Windows blocks
                            clicks and keys from a program that is not (UIPI) */
 #include "rdcore.h"
+#include <aclapi.h>
 static volatile LONG viaAgent = 0; static HANDLE agentPipe = INVALID_HANDLE_VALUE; static CRITICAL_SECTION alock;
 static int selfElevated = 0, lastElev = -1;
 static int elevatedPid(DWORD pid) {
@@ -40,16 +41,19 @@ static DWORD WINAPI watchDesktop(LPVOID unused) {
 }
 /* ---- the full control agent (rdsvc.exe, installed as a service): used when it is there and really ours */
 static WCHAR myDir[MAX_PATH];
+/* the agent's pipe must be owned by SYSTEM (or Administrators): a normal program cannot create a pipe with that owner,
+   so a fake "agent" started by another program is refused. (A SYSTEM process itself cannot be opened by a normal program.) */
 static int serverIsOurs(HANDLE p) {
-  ULONG pid = 0; if (!GetNamedPipeServerProcessId(p, &pid)) return 0;
-  HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid); if (!h) return 0;
-  WCHAR img[MAX_PATH], want[MAX_PATH]; DWORD n = MAX_PATH; int ok = 0;
-  if (QueryFullProcessImageNameW(h, 0, img, &n)) { wsprintfW(want, L"%s\\rdsvc.exe", myDir); ok = lstrcmpiW(img, want) == 0; }
-  CloseHandle(h); return ok;
+  PSID owner = NULL; PSECURITY_DESCRIPTOR sd = NULL; int ok = 0;
+  DWORD e = GetSecurityInfo(p, SE_KERNEL_OBJECT, OWNER_SECURITY_INFORMATION, &owner, NULL, NULL, NULL, &sd);
+  if (e == ERROR_SUCCESS && owner) ok = IsWellKnownSid(owner, WinLocalSystemSid) || IsWellKnownSid(owner, WinBuiltinAdministratorsSid);
+  else printf("helper-agent: cannot read the pipe owner (error %lu)\n", e);
+  if (sd) LocalFree(sd);
+  return ok;
 }
 static DWORD WINAPI agentReader(LPVOID u) {
   HANDLE p = (HANDLE)u; static char buf[1 << 16]; DWORD got;
-  while (ReadFile(p, buf, sizeof buf, &got, NULL) && got) fwrite(buf, 1, got, stdout);
+  while (ovRead(p, buf, sizeof buf, &got) && got) fwrite(buf, 1, got, stdout);
   EnterCriticalSection(&alock); if (agentPipe == p) { agentPipe = INVALID_HANDLE_VALUE; InterlockedExchange(&viaAgent, 0); CloseHandle(p); printf("agent 0\n"); } LeaveCriticalSection(&alock);
   return 0;
 }
@@ -58,15 +62,15 @@ static void tryAgent(void) {
   if (viaAgent || (lastTry && now - lastTry < 5000)) return; lastTry = now;
   DWORD sid = 0; ProcessIdToSessionId(GetCurrentProcessId(), &sid);
   WCHAR name[96]; wsprintfW(name, L"\\\\.\\pipe\\CarpathronRemoteAgent-%08lx-%lu", dirId(myDir), sid);
-  HANDLE p = CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, NULL);
-  if (p == INVALID_HANDLE_VALUE) return;
-  if (!serverIsOurs(p)) { CloseHandle(p); return; }
+  HANDLE p = CreateFileW(name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION, NULL);
+  if (p == INVALID_HANDLE_VALUE) { static DWORD said = 0; DWORD e = GetLastError(); if (e != said) { said = e; printf("helper-agent: not available (error %lu%s)\n", e, e == 2 ? ": the Carpathron Remote Helper service is not running" : e == 5 ? ": access denied" : ""); } return; }
+  if (!serverIsOurs(p)) { printf("helper-agent: refused, the pipe is not owned by the system\n"); CloseHandle(p); return; }
   EnterCriticalSection(&alock); agentPipe = p; InterlockedExchange(&viaAgent, 1); LeaveCriticalSection(&alock);
   CreateThread(NULL, 0, agentReader, p, 0, NULL);
 }
 static int toAgent(const char *line) {
   int ok = 0; EnterCriticalSection(&alock);
-  if (viaAgent && agentPipe != INVALID_HANDLE_VALUE) { DWORD w; size_t n = strlen(line); ok = WriteFile(agentPipe, line, (DWORD)n, &w, NULL) && WriteFile(agentPipe, "\n", 1, &w, NULL); }
+  if (viaAgent && agentPipe != INVALID_HANDLE_VALUE) { size_t n = strlen(line); ok = ovWrite(agentPipe, line, (DWORD)n) && ovWrite(agentPipe, "\n", 1); }
   LeaveCriticalSection(&alock); return ok;
 }
 int main(void) {

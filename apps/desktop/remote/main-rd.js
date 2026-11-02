@@ -272,7 +272,7 @@ function publicState() {
   };
 }
 // ---------------------------------------------------------------- mouse + keyboard in their own process (see input-worker.js)
-let inputWorker = null, workerFails = 0, idChange = null;
+let inputWorker = null, workerFails = 0, idChange = null, secureShown = false;
 const recaptureAll = (why) => { if (hostWin && !hostWin.isDestroyed() && sessions.size) hostWin.webContents.send('rd-recapture', why); };
 const noteCtl = (text) => { if (hostWin && !hostWin.isDestroyed()) hostWin.webContents.send('rd-ctl-note', text); };
 function startInputWorker() {
@@ -285,8 +285,8 @@ function startInputWorker() {
     if (!m) return;
     if (m.log) log(m.log);
     if (m.status) noteCtl(m.status);
-    if (m.secure === 0) recaptureAll('the Windows security screen closed');
-    if (m.secure === 1) log('remote control: Windows security screen shown through the helper service');
+    if (m.secure === 0) { secureShown = false; syncInput(); recaptureAll('the Windows security screen closed'); }
+    if (m.secure === 1) { secureShown = true; syncInput(); log('remote control: Windows security screen shown through the helper service'); }
     if (m.first) { const s = sessions.get(String(m.first)); log(`remote control: first input from ${s ? s.name : m.first} (${m.k})`); }
   });
   w.on('exit', (code) => {
@@ -302,7 +302,9 @@ function localInjector() { const j = new Injector(opts.log); j.onStatus = noteCt
 function syncInput() {
   if (!inputWorker) return;
   let ds; try { ds = displays(); } catch { return; } const allow = {};
-  for (const [sid, s] of sessions) if (s.control !== false) allow[sid] = (ds[s.screen || 0] || ds[0]).phys;
+  // while the Windows security screen is up its picture is the main screen, so input maps to the main screen too
+  const main = ds.find((x) => x.primary) || ds[0];
+  for (const [sid, s] of sessions) if (s.control !== false) allow[sid] = (secureShown ? main : (ds[s.screen || 0] || ds[0])).phys;
   try { inputWorker.postMessage({ type: 'sessions', allow }); } catch {}
 }
 // a direct line from the host page to the input process

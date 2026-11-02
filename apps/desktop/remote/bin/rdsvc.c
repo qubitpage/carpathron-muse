@@ -83,6 +83,15 @@ static int uninstall(void) {
 /* ------------------------------------------------------------------ the service: keeps one agent in the console session */
 static SERVICE_STATUS_HANDLE ssh; static SERVICE_STATUS sst; static HANDLE stopEv; static HANDLE agentProc; static DWORD agentSession = (DWORD)-1;
 static CRITICAL_SECTION agentLock;
+/* Ctrl+Alt+Del: Windows only accepts SendSAS from the service process itself, so the agent asks the service with an event
+   that only SYSTEM can signal */
+static HANDLE sasEv = NULL;
+static void sasName(WCHAR *n) { wsprintfW(n, L"Global\\CarpathronRemoteSAS_%08lx", dirId(selfDir)); }
+static void callSAS(void) {
+  typedef VOID (WINAPI *SendSASf)(BOOL);
+  HMODULE m = LoadLibraryW(L"sas.dll"); SendSASf f = m ? (SendSASf)GetProcAddress(m, "SendSAS") : NULL;
+  if (f) { f(FALSE); slog("Ctrl+Alt+Del sent"); } else slog("Ctrl+Alt+Del: sas.dll not available");
+}
 static void setState(DWORD s) { sst.dwCurrentState = s; SetServiceStatus(ssh, &sst); }
 static void killAgent(void) { if (agentProc) { TerminateProcess(agentProc, 0); CloseHandle(agentProc); agentProc = NULL; } agentSession = (DWORD)-1; }
 static void ensureAgent(void) {
@@ -116,15 +125,22 @@ static void WINAPI svcMain(DWORD argc, LPWSTR *argv) {
   ZeroMemory(&sst, sizeof sst); sst.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
   sst.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN | SERVICE_ACCEPT_SESSIONCHANGE;
   stopEv = CreateEventW(NULL, TRUE, FALSE, NULL); InitializeCriticalSection(&agentLock);
+  { WCHAR n[96]; sasName(n); SECURITY_ATTRIBUTES sa; ZeroMemory(&sa, sizeof sa); sa.nLength = sizeof sa;
+    if (ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:P(A;;GA;;;SY)", SDDL_REVISION_1, &sa.lpSecurityDescriptor, NULL)) sasEv = CreateEventW(&sa, FALSE, FALSE, n); }
   setState(SERVICE_RUNNING); slog("service started (%ls)", selfDir);
-  while (WaitForSingleObject(stopEv, 2000) == WAIT_TIMEOUT) ensureAgent(); /* also brings a stopped agent back */
+  for (;;) { /* also brings a stopped agent back */
+    HANDLE w[2] = { stopEv, sasEv }; DWORD r = WaitForMultipleObjects(sasEv ? 2 : 1, w, FALSE, 2000);
+    if (r == WAIT_OBJECT_0) break;
+    if (r == WAIT_OBJECT_0 + 1) { callSAS(); continue; }
+    ensureAgent();
+  }
   EnterCriticalSection(&agentLock); killAgent(); LeaveCriticalSection(&agentLock);
   setState(SERVICE_STOPPED);
 }
 
 /* ------------------------------------------------------------------ the agent (SYSTEM, in the user's session) */
 static HANDLE pipe = INVALID_HANDLE_VALUE; static CRITICAL_SECTION wlock; static volatile LONG secureNow = 0, connected = 0;
-static void out(const char *s, size_t n) { EnterCriticalSection(&wlock); DWORD w; if (pipe != INVALID_HANDLE_VALUE) WriteFile(pipe, s, (DWORD)n, &w, NULL); LeaveCriticalSection(&wlock); }
+static void out(const char *s, size_t n) { EnterCriticalSection(&wlock); if (pipe != INVALID_HANDLE_VALUE) ovWrite(pipe, s, (DWORD)n); LeaveCriticalSection(&wlock); }
 static void outs(const char *s) { out(s, strlen(s)); }
 /* follow the desktop that receives input (Default, or Winlogon for UAC / lock screen / Ctrl+Alt+Del) */
 static void followDesk(void) {
@@ -193,29 +209,32 @@ static int clientAllowed(HANDLE p) {
   CloseHandle(h); return ok;
 }
 static void sas(void) {
-  typedef VOID (WINAPI *SendSASf)(BOOL);
-  HMODULE m = LoadLibraryW(L"sas.dll"); SendSASf f = m ? (SendSASf)GetProcAddress(m, "SendSAS") : NULL;
-  if (f) f(FALSE); else outs("nosas\n");
+  WCHAR n[96]; sasName(n); HANDLE e = OpenEventW(EVENT_MODIFY_STATE, FALSE, n);
+  if (e) { SetEvent(e); CloseHandle(e); return; }
+  slog("Ctrl+Alt+Del: the service event is missing (error %lu)", GetLastError()); outs("nosas\n");
 }
 static int agent(void) {
   dpi(); InitializeCriticalSection(&wlock);
   DWORD sid = 0; ProcessIdToSessionId(GetCurrentProcessId(), &sid);
   WCHAR name[96]; wsprintfW(name, L"\\\\.\\pipe\\CarpathronRemoteAgent-%08lx-%lu", dirId(selfDir), sid);
   SECURITY_ATTRIBUTES sa; ZeroMemory(&sa, sizeof sa); sa.nLength = sizeof sa;
-  if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)", SDDL_REVISION_1, &sa.lpSecurityDescriptor, NULL)) return 1;
+  if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(L"O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)", SDDL_REVISION_1, &sa.lpSecurityDescriptor, NULL)) return 1;
   CreateThread(NULL, 0, watcher, NULL, 0, NULL);
   static char line[65536]; int first = 1;
   for (;;) {
-    HANDLE p = CreateNamedPipeW(name, PIPE_ACCESS_DUPLEX | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0), PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+    HANDLE p = CreateNamedPipeW(name, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0), PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
                                 1, 1 << 20, 1 << 16, 0, &sa);
     if (p == INVALID_HANDLE_VALUE) { slog("agent: pipe busy or blocked (error %lu), stopping", GetLastError()); return 2; } /* someone else owns this name: do not run */
     first = 0;
-    if (!ConnectNamedPipe(p, NULL) && GetLastError() != ERROR_PIPE_CONNECTED) { CloseHandle(p); continue; }
+    { OVERLAPPED o; ZeroMemory(&o, sizeof o); o.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL); DWORD k;
+      BOOL c = ConnectNamedPipe(p, &o); DWORD e = c ? 0 : GetLastError();
+      if (!c && e == ERROR_IO_PENDING) c = GetOverlappedResult(p, &o, &k, TRUE); else if (!c && e == ERROR_PIPE_CONNECTED) c = TRUE;
+      CloseHandle(o.hEvent); if (!c) { CloseHandle(p); continue; } }
     if (!clientAllowed(p)) { slog("agent: refused a program that is not rdinput.exe of this app"); DisconnectNamedPipe(p); CloseHandle(p); continue; }
     EnterCriticalSection(&wlock); pipe = p; LeaveCriticalSection(&wlock);
     InterlockedExchange(&connected, 1); outs("agent 1\n");
     size_t used = 0; DWORD got;
-    while (ReadFile(p, line + used, (DWORD)(sizeof line - 1 - used), &got, NULL) && got) {
+    while (ovRead(p, line + used, (DWORD)(sizeof line - 1 - used), &got) && got) {
       used += got; line[used] = 0; char *s = line, *nl;
       while ((nl = strchr(s, '\n'))) {
         *nl = 0; if (nl > s && nl[-1] == '\r') nl[-1] = 0;

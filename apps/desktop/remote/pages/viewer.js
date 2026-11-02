@@ -235,32 +235,33 @@ window.rd.state().then((st) => { APPNAME = st.app || APPNAME; const b = document
     wy += -e.deltaY * unit * 1.2; wx += e.deltaX * unit * 1.2;
     if (!wt) wt = setTimeout(() => { send({ t: 'in', e: { k: 'wh', dy: Math.round(wy), dx: Math.round(wx) } }); wy = wx = 0; wt = null; }, 30);
   }, { passive: false });
-  const held = new Set(); let vPending = false, vUpLater = false;
+  const held = new Set();
+  // Ctrl+V first sends this PC's clipboard; meanwhile every key event waits here in order, so the remote computer gets
+  // exactly Ctrl down, V down, V up, Ctrl up (a quick Ctrl release can never overtake the V)
+  let keyQ = null;
+  const sendKey = (ev) => { if (keyQ) keyQ.push(ev); else send({ t: 'in', e: ev }); };
   window.addEventListener('keydown', (e) => {
     if (e.ctrlKey && e.altKey && e.code === 'KeyF') { e.preventDefault(); e.stopPropagation(); setFull(!document.body.classList.contains('fs')); return; }
     if (!live || document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
-    // Ctrl+V: first send this PC's clipboard, then the V key, so the remote computer pastes what you just copied
-    if (e.code === 'KeyV' && (e.ctrlKey || e.metaKey) && !e.repeat && $('#clipsync').checked) {
-      e.preventDefault(); held.add(e.code); vPending = true;
-      pushClip().catch(() => {}).then(() => new Promise((r) => setTimeout(r, 250))).then(() => {
-        send({ t: 'in', e: { k: 'kd', code: 'KeyV' } }); vPending = false;
-        if (vUpLater) { vUpLater = false; send({ t: 'in', e: { k: 'ku', code: 'KeyV' } }); }
-      });
+    if (e.code === 'KeyV' && (e.ctrlKey || e.metaKey) && !e.repeat && !keyQ && $('#clipsync').checked) {
+      e.preventDefault(); held.add(e.code); keyQ = [{ k: 'kd', code: 'KeyV' }];
+      const flush = () => { const q = keyQ || []; keyQ = null; for (const ev of q) send({ t: 'in', e: ev }); };
+      pushClip().catch(() => {}).then(() => new Promise((r) => setTimeout(r, 250))).then(flush, flush);
+      setTimeout(() => { if (keyQ) flush(); }, 3000); // never hold the keyboard longer than this
       return;
     }
     // keys without a physical key code (on-screen keyboards, IME, password managers, a remote session inside a remote session,
     // automation tools) carry only the character: send it as text instead of dropping it
     if (!e.code || e.code === 'Unidentified' || e.key === 'Process') {
-      if (e.key && e.key.length <= 2 && e.key !== 'Process' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); send({ t: 'in', e: { k: 'txt', s: e.key } }); }
+      if (e.key && e.key.length <= 2 && e.key !== 'Process' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); sendKey({ k: 'txt', s: e.key }); }
       return;
     }
-    e.preventDefault(); held.add(e.code); send({ t: 'in', e: { k: 'kd', code: e.code } });
+    e.preventDefault(); held.add(e.code); sendKey({ k: 'kd', code: e.code });
   }, true);
   // text from an input method (Chinese, Japanese, emoji picker...) arrives as a finished composition
-  window.addEventListener('compositionend', (e) => { if (live && e.data && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName))) send({ t: 'in', e: { k: 'txt', s: e.data } }); }, true);
+  window.addEventListener('compositionend', (e) => { if (live && e.data && !(document.activeElement && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName))) sendKey({ k: 'txt', s: e.data }); }, true);
   window.addEventListener('keyup', (e) => {
-    if (e.code === 'KeyV' && vPending) { e.preventDefault(); held.delete(e.code); vUpLater = true; return; }
-    if (!live || !held.has(e.code)) return; e.preventDefault(); held.delete(e.code); send({ t: 'in', e: { k: 'ku', code: e.code } });
+    if (!live || !held.has(e.code)) return; e.preventDefault(); held.delete(e.code); sendKey({ k: 'ku', code: e.code });
   }, true);
   window.addEventListener('blur', () => { for (const code of held) send({ t: 'in', e: { k: 'ku', code } }); held.clear(); });
 

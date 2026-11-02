@@ -161,7 +161,7 @@
     const label = { online: `car online · ${st.ip}${fwName}${st.rssi ? ` · Wi-Fi ${st.rssi} dBm` : ''}`, connecting: `connecting to ${st.ip}…`, offline: `car offline · ${st.ip} (retrying)`, simulated: 'simulation (no car IP)' }[st.state] || st.state;
     pill.textContent = label;
     pill.className = 'pill ' + ({ online: 'ok', offline: 'bad' }[st.state] || 'warn');
-    $('#simLabel').textContent = st.state === 'online' ? 'Simulation — mirrors the real car' : 'Simulation — virtual Baby Carpathron';
+    if (!document.querySelector('.sim-card.sim3d-on')) $('#simLabel').textContent = st.state === 'online' ? 'Simulation — mirrors the real car' : 'Simulation — virtual Baby Carpathron';
     if (st.motors) onMotors(st.motors);
   }
 

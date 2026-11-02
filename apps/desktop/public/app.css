@@ -635,3 +635,10 @@ button.chip { cursor: pointer; }
 .wsw { display: inline-block; width: 22px; height: 8px; border-radius: 4px; vertical-align: middle; border: 1px solid #555; }
 .wiring-svg .w-halo.light { stroke: #7d8590; stroke-opacity: .9; }
 .wiring-svg .w-onboard { paint-order: stroke; stroke: rgba(0,0,0,.6); stroke-width: 3px; }
+
+/* ---- practice car 3D views */
+.sim3d-fp { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; background: #000; }
+.sim-card.sim3d-on #sim, .sim-card.sim3d-on #btnSimReset { display: none; }
+.sim3d-tp { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5; }
+.sim3d-bar { position: absolute; left: 10px; bottom: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+.sim-card.sim3d-on .sim-label { z-index: 2; color: #fff; text-shadow: 0 1px 2px #000; }

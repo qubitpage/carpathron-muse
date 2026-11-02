@@ -935,6 +935,8 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         logFn(`Practice car running at ${practice.host}`);
         return send(res, 200, { ok: true, running: true, host: practice.host, faults: practice.state.faults });
       }
+      if (what === 'practice/pose') return send(res, 200, practice ? { running: true, x: practice.state.x, y: practice.state.y, heading: practice.state.head, l: practice.state.l, r: practice.state.r, camera: !practice.state.faults.noCamera, led: practice.state.led, blocked: practice.state.blocked } : { running: false });
+      if (what === 'practice/frame' && m === 'POST') { const buf = await readBody(req, 2 * 1024 * 1024); if (practice && buf.length > 100 && buf[0] === 0xff && buf[1] === 0xd8) practice.setFrame(buf); return send(res, 200, { ok: !!practice }); }
       if (what === 'practice') return send(res, 200, { running: !!practice, host: practice ? practice.host : '', pose: practice ? practice.pose() : null, trail: practice ? practice.state.trail : [], room: practice ? practice.room : null, faults: practice ? practice.state.faults : {} });
       if (!ip) return send(res, 200, { error: 'Set the car address first (Robot → Setup → Find my car), or start the practice car.' });
       try {

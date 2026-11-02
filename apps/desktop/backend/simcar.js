@@ -80,6 +80,8 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
     if (fwd || rot) { const last = st.trail[st.trail.length - 1]; if (!last || Math.hypot(last[0] - st.x, last[1] - st.y) > 5) { st.trail.push([Math.round(st.x), Math.round(st.y)]); if (st.trail.length > 2000) st.trail.shift(); } }
   }, tickMs);
 
+  // the camera picture: the 3D view the app renders from the car's position (Robot page), else a still picture
+  const view = () => (st.frame && Date.now() - st.frameAt < 10000 ? st.frame : VIEW);
   const imuOk = () => !st.faults.noImu && st.sensorMode === 'auto';
   const tofOk = () => !st.faults.noTof && st.sensorMode === 'auto';
   const yaw = () => (st.head * v().gScale * (st.faults.gyroErr || 1)) / 1000 + (st.faults.gyroDrift ? ((Date.now() - st.boot) / 1000) * 0.8 : 0);
@@ -156,7 +158,7 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
       }
       case '/stop': if (st.turn) { st.turn = null; st.turnResult = 3; } drive(0, 0); return res.end('ok');
       case '/led': st.led = Math.min(Number(q.get('v')) || 0, v().ledMax); return res.end('ok');
-      case '/capture': if (st.faults.noCamera) { res.writeHead(500); return res.end('camera not available'); } res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(VIEW);
+      case '/capture': if (st.faults.noCamera) { res.writeHead(500); return res.end('camera not available'); } res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(view());
       case '/turn': {
         if (!imuOk()) return json(res, { ok: false, error: 'no gyro' });
         const deg = Number(q.get('deg')) || 0; st.turn = { target: deg, from: yaw(), t0: Date.now(), speed: Number(q.get('speed')) || 0 }; st.turnResult = 0;
@@ -227,7 +229,7 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
   const stream = http.createServer((req, res) => {
     if (st.faults.noCamera) { res.writeHead(500); return res.end('camera not available'); }
     res.writeHead(200, { 'Content-Type': 'multipart/x-mixed-replace;boundary=123456789000000000000987654321', 'Access-Control-Allow-Origin': '*' });
-    const t = setInterval(() => res.write(Buffer.concat([Buffer.from(`\r\n--123456789000000000000987654321\r\nContent-Type: image/jpeg\r\nContent-Length: ${VIEW.length}\r\n\r\n`), VIEW])), 200);
+    const t = setInterval(() => { const v = view(); res.write(Buffer.concat([Buffer.from(`\r\n--123456789000000000000987654321\r\nContent-Type: image/jpeg\r\nContent-Length: ${v.length}\r\n\r\n`), v])); }, 100);
     req.on('close', () => clearInterval(t));
   });
   return new Promise((resolve, reject) => {
@@ -239,6 +241,7 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
         port: p, host: `127.0.0.1:${p}`, state: st, room,
         pose: () => ({ x: Math.round(st.x), y: Math.round(st.y), heading: Math.round(st.head * 10) / 10 }),
         setFaults: (f) => { st.faults = { ...f }; },
+        setFrame: (buf) => { st.frame = buf; st.frameAt = Date.now(); },
         place: (x, y, heading = 0) => { st.x = x; st.y = y; st.head = heading; st.trail = []; },
         close: () => { clearInterval(tick); api.close(); stream.close(); },
       }));

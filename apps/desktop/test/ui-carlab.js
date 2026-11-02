@@ -86,21 +86,43 @@ const { chromium } = require(process.env.PW || 'playwright');
   const ctlOk = /Point:/.test(pickText) && /laser outline/.test(mapText) && moved > 10 && /cm|clear/.test(hudText) && /Hold to talk/.test(voiceOk) && /Hello test/.test(voiceOk);
   console.log(JSON.stringify({ moved, hud: hudText.replace(/\s+/g, ' ').slice(-80), ctlOk }));
 
-  // Blocks: run the starter mission on the practice car, then firmware blocks → Arduino code
+  // Blocks: every example loads, explains itself in plain words, missions run, board programs make commented code
+  await p.evaluate(() => { try { localStorage.removeItem('mc.blocks2.mission'); localStorage.removeItem('mc.blocks2.firmware'); } catch {} });
   await p.evaluate(() => window.MCui.openRobot('blocks'));
   await p.waitForSelector('#robotBlocks .blocklySvg', { timeout: 15000 });
-  await p.waitForTimeout(500);
+  await p.waitForTimeout(600);
+  const exM = await p.evaluate(() => window.MCblocks.EXAMPLES.mission.map((e) => e.title));
+  const stories = {};
+  for (const t of exM) { await p.click(`#robotBlocks .blk-examples button:has-text("${t}")`); await p.waitForTimeout(400); stories[t] = await p.locator('#robotBlocks .blk-plan').textContent(); }
+  await p.click('#robotBlocks .blk-examples button:has-text("Drive a square")'); await p.waitForTimeout(400);
   await p.screenshot({ path: `${out}/b1-mission.png`, fullPage: true });
-  await p.click('#robotBlocks button:has-text("▶ Run")');
-  await p.waitForFunction(() => /finished|stopped|✕/.test(document.querySelector('#robotBlocks .blk-log').textContent), null, { timeout: 60000 });
+  await p.click('#robotBlocks button:has-text("▶ Run on the car")');
+  await p.waitForFunction(() => /finished|stopped|✕/.test(document.querySelector('#robotBlocks .blk-log').textContent), null, { timeout: 90000 });
   const missionLog = await p.locator('#robotBlocks .blk-log').textContent();
-  await p.click('#robotBlocks .seg button:has-text("Firmware")');
-  await p.waitForSelector('#robotBlocks .blk-code', { timeout: 10000 });
-  await p.waitForTimeout(800);
-  const fwCode = await p.locator('#robotBlocks .blk-code').textContent();
+  await p.click('#robotBlocks .seg button:has-text("Board program")');
+  await p.waitForSelector('#robotBlocks .blk-tabs button', { timeout: 10000 });
+  const exF = await p.evaluate(() => window.MCblocks.EXAMPLES.firmware.map((e) => [e.id, e.title]));
+  const fw = {};
+  for (const [id, t] of exF) {
+    await p.click(`#robotBlocks .blk-examples button:has-text("${t}")`); await p.waitForTimeout(400);
+    await p.click('#robotBlocks .blk-tabs button:has-text("What it does")'); await p.waitForTimeout(200);
+    const story = await p.locator('#robotBlocks .blk-plan').textContent();
+    await p.click('#robotBlocks .blk-tabs button:has-text("What to connect")'); await p.waitForTimeout(500);
+    const parts = await p.locator('#robotBlocks .blk-plan').textContent();
+    await p.click('#robotBlocks .blk-tabs button:has-text("The code")'); await p.waitForTimeout(200);
+    const code = await p.locator('#robotBlocks .blk-code').textContent();
+    fw[id] = { story, parts, code };
+    fs.writeFileSync(`${out}/fw-${id}.ino`, code);
+  }
+  await p.click('#robotBlocks .blk-examples button:has-text("Night light")'); await p.waitForTimeout(300);
+  await p.click('#robotBlocks .blk-tabs button:has-text("What it does")'); await p.waitForTimeout(300);
   await p.screenshot({ path: `${out}/b2-firmware.png`, fullPage: true });
-  const blocksOk = /finished/.test(missionLog) && /digitalWrite\(2, HIGH\)/.test(fwCode) && /void loop\(\)/.test(fwCode) && /pinMode\(2, OUTPUT\)/.test(fwCode);
-  console.log(JSON.stringify({ missionLog: missionLog.slice(0, 200), blocksOk }));
+  await p.click('#robotBlocks .blk-tabs button:has-text("What to connect")'); await p.waitForTimeout(500);
+  await p.screenshot({ path: `${out}/b3-connect.png`, fullPage: true });
+  const blocksOk = /finished/.test(missionLog) && /Do this 4 times/.test(stories['🟦 Drive a square']) && /closer than 30 cm/.test(stories['🚧 Patrol and avoid walls']) && /Stop/.test(stories['🚧 Patrol and avoid walls'])
+    && /Switch the LED on pin 2 ON/.test(fw.blink.story) && /220 Ω/.test(fw.blink.parts) && /digitalWrite\(2, HIGH\);  \/\/ LED on pin 2 ON/.test(fw.blink.code)
+    && /button on pin 4 is pressed/.test(fw.button.story) && /INPUT_PULLUP/.test(fw.button.code) && /sensor on pin 34/.test(fw.night.story) && /servo_13.attach\(13\)/.test(fw.servo.code) && /tone\(15, 2000, 150\)/.test(fw.beep.code);
+  console.log(JSON.stringify({ missionLog: missionLog.slice(0, 120), square: stories['🟦 Drive a square'].slice(0, 200), blinkStory: fw.blink.story, blocksOk }));
 
   // Board & parts
   await p.evaluate(() => window.MCui.openRobot('parts'));

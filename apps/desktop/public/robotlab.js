@@ -353,7 +353,8 @@
   // ------------------------------------------------------------------ 🔧 Board & parts
   const CAR_BUILD = (v = {}) => ([
     { id: 'motors', name: 'L298N motor driver (car)', part: 'l298n', fixed: true, assign: { ENA: v.rEn ?? 12, IN1: v.rFwd ?? 13, IN2: v.rBack ?? 14, ENB: v.lEn ?? 2, IN3: v.lFwd ?? 15, IN4: v.lBack ?? 33 } },
-    { id: 'sensors', name: 'VL53L0X + MPU-6050 (I2C)', part: 'vl53l0x', fixed: true, assign: { SDA: v.sda ?? 3, SCL: v.scl ?? 1 } },
+    { id: 'laser', name: 'VL53L0X laser', part: 'vl53l0x', fixed: true, assign: { SDA: v.sda ?? 3, SCL: v.scl ?? 1 } },
+    { id: 'gyro', name: 'MPU-6050 gyro', part: 'mpu6050', fixed: true, assign: { SDA: v.sda ?? 3, SCL: v.scl ?? 1 } },
     { id: 'headlight', name: 'Headlight LED (on the board)', part: 'buzzer', fixed: true, builtin: true, assign: { signal: 4 } },
   ]);
   const pst = { data: null, board: 'esp32cam', builds: {}, sel: null, wizard: null };
@@ -377,10 +378,10 @@
     const info = h('div', { class: 'card pin-info' });
     const drawing = h('div', { class: 'card board-card' });
     const buildCard = h('div', { class: 'card' });
-    const schem = h('div', { class: 'card' });
+    const schem = h('div', { class: 'card wiring-card' });
     el.append(h('p', { class: 'small muted settings-intro' }, 'Pick a board to see what every pin can do. Add the parts of your robot: Muse picks free pins that can do the job, warns about boot pins and pins used twice, draws the wiring and writes the starter code. On the Baby Carpathron car (ESP32-CAM) the car\'s own wiring is already in, and you can test a free pin on the real car.'),
       h('div', { class: 'row parts-top' }, h('label', { class: 'inline' }, 'Board ', pick), h('span', { class: 'small muted' }, board.chip)),
-      h('div', { class: 'parts-grid' }, h('div', {}, drawing, info), h('div', {}, buildCard, schem)));
+      h('div', { class: 'parts-grid' }, h('div', {}, drawing, info), h('div', {}, buildCard)), schem);
 
     function drawBoard() {
       drawing.innerHTML = '';
@@ -478,8 +479,11 @@
     function drawSchem() {
       schem.innerHTML = '';
       const list = placed().filter((x) => !x.builtin);
-      schem.append(h('h3', {}, '🔌 Wiring'), h('p', { class: 'small muted' }, 'Every wire from the board to each part: red = power, grey = ground, blue = I2C (shared), purple = PWM, green = signal. Hover a part to follow its wires. Connect all grounds together.'),
-        list.length ? schematicSvg(board, list, partsById) : h('p', { class: 'small muted' }, 'Add a part to see its wiring.'));
+      schem.append(h('h3', {}, '🔌 Wiring diagram'), h('p', { class: 'small muted' }, `How to connect everything, like on the real hardware: the ${board.name.replace(/\s*\(.*\)/, '')} in the middle, each module with its own pin names, and every wire in its colour.`));
+      const box = h('div');
+      schem.append(box);
+      if (!list.length) box.append(h('p', { class: 'small muted' }, 'Add a part (＋ Add a part) to see how it is wired.'));
+      else window.MCwiring.render(box, { board, placed: list, partsById, car: pst.board === 'esp32cam', h });
     }
     drawBoard(); drawInfo(pst.sel != null ? board.pins.find((x) => x.gpio === pst.sel) : null); drawBuild(); drawWizard(); drawSchem();
   }

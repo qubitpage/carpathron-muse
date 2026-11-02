@@ -599,3 +599,39 @@ button.chip { cursor: pointer; }
 .studio-plot { width: 100%; height: 220px; border-radius: 8px; border: 1px solid var(--line); display: block; }
 .libs .row input { flex: 1; }
 .libs .list { max-height: 50vh; overflow: auto; }
+.blk-examples { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 4px 10px; }
+.blk-plan { padding: 12px 14px; }
+.blk-plan h4 { margin: 0 0 6px; }
+.blk-story { margin: 0; padding-left: 0; list-style: none; counter-reset: s; font-size: 13.5px; line-height: 1.55; }
+.blk-story li { position: relative; padding-left: 14px; }
+.blk-story li::before { content: '•'; position: absolute; left: 0; color: var(--accent); }
+.blk-story li.head { font-weight: 600; color: var(--warn); padding-left: 0; margin-top: 4px; }
+.blk-story li.head::before { content: ''; }
+.blk-parts { margin: 0 0 8px; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.blk-tabs { flex-wrap: wrap; }
+
+/* ---- wiring diagram */
+.wiring-card { margin-top: 14px; }
+.wiring-wrap { overflow-x: auto; border-radius: 10px; background: #0c1015; border: 1px solid var(--line); }
+.wiring-svg { display: block; min-width: 900px; width: 100%; height: auto; }
+.wiring-svg text { font-family: var(--font); letter-spacing: 0; }
+.wiring-svg .w-title { fill: #fff; font-size: 12.5px; font-weight: 600; }
+.wiring-svg .w-titled { fill: #2a2000; font-size: 12px; font-weight: 700; }
+.wiring-svg .w-chip { fill: #8aa0b8; font-size: 11px; }
+.wiring-svg .w-small { fill: #ddd; font-size: 10px; }
+.wiring-svg .w-pinl { fill: #f1f1f1; font-size: 11px; font-family: var(--mono); }
+.wiring-svg .w-line { fill: none; stroke-width: 3.2; stroke-linecap: round; }
+.wiring-svg .w-halo { fill: none; stroke: #000; stroke-opacity: .55; stroke-width: 6; stroke-linecap: round; }
+.wiring-svg .w-wire { cursor: pointer; }
+.wiring-svg.focus .w-wire { opacity: .12; }
+.wiring-svg.focus .w-wire.on { opacity: 1; }
+.wiring-svg .w-wire.on .w-line { stroke-width: 4.5; }
+.wiring-svg .w-mod, .wiring-svg .w-pin { cursor: pointer; }
+.wiring-info { min-height: 20px; margin: 8px 2px; color: var(--warn); }
+.wiring-list summary { cursor: pointer; margin: 6px 0; }
+.wiring-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.wiring-table th, .wiring-table td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.wiring-table tr:hover td { background: var(--panel-2); }
+.wsw { display: inline-block; width: 22px; height: 8px; border-radius: 4px; vertical-align: middle; border: 1px solid #555; }
+.wiring-svg .w-halo.light { stroke: #7d8590; stroke-opacity: .9; }
+.wiring-svg .w-onboard { paint-order: stroke; stroke: rgba(0,0,0,.6); stroke-width: 3px; }

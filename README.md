@@ -24,20 +24,33 @@ by Qubitpage LIMITED ([qubitpage.com/products](https://qubitpage.com/products/))
 ## ⬇️ Download
 
 <p align="center">
-  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.9.6_(129_MB)-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v1.9.7-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
   <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.1.6.apk_(27_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
-| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.9.6) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. This hackathon edition does not update itself: install a newer build over the old one (chats and settings are kept). Portable: unzip and run `Carpathron.exe`. |
+| 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v1.9.7) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) · or no install: [**Muse-Carpathron-win-x64-portable.zip**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-win-x64-portable.zip) | Double-click it. If SmartScreen appears: *More info → Run anyway*. This hackathon edition does not update itself: install a newer build over the old one (chats and settings are kept). Portable: unzip and run `Carpathron.exe`. |
 | 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.1.6) | [**CarpathronAvatar-1.1.6.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.1.6.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware | [`firmware/carpathron_car`](firmware/carpathron_car) (also built into the app: Robot page → ⬆ Update car firmware) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 | 🖥 **Carpathron Remote** – the remote desktop app on its own (Windows, Linux) | [qubitpage.com/remote](https://qubitpage.com/remote/) | For PCs you want to reach or help that do not run Muse Carpathron. Same IDs and passwords. |
 
-All files of this version: **[Release v1.9.6](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.9.6)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
+All files of this version: **[Release v1.9.7](https://github.com/qubitpage/carpathron-muse/releases/tag/v1.9.7)** (all releases: [Releases](https://github.com/qubitpage/carpathron-muse/releases)) · alternative split installer (parts + `Install.bat`) in [`downloads/windows`](downloads/windows) · install notes in [`downloads/README.md`](downloads/README.md).
 
-## What's new in 1.9.6
+## What's new in 1.9.7 — robot tools
+
+- **Car firmware 2.2:** every setting of the car can be changed from the app, the car tests itself, firmware updates over **Wi-Fi with undo**, and a pin test endpoint. Flash it once over USB from Robot → Setup → ⬆ Car firmware.
+- **🛠 Car settings:** all 32 settings in groups (motors, driving and safety, camera, sensors, light, name and hotspot), each explained, checked before saving (camera / memory pins, pins used twice, boot pins), with a clickable drawing of the ESP32-CAM pins.
+- **🩺 Health & calibration:** the car checks its camera, memory, Wi-Fi, I2C bus, laser, gyro and each side of wheels, with the likely cause and a one-click fix; a 7-step **calibration wizard** (gyro zero, motor dead zone, straight driving, real speed, laser offset, exact turns, camera picture); **✅ Make my robot ready**; the **robot passport** (history of changes and checks).
+- **🧱 Blocks:** missions that drive the car, **teach & repeat** (drive by hand, the car repeats it), and firmware made from blocks for ESP32 / Uno / Mega / Pico.
+- **🔧 Board & parts:** pin drawings for 6 boards, a library of 19 robot parts, an automatic pin planner, an interactive wiring schematic and starter code.
+- **Driving:** smooth keyboard and game-controller driving, a driving display over the video (heading, distance ahead, Wi-Fi, wheels), **🗣 voice control** and the **robot's own voice** (a phone on the car can be its mouth and ears), Quest mini-map and haptics.
+- **🧊 3D plan view:** laser room outlines from room scans, the objects the camera named, the car's position and path, click the floor → *Go there*.
+- **Practice car:** a simulated car in a virtual room with switchable faults, to try everything without hardware.
+- **Firmware studio:** colours, suggestions while typing, a pin check before every upload, a serial plotter and an Arduino library manager.
+- **AI tools:** robot_settings, robot_diagnose, board_pins, robot_say.
+
+### 1.9.6
 
 - **Hackathon edition:** the automatic updater is removed — Muse Carpathron is the version demonstrated for the Meta AI hackathon and no longer updates itself.
 - **Security:** dependencies updated — `npm audit` finds no known vulnerabilities in the app's libraries (electron-updater removed, spreadsheet and file-tool libraries patched); build tools on electron-builder 26.

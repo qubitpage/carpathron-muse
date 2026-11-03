@@ -27,6 +27,13 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.1.0:** a rebuilt Remote desktop (the same as Carpathron Remote 1.3.0): a native input helper so mouse and keyboard work on every PC,
+> no freeze when minimizing or dragging windows, the picture restarts by itself if Windows stops the capture, automatic
+> reconnect, remote restart, trusted computers (connect to your own PCs without a password), change your ID, actual size
+> view, Ctrl+Alt+Del and Refresh in the Keys menu, and an easy way out of full screen. The **✦ AI technician** works like a
+> real technician: it diagnoses from the output, retries failed commands another way and checks its own fixes; commands
+> that only read run without asking; you can chat with it while it works and switch the AI service in its panel; the
+> Supervisor's findings go back to the AI in both modes.
 > **2.0.3:** remote desktop fix: on some Windows PCs the mouse and keyboard did not work on the remote screen and the AI technician's commands failed ("spawn powershell.exe ENOENT", a broken PATH). Windows programs are now started by their full path.
 > **2.0.2:** the **✦ AI technician** in the built-in Remote desktop and **✦ AI DevOps** in its SSH terminal: give a job
 > and Muse works on the remote PC (sees the screen, clicks, types, runs PowerShell / bash, installs and removes software,

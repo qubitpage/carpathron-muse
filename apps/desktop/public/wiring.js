@@ -158,7 +158,7 @@
       for (const p of m.mod.pins) {
         const key = `${m.pl.id}:${p.name}`;
         if (p.kind === 'gnd') { const bp = boardPinFor('GND', m.side); if (bp) wire(bp, key, BLACK, `GND: ${label(bp)} ↔ ${label(key)} — every ground must be connected together`, 'Dupont', connName(p.conn)); continue; }
-        if (p.kind === 'power') { const bp = boardPinFor(m.part.power === '5V' || board.logic === '5V' ? '5V' : '3V3', m.side); if (bp) wire(bp, key, RED, `Power: ${label(bp)} → ${label(key)}`, 'Dupont', connName(p.conn)); continue; }
+        if (p.kind === 'power') { const bp = boardPinFor(m.part.power === '5V' ? '5V' : m.part.power === '3V3' ? '3V3' : Number(board.logic) >= 5 ? '5V' : '3V3', m.side); if (bp) wire(bp, key, RED, `Power: ${label(bp)} → ${label(key)}`, 'Dupont', connName(p.conn)); continue; }
         if (p.kind === 'power5') { const bp = boardPinFor('5V', m.side); if (bp && car) wire(key, bp, RED, `5 V from the driver powers the board: ${label(key)} → ${label(bp)}`, connName(p.conn), 'Dupont'); continue; }
         if (p.kind === 'vbat') continue;
         const g = m.pl.assign ? m.pl.assign[p.role] : null;

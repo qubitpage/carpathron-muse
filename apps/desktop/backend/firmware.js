@@ -116,4 +116,44 @@ async function rollback(host, key) {
   return r.json().catch(() => ({ ok: false, error: 'no answer' }));
 }
 
-module.exports = { SKETCH, FQBN, FQBN_BOARD, otaKey, writeKey, buildsDir, listBuilds, newBuildDir, sendOta, otaInfo, rollback, bundledDir, versionOf, installDir, prepare, pickPort, cmpVersion };
+// ---- Arduino Mega 2560 sensor hub (firmware/carpathron_mega): HC-SR04, MPU-6050, DHT11 → the car over Serial1
+const MEGA_SKETCH = 'carpathron_mega';
+const MEGA_FQBN = 'arduino:avr:mega:cpu=atmega2560';
+const MEGA_IDS = [['2341', '0042'], ['2341', '0010'], ['2A03', '0042'], ['2A03', '0010'], ['2341', '0242']];   // genuine / .org Mega 2560 (ATmega16U2)
+function bundledMegaDir() {
+  const cands = [];
+  if (process.resourcesPath) cands.push(path.join(process.resourcesPath, 'firmware', MEGA_SKETCH));
+  cands.push(path.join(__dirname, '..', '..', '..', 'firmware', MEGA_SKETCH));
+  return cands.find((d) => fs.existsSync(path.join(d, `${MEGA_SKETCH}.ino`))) || null;
+}
+const megaVersionOf = (text) => { const m = String(text || '').match(/#define\s+HUB_VERSION\s+"([^"]+)"/); return m ? m[1] : null; };
+// Copy the bundled Mega sketch into <workspace>/firmware/carpathron_mega (an edited copy is kept as backup-mega-<time>)
+function prepareMega(settings) {
+  const src = bundledMegaDir();
+  if (!src) throw new Error('The Mega sensor hub firmware is not included in this installation.');
+  const dst = path.join(settings.workspace, 'firmware', MEGA_SKETCH);
+  const files = fs.readdirSync(src).filter((f) => fs.statSync(path.join(src, f)).isFile());
+  let backup = null;
+  if (fs.existsSync(dst) && !files.every((f) => fs.existsSync(path.join(dst, f)) && fs.readFileSync(path.join(dst, f)).equals(fs.readFileSync(path.join(src, f))))) {
+    backup = path.join(settings.workspace, 'firmware', `backup-mega-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`);
+    fs.renameSync(dst, backup);
+  }
+  fs.mkdirSync(dst, { recursive: true });
+  for (const f of files) fs.copyFileSync(path.join(src, f), path.join(dst, f));
+  return { dir: dst, version: megaVersionOf(fs.readFileSync(path.join(dst, `${MEGA_SKETCH}.ino`), 'utf8')), backup };
+}
+// The Mega's port: arduino-cli recognised it as a Mega, or its USB id is a Mega's; never the car's port.
+function pickMegaPort(listJson, carPort) {
+  let j; try { j = JSON.parse(listJson); } catch { return null; }
+  const ports = (j.detected_ports || j.ports || (Array.isArray(j) ? j : [])).map((p) => ({ port: p.port || p, boards: p.matching_boards || p.boards || [] }));
+  const serial = ports.filter(({ port }) => port && port.address && port.address !== carPort && (/serial/i.test(port.protocol || '') || /^COM\d+|ttyUSB|ttyACM|cu\./.test(port.address)));
+  const hex = (v) => String(v || '').toUpperCase().replace(/^0X/, '');
+  const byBoard = serial.find(({ boards }) => boards.some((b) => /arduino:avr:mega/.test(b.fqbn || '')));
+  const byId = serial.find(({ port }) => port.properties && MEGA_IDS.some(([v, p]) => hex(port.properties.vid) === v && hex(port.properties.pid) === p));
+  const hit = byBoard || byId;
+  if (hit) return { address: hit.port.address, how: byBoard ? 'recognised as an Arduino Mega' : 'Arduino USB id' };
+  const usb = serial.filter(({ port }) => port.properties && port.properties.vid);
+  return usb.length === 1 ? { address: usb[0].port.address, how: 'the only USB board connected (not the car)' } : null;
+}
+
+module.exports = { MEGA_SKETCH, MEGA_FQBN, bundledMegaDir, megaVersionOf, prepareMega, pickMegaPort, SKETCH, FQBN, FQBN_BOARD, otaKey, writeKey, buildsDir, listBuilds, newBuildDir, sendOta, otaInfo, rollback, bundledDir, versionOf, installDir, prepare, pickPort, cmpVersion };

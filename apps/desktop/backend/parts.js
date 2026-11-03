@@ -24,6 +24,10 @@ const PARTS = [
     text: 'Gyro + accelerometer: exact turns, heading for maps, bump detection.', tips: ['Mount it flat and firm in the middle of the chassis.', 'Keep the car still for a second after power-on (it measures its zero).'], test: 'Health → gyro, Calibration → Gyro zero.', buy: 'modul accelerometru giroscop MPU6050 GY-521' },
   { id: 'hcsr04', name: 'HC-SR04 ultrasonic distance', kind: 'Sensors', power: '5V', mA: 15, signals: [{ role: 'TRIG', needs: ['out'] }, { role: 'ECHO', needs: ['in'], note: '5 V signal: needs a divider (1 kΩ + 2 kΩ) on 3.3 V boards' }],
     text: '2 cm – 4 m with sound; cheap, wide beam (sees chair legs the laser misses).', tips: ['On ESP32 / Pico use the HC-SR04P (3.3 V version) or a voltage divider on ECHO.'], test: 'Print the distance every 100 ms.', buy: 'senzor ultrasonic HC-SR04' },
+  { id: 'dht11', name: 'DHT11 temperature + humidity', kind: 'Sensors', power: 'both', mA: 3, signals: [{ role: 'DATA', needs: ['in', 'out'] }],
+    text: 'Temperature (±2 °C) and humidity (±5 %), one reading every 2 s on a single wire.', tips: ['The 3-pin module already has its pull-up resistor.', 'Put it by a vent, away from the motor driver\'s heat.'], test: 'Print temperature and humidity every 2 s.', lib: 'DHT sensor library (Adafruit) — or the hub firmware reads it without a library', buy: 'senzor temperatura umiditate DHT11' },
+  { id: 'carlink', name: 'Link to the ESP32-CAM car (serial)', kind: 'Boards', power: '5V', mA: 0, signals: [{ role: 'TX', needs: ['uart'], note: 'to ESP32 RXD through 1 kΩ, with 2 kΩ from ESP32 RXD to GND (5 V → 3.3 V)' }, { role: 'RX', needs: ['uart'], note: 'from ESP32 TXD, direct' }],
+    text: 'Two wires to the car\'s ESP32-CAM (RXD/TXD) plus 5 V and GND: the Mega sends its sensor readings to the car 20 times a second.', tips: ['Unplug the 5 V wire when you upload to the Mega over USB.', 'Update the car over Wi-Fi once this link is wired (its USB serial shares those pins).'], test: 'Robot → Setup: "Mega sensor hub: connected".', buy: 'fire jumper dupont' },
   { id: 'ir-avoid', name: 'IR obstacle module', kind: 'Sensors', power: '3V3', mA: 20, signals: [{ role: 'OUT', needs: ['in'] }],
     text: 'Sees an obstacle 2–30 cm away (LOW = obstacle). The kit has two.', tips: ['Turn the knob until its LED lights at the distance you want.'], test: 'Hand in front: the value changes.', buy: 'senzor obstacole infrarosu' },
   { id: 'tcrt5000', name: 'Line follower (TCRT5000)', kind: 'Sensors', power: '3V3', mA: 20, signals: [{ role: 'OUT', needs: ['in'] }],
@@ -81,7 +85,7 @@ function plan(boardId, partId, used = {}, { i2c } = {}) {
     if (boot(pick) || pick.use) notes.push(`${s.role} on ${pick.label}: ${pick.note || pick.use}`);
     if (s.needs.includes('uart') && board.id === 'uno') notes.push(`${s.role}: use SoftwareSerial on these pins (pins 0/1 are the USB serial).`);
   }
-  if (part.power === '5V' && board.logic === '3.3V') notes.push('Powered from 5 V but the board works at 3.3 V: check that its output signals are 3.3 V safe.');
+  if (part.power === '5V' && Number(board.logic) < 5) notes.push('Powered from 5 V but the board works at 3.3 V: check that its output signals are 3.3 V safe.');
   if (part.mA >= 200) notes.push(`Draws up to ${part.mA} mA: power it from the 5 V supply, not from a board pin.`);
   return { part, assign, notes, ok: true };
 }
@@ -93,7 +97,7 @@ function wires(boardId, placed) {
   for (const pl of placed) {
     const part = byId(pl.part);
     if (!part) continue;
-    const pw = part.power === 'battery' ? 'battery +' : part.power === '5V' ? '5V' : board.logic === '5V' ? '5V' : '3V3';
+    const pw = part.power === 'battery' ? 'battery +' : part.power === '5V' ? '5V' : part.power === '3V3' ? '3V3' : Number(board.logic) >= 5 ? '5V' : '3V3';
     out.push({ part: pl.id, from: pw, to: part.power === 'battery' ? '+12V' : 'VCC', kind: 'power' });
     out.push({ part: pl.id, from: 'GND', to: 'GND', kind: 'gnd' });
     for (const [role, gpio] of Object.entries(pl.assign || {})) out.push({ part: pl.id, from: gpio, to: role, kind: part.bus === 'i2c' ? 'i2c' : /EN|PWM/.test(role) || part.signals.find((s) => s.role === role && s.needs.includes('pwm')) ? 'pwm' : 'signal' });

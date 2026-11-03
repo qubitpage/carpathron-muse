@@ -74,10 +74,41 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
     assert.ok(/Wire.setSDA\(OLED_SDA\)/.test(code) && /#define SERVO_SIGNAL 15/.test(code) && /pinMode\(SERVO_SIGNAL, OUTPUT\)/.test(code));
   });
 
+  await step('Mega sensor hub: bundled sketch, port picking (never the car), DHT11 + car link on the Mega pins, tool schema', () => {
+    const fw = require('../backend/firmware');
+    const PT = require('../backend/parts');
+    const dir = fw.bundledMegaDir();
+    assert.ok(dir && fs.existsSync(path.join(dir, 'carpathron_mega.ino')), 'the Mega sketch is bundled');
+    const ino = fs.readFileSync(path.join(dir, 'carpathron_mega.ino'), 'utf8');
+    assert.ok(/^\d+\.\d+\.\d+$/.test(fw.megaVersionOf(ino)));
+    for (const pin of ['TRIG_PIN = 22', 'ECHO_PIN = 23', 'DHT_PIN = A0', 'Serial1.begin(115200)', '$CAR,']) assert.ok(ino.includes(pin), `sketch: ${pin}`);
+    const car = fs.readFileSync(path.join(fw.bundledDir(), 'carpathron_car.ino'), 'utf8');
+    assert.ok(/"\$CAR,"|startsWith\("CAR,"\)/.test(car) && /sensors=auto\|ir\|mega\|off/.test(car), 'car firmware understands the hub');
+    const list = (ports) => JSON.stringify({ detected_ports: ports });
+    const sp = (address, vid, pid, boards) => ({ port: { address, protocol: 'serial', properties: vid ? { vid, pid } : {} }, ...(boards ? { matching_boards: boards } : {}) });
+    assert.deepStrictEqual(fw.pickMegaPort(list([sp('COM3', '0x1A86', '0x7523'), sp('COM5', '0x2341', '0x0042')]), 'COM3').address, 'COM5');
+    assert.strictEqual(fw.pickMegaPort(list([sp('COM3', '0x1A86', '0x7523'), sp('COM7', '0x1A86', '0x7523', [{ fqbn: 'arduino:avr:mega' }])]), 'COM3').address, 'COM7');
+    assert.strictEqual(fw.pickMegaPort(list([sp('COM3', '0x1A86', '0x7523')]), 'COM3'), null, 'never the car');
+    assert.strictEqual(fw.pickMegaPort(list([sp('COM3', '0x1A86', '0x7523'), sp('COM9', '0x1A86', '0x7523')]), 'COM3').address, 'COM9', 'the only other USB board');
+    assert.strictEqual(fw.pickMegaPort(list([sp('COM8', '0x1A86', '0x7523'), sp('COM9', '0x1A86', '0x7523')]), null), null, 'two unknown boards: ask');
+    const used = {}; const placed = [];
+    for (const [id, part, assign] of [['link', 'carlink', { TX: 18, RX: 19 }], ['eyes', 'hcsr04', { TRIG: 22, ECHO: 23 }], ['gyro', 'mpu6050', { SDA: 20, SCL: 21 }], ['climate', 'dht11', { DATA: 54 }]]) {
+      placed.push({ id, part, assign });
+      const chk = boards.checkPins(boards.BOARDS.mega2560, Object.fromEntries(Object.entries(assign).map(([r, g]) => [`${id}.${r}`, g])));
+      assert.ok(!chk.some((x) => x.level === 'error'), `${part}: ${JSON.stringify(chk)}`);
+      Object.values(assign).forEach((g) => { assert.ok(!used[g], `pin ${g} twice`); used[g] = id; });
+    }
+    assert.ok(PT.plan('mega2560', 'dht11', used).ok);
+    assert.ok(PT.wires('mega2560', placed).length >= 12);
+    const xt = require('../backend/xtools');
+    const def = xt.XTOOLS.find((t) => t.name === 'robot_firmware');
+    assert.ok(def && JSON.stringify(def).includes('"mega"'), 'robot_firmware has the mega action');
+  });
+
   const car = await sim.start();
   await step('practice car: settings read, live change, restart change, pin swap, factory reset', async () => {
     const s = await C.getSettings(car.host);
-    assert.strictEqual(s.fw, '2.2.0'); assert.strictEqual(s.values.rEn, 12);
+    assert.strictEqual(s.fw, '2.3.0'); assert.strictEqual(s.values.rEn, 12);
     await C.setSetting(car.host, 'maxPct', 60);
     let s2 = await C.getSettings(car.host);
     assert.strictEqual(s2.values.maxPct, 60); assert.strictEqual(s2.restartPending, false);
@@ -174,17 +205,17 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
     const info = await fw.otaInfo(c2.host);
     assert.ok(info.ota && info.keySet && !info.other);
     const bin = path.join(tmpd, 'carpathron_car.ino.bin');
-    fs.writeFileSync(bin, Buffer.concat([Buffer.from([0xe9]), Buffer.alloc(3000), Buffer.from('FWVER=2.2.1')]));
+    fs.writeFileSync(bin, Buffer.concat([Buffer.from([0xe9]), Buffer.alloc(3000), Buffer.from('FWVER=2.3.1')]));
     assert.strictEqual((await fw.sendOta(c2.host, bin, 'wrong-key')).ok, false);
     const bad = path.join(tmpd, 'bad.bin'); fs.writeFileSync(bad, Buffer.alloc(3000));
     assert.ok(/damaged/.test((await fw.sendOta(c2.host, bad, key)).error));
     const r = await fw.sendOta(c2.host, bin, key);
     assert.ok(r.ok, JSON.stringify(r)); await sleep(500);
-    assert.strictEqual((await C.getSettings(c2.host)).fw, '2.2.1');
+    assert.strictEqual((await C.getSettings(c2.host)).fw, '2.3.1');
     assert.ok((await fw.otaInfo(c2.host)).other.valid, 'the previous firmware is kept');
     assert.strictEqual((await fw.rollback(c2.host, 'nope')).ok, false);
     assert.ok((await fw.rollback(c2.host, key)).ok); await sleep(500);
-    assert.strictEqual((await C.getSettings(c2.host)).fw, '2.2.0');
+    assert.strictEqual((await C.getSettings(c2.host)).fw, '2.3.0');
     // builds list keeps the newest 8
     for (let i = 0; i < 10; i++) { const d = fw.newBuildDir(tmpd, `2.2.${i}`); fs.writeFileSync(path.join(d, 'carpathron_car.ino.bin'), 'x'); fs.writeFileSync(path.join(d, 'build.json'), JSON.stringify({ version: `2.2.${i}`, at: new Date(Date.now() + i * 1000).toISOString() })); }
     const list = fw.listBuilds(tmpd);
@@ -267,7 +298,7 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
     const pr = await api('/api/robot/car/practice', {});
     assert.ok(pr.running && /127\.0\.0\.1/.test(pr.host));
     const s = await api('/api/robot/car/settings');
-    assert.strictEqual(s.fw, '2.2.0');
+    assert.strictEqual(s.fw, '2.3.0');
     const bad = await api('/api/robot/car/settings', { changes: { rEn: 5 } });
     assert.strictEqual(bad.ok, false); assert.ok(bad.errors.rEn);
     const good = await api('/api/robot/car/settings', { changes: { maxPct: 70, name: 'Rover', apPass: 'secret123' } });

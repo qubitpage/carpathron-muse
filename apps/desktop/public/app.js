@@ -465,9 +465,9 @@
     el.append(h('div', { class: 'settings' }, buildRobotCard(S.settings), window.MClab ? window.MClab.firmwareCard() : null,
       h('div', { class: 'card' }, h('h3', {}, 'Sensors on the car'), live,
         h('div', { class: 'row' }, h('span', { class: 'small' }, 'Sensor mode:'),
-          ...[['auto', 'Laser + gyro (I2C)'], ['ir', 'IR obstacle modules (kit)'], ['off', 'None']].map(([m, label]) => h('button', { class: 'btn tiny', onclick: async () => {
+          ...[['auto', 'Auto (I2C sensors or Mega)'], ['mega', 'Arduino Mega hub'], ['ir', 'IR obstacle modules (kit)'], ['off', 'None']].map(([m, label]) => h('button', { class: 'btn tiny', onclick: async () => {
             const r = await api('/api/robot/sensor-mode', { body: { mode: m } }); toast(r.error || `Car set to "${label}" — it restarts (about 5 s)`, !!r.error); } }, label))),
-        h('p', { class: 'small muted' }, 'On the free RXD/TXD pins, either: VL53L0X laser distance + MPU-6050 gyro (I2C — the car stops 15 cm before obstacles, exact turns), or two IR obstacle modules from a sensor kit ("Avoid": RXD = front-left, TXD = front-right — the car refuses to drive into what they see). See Guide 3.4.2. Changing the mode restarts the car.'))));
+        h('p', { class: 'small muted' }, 'On the free RXD/TXD pins, either: an Arduino Mega sensor hub (HC-SR04 eyes, MPU-6050, DHT11 — firmware 2.3, see Guide 3.4.3), VL53L0X laser distance + MPU-6050 gyro (I2C — the car stops 15 cm before obstacles, exact turns), or two IR obstacle modules from a sensor kit ("Avoid": RXD = front-left, TXD = front-right — the car refuses to drive into what they see). See Guide 3.4.2. Changing the mode restarts the car.'))));
     const tick = async () => {
       if (S.view !== 'robot' || S.robotTab !== 'setup' || !document.body.contains(live)) return;
       try {
@@ -475,7 +475,8 @@
         const sn = r.sensors;
         live.innerHTML = '';
         live.append(h('div', {}, `Car: ${r.state}${r.ip ? ` · ${r.ip}` : ''}${r.version ? ` · firmware ${r.version}` : r.firmware === 'carpathron' ? ' · firmware older than 2.0 (update it)' : ''}${r.rssi ? ` · Wi-Fi ${r.rssi} dBm` : ''}`),
-          sn ? h('div', {}, `Mode: ${sn.mode || 'auto'} · ${sn.ir ? `IR left ${sn.irLeft ? '⛔ obstacle' : 'free'} · IR right ${sn.irRight ? '⛔ obstacle' : 'free'}` : `Distance ahead: ${sn.tof ? (sn.dist > 0 ? `${Math.round(sn.dist / 10)} cm` : 'nothing within 2 m') : 'no sensor'} · Heading: ${sn.imu ? `${Math.round(sn.yaw)}°` : 'no gyro'}`}${sn.blocked ? ' · ⛔ blocked by an obstacle' : ''}`) : h('div', { class: 'muted' }, 'No sensor data (firmware 2.0+ reports it).'));
+          sn ? h('div', {}, `Mode: ${sn.mode || 'auto'} · ${sn.ir ? `IR left ${sn.irLeft ? '⛔ obstacle' : 'free'} · IR right ${sn.irRight ? '⛔ obstacle' : 'free'}` : `Distance ahead: ${sn.tof ? (sn.dist > 0 ? `${Math.round(sn.dist / 10)} cm` : 'nothing within 2 m') : 'no sensor'} · Heading: ${sn.imu ? `${Math.round(sn.yaw)}°` : 'no gyro'}`}${sn.blocked ? ' · ⛔ blocked by an obstacle' : ''}`) : h('div', { class: 'muted' }, 'No sensor data (firmware 2.0+ reports it).'),
+          sn && sn.mega != null ? h('div', {}, sn.mega ? `Mega sensor hub: connected${sn.tempC != null ? ` · ${sn.tempC} °C` : ''}${sn.humidity != null ? ` · ${sn.humidity} % humidity` : ''}${sn.tilt != null ? ` · tilt ${sn.tilt}°${sn.tilt > 35 ? ' ⚠ tipped over?' : ''}` : ''}${sn.pir === 1 ? ' · 👀 motion' : ''}` : 'Mega sensor hub: not connected') : null);
       } catch (e) { live.textContent = e.message; }
       setTimeout(tick, 1000);
     };

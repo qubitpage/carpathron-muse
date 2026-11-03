@@ -27,6 +27,9 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.2.0:** the **Arduino Mega sensor hub**: car firmware 2.3 takes heading, distance (HC-SR04 eyes), temperature,
+> humidity and tilt from an Arduino Mega 2560 over two wires; Robot → Setup has a **🔌 Flash the Mega** button and the new
+> sensor mode, Board & parts has the Mega wiring (with a DHT11 part and the car link), Guide 3.4.3 has every wire.
 > **2.1.0:** a rebuilt Remote desktop (the same as Carpathron Remote 1.3.0): a native input helper so mouse and keyboard work on every PC,
 > no freeze when minimizing or dragging windows, the picture restarts by itself if Windows stops the capture, automatic
 > reconnect, remote restart, trusted computers (connect to your own PCs without a password), change your ID, actual size
@@ -288,6 +291,29 @@ Mount the distance sensor in the middle of the front, facing forward, 3–5 cm a
 in the middle of the chassis. The car finds them when it starts (keep it still for a second — the gyro measures its
 zero). While they are connected the USB Serial Monitor is off (same pins); uploads still work (if one fails, unplug the
 SDA wire during the upload).
+
+**Arduino Mega sensor hub (firmware 2.3)** — an Arduino Mega 2560 inside the CARPATHRON cover reads the **HC-SR04** (the
+robot's eyes, in the head's eye holes), the **MPU-6050** gyro and a **DHT11** (temperature + humidity) and sends them to
+the car 20 times a second over two wires. The car uses the HC-SR04 for the obstacle stop and the gyro for exact turns,
+exactly like the laser and the gyro above, and Robot → Setup also shows temperature, humidity and tilt. Nothing on the car
+itself is rewired. The Mega lies with its USB socket at the top right; the numbers are the wire numbers:
+
+| # | From | To on the Mega |
+|---|---|---|
+| 1 | ESP32 board **5V** | **5V** — bottom double row, far right, outer pin |
+| 2 | ESP32 board **GND** | **GND** — right side, just under AREF |
+| 3 | Mega **TX1 18** | 1 kΩ → ESP32 **RXD**; plus 2 kΩ (two 1 kΩ in a row) from ESP32 RXD to ESP32 GND |
+| 4 | ESP32 **TXD** | Mega **RX1 19** |
+| 5–8 | HC-SR04 VCC · Trig · Echo · GND | 5V (bottom row, far right, inner) · **22** · **23** · GND (bottom row, far left) |
+| 9–12 | MPU-6050 VCC · GND · SCL · SDA | **3.3V** · GND (left) · **SCL 21** · **SDA 20** |
+| 13–15 | DHT11 S · + · − | **A0** · 5V (left) · GND (left) |
+
+Steps: (1) update the car to 2.3 first (over Wi-Fi is easiest), (2) Robot → Setup → **🧠 Arduino Mega sensor hub → 🔌 Flash
+the Mega** with the Mega on its USB cable and wire 1 unplugged, (3) wire everything, switch the car on and keep it still
+for 2 seconds (the gyro measures its zero). Sensor mode *Auto* finds the Mega by itself; *Arduino Mega hub* forces it.
+Robot → Board & parts → **Arduino Mega 2560** shows the same pins on the board drawing. The printed insert (six keys that
+click into the cover's side vents, six pins for the Mega's holes, four clips) holds the Mega under the roof, behind the
+antenna; fold the antenna forward before the cover goes on.
 
 ### 3.4.4 Car settings (firmware 2.2)
 

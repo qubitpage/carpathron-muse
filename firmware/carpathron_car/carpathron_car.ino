@@ -28,6 +28,9 @@
        MPU-6050 (GY-521) gyro         -> exact turns (/turn) and the heading in /status
     Or (sensor mode "ir", set from Muse Carpathron or /config?sensors=ir): two IR obstacle modules ("Avoid", active LOW)
     on RXD = front-left and TXD = front-right — the car refuses to drive forward while one of them sees something.
+    Or an Arduino Mega sensor hub (firmware/carpathron_mega) on the same two pins as a serial link: Mega TX1 (18)
+    -> 1k -> RXD, 2k from RXD to GND, TXD -> Mega RX1 (19). The Mega sends heading (MPU-6050), distance (HC-SR04),
+    temperature/humidity (DHT11) and tilt 20x per second; exact turns and the obstacle stop then use them.
     They are found by themselves at start. While they are connected the USB Serial Monitor is off (the same pins);
     without them everything works as before. The VL53L0X driver is Pololu's (MIT), included in this folder.
 
@@ -39,7 +42,7 @@
   - Then set up Wi-Fi from the phone (see above). Muse Carpathron > Robot > "Find my car" finds its IP.
 */
 
-#define FW_VERSION "2.2.0"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
+#define FW_VERSION "2.3.0"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -203,7 +206,15 @@ const uint8_t MPU_ADDR = 0x68;
 bool tofOk = false, imuOk = false;
 bool irOk = false;                        // sensor mode "ir": IR obstacle modules on RXD (left) / TXD (right)
 volatile bool irLeft = false, irRight = false;
-String sensorMode = "auto";               // "auto" = look for I2C sensors, "ir" = IR obstacle modules, "off"
+String sensorMode = "auto";               // "auto" = I2C sensors or the Mega hub, "ir" = IR obstacle modules, "mega" = Mega hub only, "off"
+// Arduino Mega sensor hub on RXD/TXD (serial 115200): "$CAR,yaw,dps,distMm,tempC10,hum,pir,tilt,flags*CS"
+volatile bool megaOk = false;             // lines from the Mega arrive
+volatile bool megaImu = false, megaSonar = false, megaDht = false;
+volatile unsigned long megaLast = 0;      // millis of the last good line
+float megaTempC = NAN, megaHum = NAN, megaTilt = NAN; int megaPir = -1;
+float megaYawPrev = NAN; unsigned long megaLines = 0, megaBad = 0;
+String megaBuf;
+bool sensorTaskOn = false;
 VL53L0X tof;
 volatile int distMm = -1;                // -1 = nothing in range / no sensor
 volatile int safetyMm = 150;             // refuse to drive forward when something is closer (0 = off); starts at setting stopMm
@@ -242,11 +253,14 @@ void setSide(int enPin, int enCh, int fwdPin, int backPin, int pct) {
 
 void setLed(int v) { PWM_WRITE(LED_PIN, CH_LED, min(v, CFG(S_LEDMAX))); }
 
+static inline bool distOk() { return tofOk || (megaSonar && millis() - megaLast < 1000); }
+static inline bool gyroOk() { return imuOk || (megaImu && millis() - megaLast < 1000); }
+
 void drive(int l, int r) {
   l = constrain(l, -100, 100);
   r = constrain(r, -100, 100);
   // distance sensor: never drive forward into something closer than safetyMm (turning and backing up are fine)
-  if (l > 0 && r > 0 && ((tofOk && safetyMm > 0 && distMm > 0 && distMm < safetyMm) || (irOk && (irLeft || irRight)))) { l = 0; r = 0; blocked = true; }
+  if (l > 0 && r > 0 && ((distOk() && safetyMm > 0 && distMm > 0 && distMm < safetyMm) || (irOk && (irLeft || irRight)))) { l = 0; r = 0; blocked = true; }
   else if (l > 0 || r > 0) blocked = false;
   curL = l; curR = r;
   if (l && r && ((l > 0) == (r > 0))) { l = l * (100 + CFG(S_TRIM)) / 100; r = r * (100 - CFG(S_TRIM)) / 100; }  // straight-driving trim
@@ -278,11 +292,58 @@ static int16_t mpuGyroZ() {
 }
 static bool i2cPresent(uint8_t addr) { Wire.beginTransmission(addr); return Wire.endTransmission() == 0; }
 
+// ---- Arduino Mega sensor hub: one line 20x per second, XOR checksum of the text between '$' and '*'
+static bool megaParse(const String& ln) {
+  int st = ln.indexOf('$'), star = ln.lastIndexOf('*');
+  if (st < 0 || star < st + 5 || star + 3 > (int)ln.length()) return false;
+  uint8_t cs = 0; for (int i = st + 1; i < star; i++) cs ^= (uint8_t)ln[i];
+  if ((uint8_t)strtol(ln.substring(star + 1, star + 3).c_str(), NULL, 16) != cs) { megaBad++; return false; }
+  String b = ln.substring(st + 1, star);
+  if (!b.startsWith("CAR,")) return false;
+  float v[8]; int n = 0, from = 4;
+  while (n < 8) { int c = b.indexOf(',', from); String f = c < 0 ? b.substring(from) : b.substring(from, c); v[n++] = f.toFloat(); if (c < 0) break; from = c + 1; }
+  if (n < 8) { megaBad++; return false; }
+  int flags = (int)v[7];
+  megaImu = flags & 1; megaSonar = flags & 2; megaDht = flags & 4;
+  if (megaImu) {
+    float y = v[0];
+    if (!isnan(megaYawPrev)) yawDeg += (y - megaYawPrev) * CFG(S_GSCALE) / 1000.0f;   // same sign as the car: + = right
+    megaYawPrev = y; lastDps = v[1];
+  }
+  if (megaSonar) distMm = (v[2] <= 0 || v[2] >= 2000) ? -1 : max(1, (int)v[2] - CFG(S_TOFOFF));
+  megaTempC = megaDht ? v[3] / 10.0f : NAN; megaHum = megaDht ? v[4] : NAN;
+  megaPir = (int)v[5]; megaTilt = megaImu ? v[6] : NAN;
+  megaLast = millis(); megaLines++;
+  return true;
+}
+// Read whatever the Mega sent; true when at least one good line arrived.
+static bool megaPoll() {
+  bool got = false;
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n') { if (megaParse(megaBuf)) got = true; megaBuf = ""; }
+    else if (c != '\r' && megaBuf.length() < 96) megaBuf += c;
+    else if (megaBuf.length() >= 96) megaBuf = "";
+  }
+  return got;
+}
+// At start: wait up to ms for the Mega. Found = the pins stay a serial link to the Mega (no Serial Monitor).
+static bool megaListen(unsigned long ms) {
+  unsigned long t0 = millis();
+  while (millis() - t0 < ms) { if (megaPoll()) { megaOk = true; Serial.println("[mega] sensor hub found on RXD/TXD."); return true; } delay(10); }
+  return false;
+}
+
 // Looks for the sensors on RXD/TXD. Only when one answers do the pins stay I2C (the USB Serial Monitor then stops).
 static bool serialPins() { return I2C_SDA == 1 || I2C_SDA == 3 || I2C_SCL == 1 || I2C_SCL == 3; }
 bool initSensors() {
   { Preferences sp; sp.begin("carpathron", true); sensorMode = sp.getString("sensors", "auto"); sp.end(); }
   if (sensorMode == "off") { Serial.println("Sensors switched off (sensor mode off)."); return false; }
+  if (sensorMode == "mega") {
+    Serial.println("Sensor mode mega: Arduino Mega sensor hub on RXD/TXD (115200).");
+    megaListen(3000); megaOk = true;     // keep listening even if it starts later
+    return true;
+  }
   if (sensorMode == "ir") {
     Serial.println("Sensor mode ir: IR obstacle modules on the I2C pins (SDA = front-left, SCL = front-right).");
     if (serialPins()) { Serial.println("The Serial Monitor stops now (same pins)."); Serial.flush(); delay(50); Serial.end(); }
@@ -290,13 +351,27 @@ bool initSensors() {
     irOk = true;
     return true;
   }
+  // A Mega sensor hub talks on RXD first: listen for it before probing I2C there (its serial bits could look like an I2C answer).
+  if (serialPins()) {
+    if (megaListen(4500)) return true;
+    Serial.flush(); delay(20); Serial.end();
+    pinMode(3, INPUT); int edges = 0, last = digitalRead(3); unsigned long t0 = millis();
+    while (millis() - t0 < 300) { int v = digitalRead(3); if (v != last) { edges++; last = v; } }
+    Serial.begin(115200);
+    if (edges > 20) { megaOk = true; Serial.println("[mega] something is sending on RXD: treating it as the Mega sensor hub."); return true; }
+  }
   Serial.printf("Looking for sensors on GPIO %d / %d (VL53L0X distance, MPU-6050 gyro)...%s\n", I2C_SDA, I2C_SCL, serialPins() ? " the Serial Monitor pauses for a moment." : "");
   Serial.flush(); delay(50);
   if (serialPins()) Serial.end();
   Wire.begin(I2C_SDA, I2C_SCL, 400000);
   Wire.setTimeOut(20);
   bool tofHere = i2cPresent(0x29), imuHere = i2cPresent(MPU_ADDR);
-  if (!tofHere && !imuHere) { Wire.end(); if (serialPins()) Serial.begin(115200); Serial.println("No sensors found: Serial Monitor stays on."); return false; }
+  if (!tofHere && !imuHere) {
+    Wire.end(); if (serialPins()) Serial.begin(115200);
+    if (megaListen(3000)) return true;
+    Serial.println("No sensors found: Serial Monitor stays on (a Mega sensor hub is still picked up when it starts sending).");
+    return false;
+  }
   wireOn = true;
   if (imuHere) {
     mpuWrite(0x6B, 0x00);      // wake up
@@ -332,6 +407,9 @@ static void sensorTask(void*) {
     if (irOk) {
       irLeft = digitalRead(I2C_SDA) == LOW; irRight = digitalRead(I2C_SCL) == LOW;   // "Avoid" modules pull LOW on an obstacle
       if (curL > 0 && curR > 0 && (irLeft || irRight)) { drive(0, 0); blocked = true; }
+    }
+    if (megaOk && megaPoll() && megaSonar) {
+      if (curL > 0 && curR > 0 && safetyMm > 0 && distMm > 0 && distMm < safetyMm) { drive(0, 0); blocked = true; }
     }
     if (tofOk && (tof.readReg(VL53L0X::RESULT_INTERRUPT_STATUS) & 0x07)) {
       uint16_t mm = tof.readReg16Bit(VL53L0X::RESULT_RANGE_STATUS + 10);
@@ -500,7 +578,7 @@ static esp_err_t led_handler(httpd_req_t* req) {
 }
 
 static esp_err_t turn_handler(httpd_req_t* req) {
-  if (!imuOk) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"no gyro (MPU-6050) found\"}");
+  if (!gyroOk()) return send_text(req, "application/json", "{\"ok\":false,\"error\":\"no gyro (MPU-6050) found\"}");
   int deg = constrain(queryInt(req, "deg", 0), -720, 720), sp = queryInt(req, "speed", CFG(S_TURNSPD));
   if (!deg) return send_text(req, "application/json", "{\"ok\":true,\"turning\":false}");
   startTurn(deg, sp); lastDrive = millis();
@@ -513,12 +591,12 @@ static esp_err_t safety_handler(httpd_req_t* req) {
   return send_text(req, "application/json", b);
 }
 
-// Sensor mode: /config?sensors=auto|ir|off — saved in the car, it restarts to apply it
+// Sensor mode: /config?sensors=auto|ir|mega|off — saved in the car, it restarts to apply it
 static esp_err_t config_handler(httpd_req_t* req) {
   char q[64], v[12] = "";
   if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) httpd_query_key_value(q, "sensors", v, sizeof(v));
   String m = String(v);
-  if (m != "auto" && m != "ir" && m != "off") {
+  if (m != "auto" && m != "ir" && m != "mega" && m != "off") {
     char b[96]; snprintf(b, sizeof(b), "{\"ok\":true,\"sensors\":\"%s\"}", sensorMode.c_str());
     return send_text(req, "application/json", b);
   }
@@ -529,17 +607,20 @@ static esp_err_t config_handler(httpd_req_t* req) {
 }
 
 static esp_err_t status_handler(httpd_req_t* req) {
-  char json[860];
+  char json[1000];
   bool sta = WiFi.status() == WL_CONNECTED;
   snprintf(json, sizeof(json),
            "{\"name\":\"%s\",\"fw\":\"" FW_VERSION "\",\"restartPending\":%s,\"ip\":\"%s\",\"mode\":\"%s\",\"wifi\":\"%s\",\"wifiIp\":\"%s\",\"connecting\":%s,\"rssi\":%d,\"left\":%d,\"right\":%d,\"camera\":%s,\"psram\":%s,\"uptime\":%lu,"
-           "\"sensors\":{\"mode\":\"%s\",\"ir\":%s,\"irLeft\":%s,\"irRight\":%s,\"tof\":%s,\"imu\":%s,\"dist\":%d,\"stopMm\":%d,\"blocked\":%s,\"yaw\":%.1f,\"turning\":%s,\"turnResult\":%d}}",
+           "\"sensors\":{\"mode\":\"%s\",\"ir\":%s,\"irLeft\":%s,\"irRight\":%s,\"tof\":%s,\"imu\":%s,\"dist\":%d,\"stopMm\":%d,\"blocked\":%s,\"yaw\":%.1f,\"turning\":%s,\"turnResult\":%d,"
+           "\"mega\":%s,\"tempC\":%s,\"humidity\":%s,\"tilt\":%s,\"pir\":%d}}",
            robotName.c_str(), restartPending ? "true" : "false", (sta ? WiFi.localIP() : WiFi.softAPIP()).toString().c_str(), apMode ? "hotspot" : "wifi", savedSsid.c_str(),
            sta ? WiFi.localIP().toString().c_str() : "", wifiChangeRequested ? "true" : "false", sta ? WiFi.RSSI() : 0, curL, curR,
            cameraOk ? "true" : "false", psramFound() ? "true" : "false", millis() / 1000,
            sensorMode.c_str(), irOk ? "true" : "false", irLeft ? "true" : "false", irRight ? "true" : "false",
-           tofOk ? "true" : "false", imuOk ? "true" : "false", (int)distMm, (int)safetyMm, blocked ? "true" : "false", (float)yawDeg,
-           turning ? "true" : "false", (int)turnResult);
+           distOk() ? "true" : "false", gyroOk() ? "true" : "false", (int)distMm, (int)safetyMm, blocked ? "true" : "false", (float)yawDeg,
+           turning ? "true" : "false", (int)turnResult,
+           (megaOk && millis() - megaLast < 1000) ? "true" : "false", isnan(megaTempC) ? "null" : String(megaTempC, 1).c_str(),
+           isnan(megaHum) ? "null" : String(megaHum, 0).c_str(), isnan(megaTilt) ? "null" : String(megaTilt, 0).c_str(), (int)megaPir);
   return send_text(req, "application/json", json);
 }
 
@@ -661,7 +742,7 @@ static const char* resetName(int r) {
   }
 }
 static String motorProbe(char side) {
-  if (!imuOk) return "null";
+  if (!gyroOk()) return "null";
   if (side == 'b' && safetyMm <= 0) return "null";  // forward without the laser stop: not without the safety distance
   turning = false;
   float y0 = yawDeg; int d0 = distMm;
@@ -742,7 +823,7 @@ static esp_err_t pin_handler(httpd_req_t* req) {
   const char* why = nullptr;
   if (g < 0 || g > 39 || !freePin(g)) why = "not a free pin of the ESP32-CAM (free: 1 2 3 12 13 14 15 33)";
   else if (g == R_EN || g == R_FWD || g == R_BACK || g == L_EN || g == L_FWD || g == L_BACK) why = "used by the motors (change it in Car settings first)";
-  else if ((wireOn || irOk) && (g == I2C_SDA || g == I2C_SCL)) why = "used by the sensors now (sensor mode off frees it)";
+  else if ((wireOn || irOk || megaOk) && (g == 1 || g == 3 || g == I2C_SDA || g == I2C_SCL)) why = "used by the sensors now (sensor mode off frees it)";
   if (why) { String e = String("{\"ok\":false,\"error\":\"GPIO ") + g + " is " + why + "\"}"; return send_text(req, "application/json", e.c_str()); }
   if (!strcmp(mode, "high") || !strcmp(mode, "low")) {
     pinMode(g, OUTPUT); digitalWrite(g, !strcmp(mode, "high") ? HIGH : LOW); pinReleaseAt[g] = millis() + 3000;
@@ -789,21 +870,25 @@ static esp_err_t diag_handler(httpd_req_t* req) {
   j += "]}";
   // laser: 25 readings over 1 s
   int n = 0, none = 0; long sum = 0, sum2 = 0; int lo = 9999, hi = -1;
-  if (tofOk) for (int i = 0; i < 25; i++) { int d = distMm; if (d > 0) { n++; sum += d; sum2 += (long)d * d; lo = min(lo, d); hi = max(hi, d); } else none++; delay(40); }
+  if (distOk()) for (int i = 0; i < 25; i++) { int d = distMm; if (d > 0) { n++; sum += d; sum2 += (long)d * d; lo = min(lo, d); hi = max(hi, d); } else none++; delay(40); }
   float mean = n ? (float)sum / n : 0, sd = n > 1 ? sqrtf(max(0.0f, (float)sum2 / n - mean * mean)) : 0;
   char tb[200]; snprintf(tb, sizeof(tb), ",\"tof\":{\"ok\":%s,\"samples\":%d,\"outOfRange\":%d,\"mean\":%.0f,\"sd\":%.1f,\"min\":%d,\"max\":%d,\"stopMm\":%d}",
-                         tofOk ? "true" : "false", n, none, mean, sd, n ? lo : -1, hi, (int)safetyMm);
+                         distOk() ? "true" : "false", n, none, mean, sd, n ? lo : -1, hi, (int)safetyMm);
   j += tb;
   // gyro: zero drift and noise while standing still (50 readings, 0.5 s)
   float gs = 0, gs2 = 0; int gn = 0;
-  if (imuOk && !curL && !curR) for (int i = 0; i < 50; i++) { float d = lastDps; gs += d; gs2 += d * d; gn++; delay(10); }
+  if (gyroOk() && !curL && !curR) for (int i = 0; i < 50; i++) { float d = lastDps; gs += d; gs2 += d * d; gn++; delay(10); }
   float gm = gn ? gs / gn : 0, gsd = gn > 1 ? sqrtf(max(0.0f, gs2 / gn - gm * gm)) : 0;
-  char gb[160]; snprintf(gb, sizeof(gb), ",\"imu\":{\"ok\":%s,\"whoAmI\":%d,\"bias\":%.1f,\"restDps\":%.2f,\"noiseDps\":%.2f,\"yaw\":%.1f}", imuOk ? "true" : "false", who, gyroBias, gm, gsd, (float)yawDeg);
+  char gb[160]; snprintf(gb, sizeof(gb), ",\"imu\":{\"ok\":%s,\"whoAmI\":%d,\"bias\":%.1f,\"restDps\":%.2f,\"noiseDps\":%.2f,\"yaw\":%.1f}", gyroOk() ? "true" : "false", who, gyroBias, gm, gsd, (float)yawDeg);
   j += gb;
+  char mb[220]; snprintf(mb, sizeof(mb), ",\"mega\":{\"ok\":%s,\"lines\":%lu,\"bad\":%lu,\"lastMs\":%ld,\"imu\":%s,\"sonar\":%s,\"dht\":%s}",
+                         megaOk ? "true" : "false", megaLines, megaBad, megaLast ? (long)(millis() - megaLast) : -1L,
+                         megaImu ? "true" : "false", megaSonar ? "true" : "false", megaDht ? "true" : "false");
+  j += mb;
   j += ",\"ir\":{\"ok\":" + String(irOk ? "true" : "false") + ",\"left\":" + (irLeft ? "true" : "false") + ",\"right\":" + (irRight ? "true" : "false") + "}";
   if (motors) {
     String ml = motorProbe('l'), mr = motorProbe('r');
-    j += ",\"motors\":{\"left\":" + ml + ",\"right\":" + mr + ",\"both\":" + (tofOk ? motorProbe('b') : String("null")) + "}";
+    j += ",\"motors\":{\"left\":" + ml + ",\"right\":" + mr + ",\"both\":" + (distOk() ? motorProbe('b') : String("null")) + "}";
   }
   j += ",\"pins\":{\"rEn\":" + String(R_EN) + ",\"rFwd\":" + String(R_FWD) + ",\"rBack\":" + String(R_BACK) + ",\"lEn\":" + String(L_EN) + ",\"lFwd\":" + String(L_FWD) + ",\"lBack\":" + String(L_BACK) + ",\"led\":" + String(LED_PIN) + "}}";
   return send_text(req, "application/json", j.c_str());
@@ -1158,6 +1243,10 @@ void handleSerial() {
     if (c == '\r') continue;
     if (c != '\n') { if (serialLine.length() < 100) serialLine += c; continue; }
     String line = serialLine; serialLine = "";
+    if (line.startsWith("$CAR")) {           // an Arduino Mega sensor hub started sending after boot (sensor mode auto)
+      if (!wireOn && !irOk && sensorMode != "off" && megaParse(line)) { megaOk = true; Serial.println("[mega] sensor hub found on RXD/TXD."); }
+      continue;
+    }
     if (serialStep == 3) {
       serialStep = 0; line.trim();
       if (line == "BURN") burnFlashFuse(); else Serial.println("[fixboot] Cancelled.");
@@ -1206,7 +1295,7 @@ void setup() {
   safetyMm = CFG(S_STOPMM);
   initMotors();
   cameraOk = initCamera();
-  if (initSensors()) xTaskCreatePinnedToCore(sensorTask, "sensors", 4096, NULL, 3, NULL, 0);
+  if (initSensors()) { xTaskCreatePinnedToCore(sensorTask, "sensors", 4096, NULL, 3, NULL, 0); sensorTaskOn = true; }
   startWifi();
   startServers();
   for (int i = 0; i < 3; i++) { setLed(20); delay(80); setLed(0); delay(80); }  // ready
@@ -1216,10 +1305,11 @@ void setup() {
 }
 
 void loop() {
-  handleSerial();
+  if (!megaOk) handleSerial();
+  if (megaOk && !sensorTaskOn) { xTaskCreatePinnedToCore(sensorTask, "sensors", 4096, NULL, 3, NULL, 0); sensorTaskOn = true; }
   for (int g = 0; g < 40; g++) if (pinReleaseAt[g] && (long)(millis() - pinReleaseAt[g]) > 0) {
     pinMode(g, INPUT); pinReleaseAt[g] = 0;
-    if ((g == 1 || g == 3) && !wireOn && !irOk) Serial.begin(115200);  // give RX/TX back to the USB serial monitor
+    if ((g == 1 || g == 3) && !wireOn && !irOk && !megaOk) Serial.begin(115200);  // give RX/TX back to the USB serial monitor
   }
   if ((curL || curR) && millis() - lastDrive > FAILSAFE_MS) {
     drive(0, 0);

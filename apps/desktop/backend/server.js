@@ -847,7 +847,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/robot/firmware' && m === 'GET') return send(res, 200, { builds: require('./firmware').listBuilds(dataDir).map((x) => ({ version: x.version, at: x.at, size: x.size })) });
     if (p === '/api/robot/firmware' && m === 'POST') {
       const b = await readJson(req);
-      const action = ['status', 'check', 'build', 'update', 'wifi', 'undo'].includes(b.action) ? b.action : 'status';
+      const action = ['status', 'check', 'build', 'update', 'wifi', 'undo', 'mega'].includes(b.action) ? b.action : 'status';
       const busy = action !== 'status' && action !== 'check';
       if (agent.firmwareBusy && busy) return send(res, 200, { error: 'A firmware job is already running.' });
       if (busy) agent.firmwareBusy = true;
@@ -859,18 +859,18 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       } catch (e) { return send(res, 200, { error: e.message }); }
       finally { if (busy) agent.firmwareBusy = false; }
     }
-    // Sensor mode on the car (firmware 2.1): auto (I2C laser + gyro) | ir (IR obstacle modules) | off — the car restarts
+    // Sensor mode on the car (firmware 2.1): auto (I2C laser + gyro, or the Mega hub) | ir (IR obstacle modules) | mega (2.3: Arduino Mega hub) | off — the car restarts
     if (p === '/api/robot/sensor-mode' && m === 'POST') {
       const b = await readJson(req);
-      const mode = ['auto', 'ir', 'off'].includes(b.mode) ? b.mode : null;
+      const mode = ['auto', 'ir', 'mega', 'off'].includes(b.mode) ? b.mode : null;
       const ip = String((store.settings.robot || {}).carIp || '').trim();
-      if (!mode || !ip) return send(res, 200, { error: !ip ? 'Set the car address first.' : 'mode must be auto, ir or off' });
+      if (!mode || !ip) return send(res, 200, { error: !ip ? 'Set the car address first.' : 'mode must be auto, ir, mega or off' });
       try {
         const r = await fetch(`http://${ip}/config?sensors=${mode}`, { signal: AbortSignal.timeout(4000) });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         setTimeout(() => robot.connect(), 5000);
         return send(res, 200, { ok: true, mode, restarting: true });
-      } catch (e) { return send(res, 200, { error: `The car did not accept it (${e.message}). It needs firmware 2.1 — update it first.` }); }
+      } catch (e) { return send(res, 200, { error: `The car did not accept it (${e.message}). It needs firmware 2.1 (mega: 2.3) — update it first.` }); }
     }
     // Voice: spoken robot commands (short ones run at once, the rest go to the agent) and the robot's own voice
     if (p === '/api/robot/voice' && m === 'POST') {

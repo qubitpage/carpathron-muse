@@ -42,7 +42,7 @@ const XTOOLS = [
   { name: 'arduino_upload', risk: 'exec', description: 'Compile and flash (upload) a sketch to a board on a serial port (e.g. COM5). Hardware action: the board resets.', parameters: obj({ sketch_path: { type: 'string' }, fqbn: { type: 'string' }, port: { type: 'string' } }, ['sketch_path', 'fqbn', 'port']) },
   { name: 'serial_monitor', risk: 'exec', description: 'Read the serial output of a board for some seconds (and optionally send a line first). Use to see boot logs, IP addresses, debug prints.', parameters: obj({ port: { type: 'string' }, baud: { type: 'integer', description: 'default 115200' }, seconds: { type: 'integer', description: 'default 8, max 120' }, send: { type: 'string' } }, ['port']) },
   { name: 'arduino_cli', risk: 'exec', description: 'Run any arduino-cli command (arguments only, e.g. "lib search FastLED", "core list", "board details -b esp32:esp32:esp32").', parameters: obj({ args: { type: 'string' } }, ['args']) },
-  { name: 'robot_firmware', risk: 'exec', description: 'Baby Carpathron car firmware, in plain steps. action "status" (or "check"): versions (bundled with the app, workspace copy, on the car), whether the car takes Wi-Fi updates, the builds kept on this PC. "build": compile the firmware into a file (nothing is sent). "update": put it on the car over USB (copies the sketch to <workspace>/firmware/carpathron_car keeping a backup, finds the car\'s USB port, installs the ESP32 core if needed, compiles with Wi-Fi-update space, uploads, checks the car comes back). "wifi": build and send it to the car over Wi-Fi (works after one USB update from this PC). "undo": go back to the firmware the car had before the last update. To flash a changed copy, pass sketch_path.', parameters: obj({ action: { type: 'string', enum: ['status', 'check', 'build', 'update', 'wifi', 'undo'] }, port: { type: 'string', description: 'serial port, e.g. COM4 (found automatically when empty)' }, sketch_path: { type: 'string', description: 'optional: use this sketch folder instead of the bundled one' } }, ['action']) },
+  { name: 'robot_firmware', risk: 'exec', description: 'Baby Carpathron car firmware, in plain steps. action "status" (or "check"): versions (bundled with the app, workspace copy, on the car), whether the car takes Wi-Fi updates, the builds kept on this PC. "build": compile the firmware into a file (nothing is sent). "update": put it on the car over USB (copies the sketch to <workspace>/firmware/carpathron_car keeping a backup, finds the car\'s USB port, installs the ESP32 core if needed, compiles with Wi-Fi-update space, uploads, checks the car comes back). "wifi": build and send it to the car over Wi-Fi (works after one USB update from this PC). "undo": go back to the firmware the car had before the last update. To flash a changed copy, pass sketch_path. "mega": flash the Arduino Mega 2560 sensor hub (HC-SR04 eyes, MPU-6050 gyro, DHT11 on the Mega, linked to the car on Mega TX1 18 / RX1 19 ↔ ESP32 RXD / TXD) over USB; car firmware 2.3+ picks it up by itself.', parameters: obj({ action: { type: 'string', enum: ['status', 'check', 'build', 'update', 'wifi', 'undo', 'mega'] }, port: { type: 'string', description: 'serial port, e.g. COM4 (found automatically when empty)' }, sketch_path: { type: 'string', description: 'optional: use this sketch folder instead of the bundled one' } }, ['action']) },
   { name: 'open_arduino_ide', risk: 'exec', description: 'Open the Arduino IDE on this PC, optionally with a sketch, so the user can see or edit it.', parameters: obj({ path: { type: 'string' } }) },
   // ---------- Meta media models
   { name: 'generate_image', risk: 'write', description: 'Create an image with Muse Image (logos, product renders, illustrations, website hero images, UI mockups) or edit existing images (give edit_images). Saves PNG/JPG/WEBP to output_path and shows it.', parameters: obj({ prompt: { type: 'string' }, output_path: { type: 'string' }, size: { type: 'string', description: 'aspect, e.g. 1024x1024, 1792x1024, 1024x1792' }, edit_images: { type: 'array', items: { type: 'string' } } }, ['prompt', 'output_path']) },
@@ -508,7 +508,43 @@ function needCli(ctx) {
 }
 
 // Baby Carpathron firmware: status / update over USB (see firmware.js)
+// Arduino Mega 2560 sensor hub: copy the bundled sketch, install arduino:avr if needed, find the Mega, compile + upload.
+async function megaFirmware(args, ctx) {
+  const fw = require('./firmware');
+  const status = ctx.status || (() => {});
+  const log = [];
+  const p = fw.prepareMega(ctx.settings);
+  log.push(`Mega sensor hub ${p.version} copied to ${p.dir}${p.backup ? ` (previous copy kept in ${p.backup})` : ''}`);
+  let cli = findArduinoCli(ctx.dataDir, ctx.settings.arduinoCli);
+  const cores = cli ? await runProc(cli, ['core', 'list'], { timeoutMs: 60000 }) : { out: '' };
+  if (!cli || !/arduino:avr/.test(cores.out)) {
+    status('Installing the Arduino AVR tools for the Mega (first time only, a few minutes)…');
+    log.push(await arduinoSetup({ cores: ['arduino:avr'] }, ctx));
+    cli = needCli(ctx);
+  }
+  let port = args.port ? { address: String(args.port), how: 'given' } : null;
+  if (!port) {
+    status('Looking for the Mega on USB…');
+    const r = await runProc(cli, ['board', 'list', '--format', 'json'], { timeoutMs: 60000, signal: ctx.signal });
+    port = fw.pickMegaPort(r.out, (ctx.settings.robot || {}).usbPort);
+    if (!port) return `${log.join('\n')}\nThe Mega was not found on USB. Connect it with its USB cable (the square USB-B plug), unplug other boards (or pick its port), then try again.\n[UPLOAD FAILED]`;
+  }
+  log.push(`Mega on ${port.address} (${port.how})`);
+  status(`Compiling and uploading the sensor hub to the Mega on ${port.address}…`);
+  const up = await runProc(cli, ['compile', '--upload', '-p', port.address, '--fqbn', fw.MEGA_FQBN, p.dir], { timeoutMs: 600000, signal: ctx.signal });
+  if (up.code !== 0) {
+    let hint = '';
+    if (/could not open port|Access is denied|busy/i.test(up.out)) hint = '\nHint: another program uses the port (Arduino IDE serial monitor?). Close it and try again.';
+    if (/not in sync|timeout communicating|stk500v2_ReceiveMessage/i.test(up.out)) hint = '\nHint: wrong port or board. Unplug the car\'s 5V wire from the Mega (wire 1) and try again.';
+    return `${log.join('\n')}\n${clip(up.out.trim(), 20000)}\n[UPLOAD FAILED]${hint}`;
+  }
+  log.push('Uploaded. Open the serial monitor at 115200 to see every reading twice a second. With the wires to the car connected, the car (firmware 2.3+) uses the Mega for exact turns and the obstacle stop.');
+  if (ctx.settings.robot) ctx.settings.robot.megaPort = port.address;
+  return `${log.join('\n')}\n[UPLOAD OK]`;
+}
+
 async function robotFirmware(args, ctx) {
+  if (args.action === 'mega') return megaFirmware(args, ctx);
   const fw = require('./firmware');
   const status = ctx.status || (() => {});
   const carIp = () => String((ctx.settings.robot || {}).carIp || '').trim();
@@ -523,7 +559,7 @@ async function robotFirmware(args, ctx) {
     let c = { online: false };
     for (let i = 0; i < 24 && !(c.online && (!want || c.version === want)); i++) { await new Promise((r) => setTimeout(r, 1500)); c = await carVersion(); }
     if (ctx.robot && ctx.robot.connect) try { ctx.robot.connect(); } catch {}
-    return c.online ? `Car online at ${c.ip}, firmware ${c.version}${c.sensors ? ` — distance sensor: ${c.sensors.tof ? 'found' : 'not connected'}, gyro: ${c.sensors.imu ? 'found' : 'not connected'}` : ''}` : `The car did not answer on Wi-Fi yet (${c.note}). If it stays offline: Robot page → Find my car.`;
+    return c.online ? `Car online at ${c.ip}, firmware ${c.version}${c.sensors ? ` — distance sensor: ${c.sensors.tof ? 'found' : 'not connected'}, gyro: ${c.sensors.imu ? 'found' : 'not connected'}${c.sensors.mega ? ', Mega sensor hub: connected' : ''}` : ''}` : `The car did not answer on Wi-Fi yet (${c.note}). If it stays offline: Robot page → Find my car.`;
   };
   const bundled = fw.bundledDir();
   const bundledVersion = bundled ? fw.versionOf(fs.readFileSync(path.join(bundled, `${fw.SKETCH}.ino`), 'utf8')) : null;

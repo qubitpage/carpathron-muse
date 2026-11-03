@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const C = require('./carsettings');
 
-const FW = '2.2.0';
+const FW = '2.3.0';
 const VIEW = fs.readFileSync(path.join(__dirname, 'simcar-view.jpg'));
 // room in cm: outer walls + boxes [x1, y1, x2, y2]; the car starts in the middle looking along +x (heading 0 = +x, clockwise positive)
 const ROOM = { w: 360, h: 280, start: [120, 140], boxes: [[250, 110, 290, 170], [40, 200, 120, 260], [170, 30, 200, 60]] };
@@ -150,7 +150,7 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
       case '/status': return json(res, {
         name: st.strings.name, fw: st.fw, restartPending: st.restartPending, ip: '127.0.0.1', mode: 'wifi', wifi: 'Simulator', wifiIp: '127.0.0.1', connecting: false,
         rssi: st.faults.weakWifi ? -80 : -52, left: st.l, right: st.r, camera: !st.faults.noCamera, psram: !st.faults.noPsram, uptime: Math.round((Date.now() - st.boot) / 1000), simulator: true,
-        sensors: { mode: st.sensorMode, ir: false, irLeft: false, irRight: false, tof: tofOk(), imu: imuOk(), dist: distMm(), stopMm: v().stopMm, blocked: st.blocked, yaw: Math.round(yaw() * 10) / 10, turning: !!st.turn, turnResult: st.turnResult },
+        sensors: { mode: st.sensorMode, ir: false, irLeft: false, irRight: false, tof: tofOk(), imu: imuOk(), dist: distMm(), stopMm: v().stopMm, blocked: st.blocked, yaw: Math.round(yaw() * 10) / 10, turning: !!st.turn, turnResult: st.turnResult, mega: false, tempC: null, humidity: null, tilt: null, pir: -1 },
       });
       case '/drive': {
         if (st.turn) { st.turn = null; st.turnResult = 3; }
@@ -165,7 +165,7 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
         return json(res, { ok: true, deg });
       }
       case '/safety': if (q.has('mm')) st.values.stopMm = st.saved.stopMm = Math.max(0, Math.min(1000, Number(q.get('mm')) || 0)); return json(res, { ok: true, stopMm: v().stopMm });
-      case '/config': { const m = q.get('sensors'); if (['auto', 'ir', 'off'].includes(m)) { st.sensorMode = m; restart(); return json(res, { ok: true, restarting: true }); } return json(res, { ok: true, sensors: st.sensorMode }); }
+      case '/config': { const m = q.get('sensors'); if (['auto', 'ir', 'mega', 'off'].includes(m)) { st.sensorMode = m; restart(); return json(res, { ok: true, restarting: true }); } return json(res, { ok: true, sensors: st.sensorMode }); }
       case '/test': return res.end('ok');
       case '/settings': {
         if (q.has('restart') || q.has('reset')) { if (q.has('reset')) { st.saved = { ...C.DEFAULTS }; st.strings = { name: 'Practice car', apSsid: 'Carpathron-Car', apPass: 'carpathron' }; } json(res, { ok: true, restarting: true }); return setTimeout(() => restart(), 300); }

@@ -59,7 +59,7 @@
     const items = placed.map((pl) => ({ pl, part: partsById[pl.part] })).filter((x) => x.part);
     const conns = [];
     items.forEach(({ pl, part }, pi) => {
-      const power = part.power === 'battery' ? 'BAT+' : part.power === '5V' ? '5V' : board.logic === '5V' ? '5V' : '3V3';
+      const power = part.power === 'battery' ? 'BAT+' : part.power === '5V' ? '5V' : part.power === '3V3' ? '3V3' : Number(board.logic) >= 5 ? '5V' : '3V3';
       conns.push({ pi, role: part.power === 'battery' ? 'VM' : 'VCC', from: power, kind: 'power' }, { pi, role: 'GND', from: 'GND', kind: 'gnd' });
       for (const s of part.signals) if (pl.assign && pl.assign[s.role] != null) conns.push({ pi, role: s.role, from: Number(pl.assign[s.role]), kind: part.bus === 'i2c' ? 'i2c' : s.needs.includes('pwm') ? 'pwm' : 'sig' });
     });
@@ -357,6 +357,13 @@
     { id: 'gyro', name: 'MPU-6050 gyro', part: 'mpu6050', fixed: true, assign: { SDA: v.sda ?? 3, SCL: v.scl ?? 1 } },
     { id: 'headlight', name: 'Headlight LED (on the board)', part: 'buzzer', fixed: true, builtin: true, assign: { signal: 4 } },
   ]);
+  // The Baby Carpathron Mega sensor hub (firmware/carpathron_mega): the same pins as the hub firmware and the wiring guide
+  const MEGA_BUILD = () => ([
+    { id: 'link', name: 'Link to the car ESP32-CAM', part: 'carlink', fixed: true, assign: { TX: 18, RX: 19 } },
+    { id: 'eyes', name: 'HC-SR04 eyes', part: 'hcsr04', fixed: true, assign: { TRIG: 22, ECHO: 23 } },
+    { id: 'gyro', name: 'MPU-6050 gyro', part: 'mpu6050', fixed: true, assign: { SDA: 20, SCL: 21 } },
+    { id: 'climate', name: 'DHT11', part: 'dht11', fixed: true, assign: { DATA: 54 } },
+  ]);
   const pst = { data: null, board: 'esp32cam', builds: {}, sel: null, wizard: null };
   async function renderParts(el) {
     const { h, api, toast, askAgent } = ui();
@@ -367,7 +374,7 @@
     const boardsById = Object.fromEntries(pst.data.boards.map((b) => [b.id, b]));
     let carVals = null;
     if (pst.board === 'esp32cam') { const cs = await api('/api/robot/car/settings').catch(() => null); if (cs && cs.values) carVals = cs.values; }
-    const placed = () => [...(pst.board === 'esp32cam' ? CAR_BUILD(carVals || {}) : []), ...((pst.builds[pst.board] || {}).parts || [])];
+    const placed = () => [...(pst.board === 'esp32cam' ? CAR_BUILD(carVals || {}) : pst.board === 'mega2560' ? MEGA_BUILD() : []), ...((pst.builds[pst.board] || {}).parts || [])];
     const assignOf = () => { const a = {}; for (const pl of placed()) for (const [r, g] of Object.entries(pl.assign || {})) a[`${pl.id}.${r}`] = g; return a; };
     const names = () => { const n = {}; for (const pl of placed()) for (const r of Object.keys(pl.assign || {})) n[`${pl.id}.${r}`] = `${pl.builtin ? 'headlight' : (partsById[pl.part] || {}).name ? `${pl.id === 'motors' ? 'motor' : pl.id} ${r}` : r}`; return n; };
     const save = async () => { await api('/api/robot/build', { body: { board: pst.board, parts: (pst.builds[pst.board] || {}).parts || [] } }); };
@@ -521,7 +528,17 @@
       step('3', 'Flash over USB', 'Car connected to this PC with the USB-C data cable. Needed once (it also adds the space for Wi-Fi updates). If it hangs on "Connecting…", hold the BOOT button.', '🔌 Flash over USB', 'update', 'Flashing over USB… (first time: installs the ESP32 tools, several minutes)', true),
       step('4', 'Flash over Wi-Fi', 'No cable: the new firmware goes through your Wi-Fi. The car checks the file before it switches.', '📶 Flash over Wi-Fi', 'wifi', 'Building and sending over Wi-Fi…'),
       step('5', 'Undo', 'Something wrong after an update? The car goes back to the firmware it had before.', '↩ Undo last update', 'undo', 'Going back to the previous firmware…'),
-      builds, out);
+      builds,
+      h('h3', { style: 'margin-top:14px' }, '🧠 Arduino Mega sensor hub'),
+      h('p', { class: 'small muted' }, 'Optional: an Arduino Mega 2560 inside the cover reads the HC-SR04 eyes, the MPU-6050 gyro and the DHT11 and sends them to the car over two wires (Mega TX1 18 → 1 kΩ → ESP32 RXD with 2 kΩ to GND, ESP32 TXD → Mega RX1 19, plus 5V and GND). The full pin-by-pin wiring is in Robot → Board & parts → Arduino Mega 2560 and in Guide 3.4.3. Car firmware 2.3 finds the Mega by itself.'),
+      h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => {
+        const ov = h('div', { class: 'mw-overlay', style: 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;flex-direction:column;padding:24px' },
+          h('div', { style: 'display:flex;justify-content:flex-end;margin-bottom:8px' }, h('button', { class: 'btn primary', onclick: () => ov.remove() }, '✕ Close')),
+          h('iframe', { src: '/mega-wiring.html', title: 'Mega wiring guide', style: 'flex:1;width:100%;border:0;border-radius:12px;background:#fff' }));
+        document.body.append(ov);
+      } }, '📄 Open the pin-by-pin wiring guide')),
+      step('6', 'Flash the Mega', 'Mega connected to this PC with its USB cable. Unplug the car\'s 5V wire from the Mega first. First time: installs the Arduino AVR tools.', '🔌 Flash the Mega', 'mega', 'Compiling and uploading the sensor hub to the Mega…'),
+      out);
   }
 
   window.MClab = { renderSettings, renderHealth, renderParts, boardSvg, schematicSvg, firmwareCard };

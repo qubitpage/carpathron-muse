@@ -27,6 +27,7 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.2.1:** the wiring guide shows the Mega as it lies with the USB socket at the bottom, which jumper wire goes where and what to solder.
 > **2.2.0:** the **Arduino Mega sensor hub**: car firmware 2.3 takes heading, distance (HC-SR04 eyes), temperature,
 > humidity and tilt from an Arduino Mega 2560 over two wires; Robot → Setup has a **🔌 Flash the Mega** button and the new
 > sensor mode, Board & parts has the Mega wiring (with a DHT11 part and the car link), Guide 3.4.3 has every wire.
@@ -296,17 +297,23 @@ SDA wire during the upload).
 robot's eyes, in the head's eye holes), the **MPU-6050** gyro and a **DHT11** (temperature + humidity) and sends them to
 the car 20 times a second over two wires. The car uses the HC-SR04 for the obstacle stop and the gyro for exact turns,
 exactly like the laser and the gyro above, and Robot → Setup also shows temperature, humidity and tilt. Nothing on the car
-itself is rewired. The Mega lies with its USB socket at the top right; the numbers are the wire numbers:
+itself is rewired. Lay the Mega with its **USB socket and power jack at the bottom** (power pins down the right side, pins 0–21 down the left, the long double row at the top); the numbers are the wire numbers:
 
 | # | From | To on the Mega |
 |---|---|---|
-| 1 | ESP32 board **5V** | **5V** — bottom double row, far right, outer pin |
-| 2 | ESP32 board **GND** | **GND** — right side, just under AREF |
+| 1 | ESP32 board **5V** | **5V** — top double row, far left, upper pin (edge) |
+| 2 | ESP32 board **GND** | **GND** — left side, just above AREF |
 | 3 | Mega **TX1 18** | 1 kΩ → ESP32 **RXD**; plus 2 kΩ (two 1 kΩ in a row) from ESP32 RXD to ESP32 GND |
 | 4 | ESP32 **TXD** | Mega **RX1 19** |
-| 5–8 | HC-SR04 VCC · Trig · Echo · GND | 5V (bottom row, far right, inner) · **22** · **23** · GND (bottom row, far left) |
-| 9–12 | MPU-6050 VCC · GND · SCL · SDA | **3.3V** · GND (left) · **SCL 21** · **SDA 20** |
-| 13–15 | DHT11 S · + · − | **A0** · 5V (left) · GND (left) |
+| 5–8 | HC-SR04 VCC · Trig · Echo · GND | 5V (top row, far left, lower pin) · **22** (lower row) · **23** (upper row), second from the left · GND (top row, far right, upper pin) |
+| 9–12 | MPU-6050 VCC · GND · SCL · SDA | **3.3V** · GND next to 5V (right side) · **SCL 21** · **SDA 20** (left side, top) |
+| 13–15 | DHT11 S · + · − | **A0** · 5V · GND next to Vin (all on the right side) |
+
+Every wire is male–female (pin end in the Mega's sockets, socket end on the sensor or the ESP32 board's pins). The 1 kΩ
+on wire 3 goes straight into Mega socket 18; at the ESP32 end, its other leg and the 2 kΩ are twisted together into a
+female–female wire to RXD, and the 2 kΩ's free leg goes on a female–female wire to the bottom GND. **Solder the
+MPU-6050's pin strip** (at least VCC GND SCL SDA); the HC-SR04 and DHT11 already have pins. Robot → Setup → 📄 *Open the
+pin-by-pin wiring guide* shows all of this on a drawing of the board.
 
 Steps: (1) update the car to 2.3 first (over Wi-Fi is easiest), (2) Robot → Setup → **🧠 Arduino Mega sensor hub → 🔌 Flash
 the Mega** with the Mega on its USB cable and wire 1 unplugged, (3) wire everything, switch the car on and keep it still

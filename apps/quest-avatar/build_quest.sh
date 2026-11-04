@@ -8,6 +8,8 @@ APKTOOL=${APKTOOL:-/home/claude/godot/apktool.jar}
 LOADER_AAR=${LOADER_AAR:-/home/claude/godot/loader.aar}
 # Store builds must always be signed with the RELEASE key (Meta rejects a different certificate)
 KS=${KS:-/home/claude/keys/carpathron-release.keystore}; KS_PASS=${KS_PASS:-$(cat /home/claude/keys/release.pass)}; KS_ALIAS=${KS_ALIAS:-carpathron}
+# the keystore password is never stored in export_presets.cfg: Godot reads it from these variables
+export GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$KS" GODOT_ANDROID_KEYSTORE_RELEASE_USER="$KS_ALIAS" GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD="$KS_PASS"
 mkdir -p build && rm -rf build/dec build/*.apk build/*.idsig
 "$GODOT" --headless --path . --export-${EXPORT:-release} "Quest" build/CarpathronAvatar-unsigned.apk > build/export.log 2>&1 || { tail -20 build/export.log; exit 1; }
 java -jar "$APKTOOL" d -f -s -o build/dec build/CarpathronAvatar-unsigned.apk > /dev/null

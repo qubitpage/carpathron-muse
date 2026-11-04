@@ -1,7 +1,7 @@
 {
   "name": "muse-carpathron",
   "productName": "Muse Carpathron",
-  "version": "2.3.5",
+  "version": "2.3.6",
   "description": "Muse Carpathron: an AI agent for Windows powered by Meta Muse models (open-source hackathon edition). Coding, servers, GitHub, MCP, computer use and robot control.",
   "main": "main.js",
   "author": {
@@ -14,7 +14,7 @@
   "scripts": {
     "start": "electron .",
     "server": "node backend/standalone.js",
-    "test": "node test/run-all.js && node test/v14.js && node test/security.js && node test/carlab.js && node test/explain.js && node test/roommap.js && node test/voice.js",
+    "test": "node test/run-all.js && node test/ui-questrec.js && node test/v14.js && node test/security.js && node test/carlab.js && node test/explain.js && node test/roommap.js && node test/voice.js",
     "dist": "node build/patch-sdk.js && node build/fetch-voice-engine.js && electron-builder --win nsis --x64",
     "postinstall": "node build/patch-sdk.js",
     "test:electron": "xvfb-run -a electron --no-sandbox test/electron-browser.js /tmp && xvfb-run -a electron --no-sandbox test/electron-audio.js test/audio"

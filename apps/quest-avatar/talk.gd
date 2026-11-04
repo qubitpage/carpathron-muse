@@ -105,7 +105,7 @@ func _finish_rec() -> void:
 	for v in _rec:
 		pk = maxf(pk, absf(v))
 	print("CARPATHRON_TALK heard %.1f s, peak %.3f, noise %.4f, ptt %s" % [secs, pk, noise, str(_ptt)])
-	if secs < 0.45 or (not _ptt and pk < noise * 4.0 + 0.01):
+	if secs < 0.45:
 		_rt_stop()
 		_rec = PackedFloat32Array()
 		set_state("idle")
@@ -352,8 +352,7 @@ func _process(delta: float) -> void:
 	if _pre.size() > keep:
 		_pre = _pre.slice(_pre.size() - keep)
 	if state == "idle":
-		if rms < noise * 2.0 + 0.002:
-			noise = lerpf(noise, minf(rms, 0.02), 0.005 if rms > noise else 0.03)
+		noise = lerpf(noise, minf(rms, 0.05), 0.02)
 		if hands_free and Time.get_ticks_msec() > _deaf_until and rms > noise * 2.5 + 0.005:
 			_voice_ms += ms
 			if _voice_ms > 120.0:

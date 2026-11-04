@@ -138,12 +138,13 @@
         mode.textContent = v.mode === 'room' ? 'Carpathron in my room · live' : v.mode === 'tour' ? 'virtual tour · live' : v.mode === 'robot' ? 'robot · live' : 'live';
         mode.classList.add('ok');
         if (!questOn) { wrap.hidden = false; wait.hidden = true; img.src = '/api/avatar/view.mjpg?v=' + Date.now(); questOn = true; }
+        if (recBtn) recBtn.disabled = false;
       } else if (questOn && !questOffT) {
-        questOffT = setTimeout(() => { wrap.hidden = true; wait.hidden = false; mode.textContent = 'waiting for the headset'; mode.classList.remove('ok'); img.removeAttribute('src'); questOn = false; questOffT = null; }, 6000);
+        questOffT = setTimeout(() => { if (rec.on) recStop(); if (recBtn) recBtn.disabled = true; wrap.hidden = true; wait.hidden = false; mode.textContent = 'waiting for the headset'; mode.classList.remove('ok'); img.removeAttribute('src'); questOn = false; questOffT = null; }, 6000);
       }
     } catch (_) {}
   }
-  setInterval(questPoll, 2000); questPoll();
+  setInterval(questPoll, 2000); setTimeout(questPoll, 0);
   // 2.3: what you say to Carpathron in the headset and what he answers (shown under the Quest view)
   const feed = [];
   function onCompanion(d) {
@@ -164,13 +165,71 @@
   try { if (voiceHere) voiceHere.checked = localStorage.getItem('mc.questVoice') !== '0'; } catch (_) {}
   if (voiceHere) voiceHere.onchange = () => { try { localStorage.setItem('mc.questVoice', voiceHere.checked ? '1' : '0'); } catch (_) {} };
   let vq = Promise.resolve();
+  // his voice goes through one audio graph, so a recording can take it too
+  let actx = null, voiceDest = null;
+  function audioGraph() { if (!actx) { actx = new (window.AudioContext || window.webkitAudioContext)(); voiceDest = actx.createMediaStreamDestination(); } if (actx.state === 'suspended') actx.resume().catch(() => {}); return actx; }
   function onCompanionVoice(d) {
     if (!d || !Array.isArray(d.audio) || !questOn || !voiceHere || !voiceHere.checked) return;
     for (const u of d.audio) {
       const src = String(u).replace(/^\/avatar\/speech\//, '/api/avatar/speech/');
-      vq = vq.then(() => new Promise((done) => { const a = new Audio(src); a.onended = done; a.onerror = done; a.play().catch(done); }));
+      vq = vq.then(() => new Promise((done) => {
+        const a = new Audio(src); a.crossOrigin = 'anonymous';
+        try { const ctx = audioGraph(); const n = ctx.createMediaElementSource(a); n.connect(ctx.destination); n.connect(voiceDest); } catch (_) {}
+        a.onended = done; a.onerror = done; a.play().catch(done);
+      }));
     }
   }
+  // 2.3.6: ⏺ Record the Quest view here, with his voice and (if you like) your PC microphone → <workspace>/recordings
+  const rec = { on: false, mr: null, name: '', timer: null, t0: 0, mic: null, bytes: 0 };
+  const recBtn = $('#btnQuestRec'), recState = $('#questRecState'), recList = $('#questRecList');
+  async function listRecordings() {
+    try {
+      const r = await (await fetch('/api/avatar/recordings', { credentials: 'same-origin' })).json();
+      recList.innerHTML = '';
+      if (!r.files || !r.files.length) return;
+      const mb = (b) => `${(b / 1048576).toFixed(1)} MB`;
+      recList.append(Object.assign(document.createElement('div'), { className: 'muted', textContent: `Recordings in ${r.dir}` }));
+      for (const f of r.files.slice(0, 5)) {
+        const row = document.createElement('div'); row.className = 'row';
+        const a = document.createElement('a'); a.href = '#'; a.textContent = `${f.name} (${mb(f.bytes)})`; a.onclick = (e) => { e.preventDefault(); if (window.desktop && window.desktop.openPath) window.desktop.openPath(f.file); };
+        row.append(a); recList.append(row);
+      }
+    } catch (_) {}
+  }
+  async function recStart() {
+    const img = $('#questVideo');
+    if (!questOn || !img.naturalWidth) { recState.textContent = 'No headset view yet.'; return; }
+    const cv = document.createElement('canvas'); cv.width = img.naturalWidth || 854; cv.height = img.naturalHeight || 480;
+    const g = cv.getContext('2d');
+    const draw = () => { try { g.drawImage(img, 0, 0, cv.width, cv.height); } catch (_) {} };
+    draw();
+    const stream = cv.captureStream(10);
+    const ctx = audioGraph();
+    const mix = ctx.createMediaStreamDestination();
+    try { ctx.createMediaStreamSource(voiceDest.stream).connect(mix); } catch (_) {}
+    if ($('#questRecMic').checked) {
+      try { rec.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); ctx.createMediaStreamSource(rec.mic).connect(mix); }
+      catch (e) { recState.textContent = `Microphone not available (${e.message}) — recording without your voice.`; rec.mic = null; }
+    }
+    for (const t of mix.stream.getAudioTracks()) stream.addTrack(t);
+    const type = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((t) => MediaRecorder.isTypeSupported(t)) || '';
+    rec.name = `quest-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.webm`;
+    rec.bytes = 0; rec.t0 = Date.now(); rec.on = true;
+    rec.mr = new MediaRecorder(stream, type ? { mimeType: type, videoBitsPerSecond: 2500000 } : undefined);
+    let chain = Promise.resolve();
+    rec.mr.ondataavailable = (e) => { if (!e.data || !e.data.size) return; chain = chain.then(() => fetch(`/api/avatar/recording?name=${rec.name}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/octet-stream' }, body: e.data }).then((r) => r.json()).then((j) => { if (j.bytes) rec.bytes = j.bytes; }).catch(() => {})); };
+    rec.mr.onstop = () => { chain.then(() => { recState.textContent = `Saved: ${rec.name} (${(rec.bytes / 1048576).toFixed(1)} MB)`; listRecordings(); }); };
+    rec.mr.start(2000);
+    rec.timer = setInterval(() => { draw(); const s = Math.round((Date.now() - rec.t0) / 1000); recState.textContent = `⏺ Recording ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}  ·  ${(rec.bytes / 1048576).toFixed(1)} MB  ·  ${rec.mic ? 'with your voice' : 'no microphone'}`; }, 100);
+    recBtn.textContent = '⏹ Stop'; recBtn.classList.add('recording');
+  }
+  function recStop() {
+    rec.on = false; clearInterval(rec.timer);
+    try { rec.mr && rec.mr.state !== 'inactive' && rec.mr.stop(); } catch (_) {}
+    if (rec.mic) { for (const t of rec.mic.getTracks()) t.stop(); rec.mic = null; }
+    recBtn.textContent = '⏺ Record'; recBtn.classList.remove('recording');
+  }
+  if (recBtn) { recBtn.onclick = () => (rec.on ? recStop() : recStart()); listRecordings(); }
   $('#btnQuestFull').onclick = () => { const w = $('#questVideo'); (w.requestFullscreen || w.webkitRequestFullscreen || (() => {})).call(w); };
   let ledT;
   $('#carLed').oninput = (e) => { clearTimeout(ledT); ledT = setTimeout(() => window.MCapi('/api/robot/led', { body: { v: Number(e.target.value) } }).catch(() => {}), 120); };

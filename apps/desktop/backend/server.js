@@ -834,6 +834,23 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/robot/stream') return robot.pipeStream(res);
     if (p === '/api/avatar/view.mjpg') return questView.add(res);
     if (p === '/api/avatar/view') return send(res, 200, { live: Date.now() - questView.at < 3000, at: questView.at, mode: questView.mode });
+    // 2.3.6: recordings of the Quest view made in the app (Robots → Control → ⏺ Record): the browser sends the video
+    // in pieces while it records; the file grows in <workspace>/recordings
+    if (p === '/api/avatar/recording' && m === 'POST') {
+      const name = String(url.searchParams.get('name') || '').replace(/[^\w.-]/g, '');
+      if (!/^quest-[\w-]+\.webm$/.test(name)) return send(res, 400, { error: 'bad name' });
+      const dir = path.join(store.settings.workspace, 'recordings');
+      fs.mkdirSync(dir, { recursive: true });
+      const raw = await readBody(req, 64 * 1024 * 1024);
+      fs.appendFileSync(path.join(dir, name), raw);
+      return send(res, 200, { ok: true, file: path.join(dir, name), bytes: fs.statSync(path.join(dir, name)).size });
+    }
+    if (p === '/api/avatar/recordings' && m === 'GET') {
+      const dir = path.join(store.settings.workspace, 'recordings');
+      let files = [];
+      try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.webm')).map((f) => ({ name: f, file: path.join(dir, f), bytes: fs.statSync(path.join(dir, f)).size, at: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.at - a.at).slice(0, 12); } catch {}
+      return send(res, 200, { dir, files });
+    }
     if (p.startsWith('/api/avatar/speech/') && m === 'GET') {
       // 2.3.5: Carpathron's voice on this PC too (so a PC screen recording of the Quest view has his voice)
       const nm = p.slice('/api/avatar/speech/'.length).replace(/[^\w.-]/g, ''), job = speechJobs.get(nm.replace(/\.wav$/, ''));

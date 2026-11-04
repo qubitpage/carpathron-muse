@@ -27,6 +27,10 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.6:** **⏺ Record** in *Robots → Control → Meta Quest view*: records what you see in the headset together with
+> Carpathron's voice and (tick it) your own voice from the PC microphone, over Wi-Fi, into *MuseCarpathron\recordings*
+> as a .webm video (plays in Chrome, Edge, VLC). Carpathron Avatar 1.6.4: the microphone is never switched off again
+> while the app runs (1.6.3 did that with *Talk without buttons* off, and the headset did not always give it back).
 > **2.3.5:** recording and a steadier headset. *Robots → Control* always shows the **Meta Quest view** card: what you see
 > in the headset, over Wi-Fi, with **his voice on this PC too** — record that card with any screen recorder, no cable.
 > Carpathron Avatar 1.6.3: the robot's camera window **follows your head** (Small / Medium / Large in the menu), the

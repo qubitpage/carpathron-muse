@@ -827,16 +827,11 @@ func _mic_ready() -> bool:
 
 ## 1.6.3: with "Talk without buttons" OFF the microphone is open only while you hold the grip, so the Quest's own
 ## screen recorder can record your voice (two apps cannot share the microphone on the headset)
-func _mic_gate(grip_down: bool) -> void:
-	if mic == null:
-		return
-	var want: bool = hands_free or grip_down or recording
-	if want and not mic.playing:
+func _mic_gate(_grip_down: bool) -> void:
+	# 1.6.4: the microphone is never stopped and restarted (on the headset the input does not come back reliably);
+	# it stays open, and the app only listens hands-free or while you hold the grip
+	if mic != null and not mic.playing:
 		mic.play()
-	elif not want and mic.playing and Time.get_ticks_msec() > _mic_off_at:
-		mic.stop()
-	if grip_down:
-		_mic_off_at = Time.get_ticks_msec() + 1500
 
 func _ptt(down: bool) -> void:
 	if down and not recording and muse.state == "linked":
@@ -981,7 +976,7 @@ func _menu_items(p: String) -> Dictionary:
 			its.append({"id": "drive", "arg": "", "icon": "✥", "color": C_ORANGE, "label": "Driving", "sub": "Simple: a stick forward / back + sideways   ·   Tank: one stick per side", "value": "Tank" if tank else "Simple"})
 			its.append({"id": "head", "arg": "", "icon": "◎", "color": C_ORANGE, "label": "Head steering", "sub": "the robot turns where you look", "value": "On" if head_steer else "Off"})
 			its.append({"id": "hints", "arg": "", "icon": "?", "color": C_GREY, "label": "Button labels on the controllers", "sub": "shown when you look at your controllers", "value": "On" if cfg.get_value("ui", "hints", true) else "Off"})
-			its.append({"id": "handsfree", "arg": "", "icon": "🎤", "color": C_ORANGE, "label": "Talk without buttons", "sub": "On: Carpathron listens when you speak.   Off: hold the right grip — and the Quest screen recorder can record your voice", "value": "On" if hands_free else "Off"})
+			its.append({"id": "handsfree", "arg": "", "icon": "🎤", "color": C_ORANGE, "label": "Talk without buttons", "sub": "On: Carpathron listens when you speak.   Off: hold the right grip while you talk", "value": "On" if hands_free else "Off"})
 			its.append({"id": "vision", "arg": "", "icon": "◈", "color": C_ORANGE, "label": "Smart vision", "sub": "Muse marks people, animals, obstacles and items on the robot's picture", "value": "On" if cfg.get_value("ui", "vision", true) else "Off"})
 			its.append({"id": "share", "arg": "", "icon": "⇪", "color": C_BLUE, "label": "Show my view on the PC", "sub": "Muse Carpathron > Robots > Live shows what you see (to record it)", "value": "On" if spectator.enabled else "Off"})
 			its.append({"id": "recenter", "arg": "", "icon": "⊙", "color": C_GREY, "label": "Bring the screen in front of me"})

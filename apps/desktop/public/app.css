@@ -343,7 +343,7 @@ body[data-view="chat"] .mobile-menu { display: none !important; }
 .zoom-ov { position: fixed; inset: 0; background: #000c; display: flex; align-items: center; justify-content: center; z-index: 1000; cursor: zoom-out; }
 .zoom-ov img { max-width: 95vw; max-height: 92vh; border-radius: 8px; box-shadow: 0 8px 40px #000; }
 
-#btnMic.recording { color: #fff; background: #d93025; border-radius: 8px; padding: 0 8px; min-width: 56px; animation: micpulse 1.2s infinite; }
+#btnMic.recording, #btnQuestRec.recording { color: #fff; background: #d93025; border-radius: 8px; padding: 0 8px; min-width: 56px; animation: micpulse 1.2s infinite; }
 @keyframes micpulse { 50% { opacity: .7; } }
 
   background: var(--panel-2); border: 1px solid var(--accent, #f5822a); padding: 8px 12px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }

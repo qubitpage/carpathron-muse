@@ -1382,7 +1382,9 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
               const raw = await readBody(req, 12 * 1024 * 1024);
               const s = store.settings;
               text = await voice.transcribe(raw, { apiKey: s.apiKey, apiBase: s.apiBase, mime: 'audio/wav' });
-              if (!text) return send(res, 200, { heard: '', say: "Sorry, I didn't catch that.", action: 'none', mood: 'sorry' });
+              // 2.3.8: nothing understood = silent (the headset decides whether to say so): a spoken "Sorry, I didn't
+              // catch that" was heard again by the headset microphone and made an endless loop
+              if (!text) { logFn('Companion: the transcription was empty (no words in the recording)'); return send(res, 200, { heard: '', say: '', action: 'none', mood: 'curious', missed: true }); }
             } else text = String((await readJson(req)).text || '');
             const sttMs = Date.now() - t0;
             if (voice.voiceToCommand(text) === '/robot stop') { roommap.stop('Quest'); missions.stop('Quest'); robot.stop('Quest'); }

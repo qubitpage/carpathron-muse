@@ -27,6 +27,11 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.8:** a small turn is a small turn again: the PC stops a gyro turn that runs too long (a 20° turn spun 2-3 full
+> circles when the Mega hub's heading lagged) and then uses timed turns for 10 minutes. When nothing was understood
+> he stays quiet instead of saying "Sorry, I didn't catch that" — that sentence was heard again by the headset and made
+> a loop. His voice goes into a ⏺ recording silently; playing it on the PC speakers is now opt-in (the headset heard
+> it). Carpathron Avatar 1.6.6.
 > **2.3.7:** Baby Carpathron no longer talks over you: he mentions a person or a pet he sees at most once every 5
 > minutes (the same dog was announced every 25 s under a new name), and never in the minute after you spoke to him.
 > Carpathron Avatar 1.6.5: listening uses the proven recording upload again (*Settings → Fast listening (beta)* turns

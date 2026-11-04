@@ -800,6 +800,10 @@ func _setup_audio() -> void:
 			link.note = {"listening": "🎤 listening...", "thinking": "Carpathron is thinking...", "speaking": ""}.get(st, link.note)
 			_refresh_panel())
 	robot_talk.replied.connect(func(j):
+		if bool(j.get("missed", false)):
+			muse.last_answer = "🎤 (didn't get that — say it again, or hold the right grip while you talk)"
+			_refresh_panel()
+			return
 		if bool(j.get("local", false)):
 			_car_action(str(j.get("action", "none")), float(j.get("amount", 0)))
 		muse.last_answer = "You: %s\nCarpathron: %s%s" % [str(j.get("heard", "")), str(j.get("say", "")), ("\nThe car: " + str(j["doing"])) if str(j.get("doing", "")) != "" else ""]

@@ -162,19 +162,22 @@
   // 2.3.5: his voice on the PC speakers too (on by default while the Quest view is shown), so a PC screen recording
   // of the headset view has what he says; the headset plays the same files
   const voiceHere = $('#questVoiceHere');
-  try { if (voiceHere) voiceHere.checked = localStorage.getItem('mc.questVoice') !== '0'; } catch (_) {}
-  if (voiceHere) voiceHere.onchange = () => { try { localStorage.setItem('mc.questVoice', voiceHere.checked ? '1' : '0'); } catch (_) {} };
+  // 2.3.8: off by default — his voice from the PC speakers was heard again by the headset microphone
+  try { if (voiceHere) voiceHere.checked = localStorage.getItem('mc.questVoice2') === '1'; } catch (_) {}
+  if (voiceHere) voiceHere.onchange = () => { try { localStorage.setItem('mc.questVoice2', voiceHere.checked ? '1' : '0'); } catch (_) {} };
   let vq = Promise.resolve();
   // his voice goes through one audio graph, so a recording can take it too
   let actx = null, voiceDest = null;
   function audioGraph() { if (!actx) { actx = new (window.AudioContext || window.webkitAudioContext)(); voiceDest = actx.createMediaStreamDestination(); } if (actx.state === 'suspended') actx.resume().catch(() => {}); return actx; }
   function onCompanionVoice(d) {
-    if (!d || !Array.isArray(d.audio) || !questOn || !voiceHere || !voiceHere.checked) return;
+    // his voice goes into a recording (silently) and, only if ticked, out of the PC speakers
+    const loud = !!(voiceHere && voiceHere.checked);
+    if (!d || !Array.isArray(d.audio) || !questOn || (!loud && !rec.on)) return;
     for (const u of d.audio) {
       const src = String(u).replace(/^\/avatar\/speech\//, '/api/avatar/speech/');
       vq = vq.then(() => new Promise((done) => {
         const a = new Audio(src); a.crossOrigin = 'anonymous';
-        try { const ctx = audioGraph(); const n = ctx.createMediaElementSource(a); n.connect(ctx.destination); n.connect(voiceDest); } catch (_) {}
+        try { const ctx = audioGraph(); const n = ctx.createMediaElementSource(a); if (loud) n.connect(ctx.destination); n.connect(voiceDest); } catch (_) {}
         a.onended = done; a.onerror = done; a.play().catch(done);
       }));
     }

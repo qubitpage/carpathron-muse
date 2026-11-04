@@ -135,9 +135,13 @@ class Robot {
     try { const j = JSON.parse(await carGet(this.ip, '/status', 1500)); this.info = j; this._fromGyro(); return j.sensors || null; } catch { return null; }
   }
   // Exact turn with the car's gyro (firmware 2.0 + MPU-6050). Resolves when done; null when the car cannot.
-  async gyroTurn(deg, speed = 70) {
+  // 2.3.8: maxMs = how long that turn may take at most (from the car's measured full-turn time); the PC stops the
+  // car itself when the turn runs longer or the heading has gone past the target — a car whose gyro heading lags
+  // (the Mega hub) kept spinning 2-3 full circles for a 20° turn.
+  async gyroTurn(deg, speed = 70, { maxMs = 0 } = {}) {
     const s = await this.sensors();
     if (!s || !s.imu) return null;
+    this._turnMaxMs = maxMs; this._turnYaw0 = Number(s.yaw);
     this.cancelPlan('gyro turn');
     this.stopTicks = 10; this.lastSent = { l: 0, r: 0 }; // no more (or first) stop packets: they would cancel the car's own turn
     const start = await carGet(this.ip, `/turn?deg=${Math.round(deg)}&speed=${Math.round(speed)}`, 2000).then((b) => JSON.parse(b)).catch(() => null);
@@ -151,7 +155,14 @@ class Robot {
       await new Promise((r) => setTimeout(r, 120));
       const now = await this.sensors();
       if (now && !now.turning) return { turned: deg, result: now.turnResult === 1 ? 'reached' : now.turnResult === 2 ? 'timeout' : 'cancelled', yaw: now.yaw };
-      if (Date.now() - t0 > 6000 + Math.abs(deg) * 35) { carGet(this.ip, '/stop', 1500).catch(() => {}); return { turned: deg, result: 'timeout' }; }
+      const el = Date.now() - t0;
+      const moved = now && Number.isFinite(Number(now.yaw)) && Number.isFinite(this._turnYaw0) ? Math.abs(Number(now.yaw) - this._turnYaw0) : 0;
+      const over = moved >= Math.abs(deg) + 15;
+      if (over || (this._turnMaxMs && el > this._turnMaxMs) || el > 6000 + Math.abs(deg) * 35) {
+        await carGet(this.ip, '/stop', 1500).catch(() => {});
+        this.emit('log', `Gyro turn ${deg}° stopped by the PC after ${el} ms (${over ? 'went past the target' : 'took too long'}; heading moved ${Math.round(moved)}°)`);
+        return { turned: deg, result: 'timeout' };
+      }
     }
   }
 

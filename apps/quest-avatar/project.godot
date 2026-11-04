@@ -3,7 +3,7 @@ config_version=5
 
 [application]
 config/name="Carpathron Avatar"
-config/version="1.6.5"
+config/version="1.6.6"
 config/description="See through your robot's eyes and drive it from the Meta Quest."
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.4", "Mobile")

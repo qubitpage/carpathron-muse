@@ -149,9 +149,9 @@ func send_wav(wav: PackedByteArray) -> void:
 ## push-to-talk = he says so
 func _missed() -> void:
 	_misses += 1
-	if _ptt or not hands_free or _misses >= 3:
+	if not hands_free or _misses >= 4:
 		_misses = 0
-		_on_reply({"heard": "", "say": "Sorry, I didn't catch that. " + ("Try holding the grip while you talk." if hands_free else "Could you say it again?"), "action": "none", "mood": "sorry"})
+		_on_reply({"heard": "", "say": "Sorry, I didn't catch that." + (" Hold the right grip while you talk." if hands_free else ""), "action": "none", "mood": "sorry"})
 	else:
 		replied.emit({"heard": "", "say": "", "action": "none", "mood": "curious", "missed": true})
 		set_state("idle")
@@ -176,6 +176,9 @@ func _local_turn(text: String) -> void:
 func _on_reply(j: Dictionary) -> void:
 	if state != "thinking":
 		return   # interrupted meanwhile
+	if bool(j.get("missed", false)) and str(j.get("say", "")) == "":
+		_missed()
+		return
 	if str(j.get("heard", "")) != "":
 		_misses = 0
 	replied.emit(j)

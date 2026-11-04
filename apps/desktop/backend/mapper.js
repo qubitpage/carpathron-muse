@@ -81,10 +81,15 @@ class Mapper {
     deg = Math.max(-360, Math.min(360, Number(deg) || 0));
     if (!deg) return { turned: 0 };
     const settle = look ? 450 : 250;
-    // with the gyro on the car: exact turn done by the car itself
-    if (this.robot.gyroTurn) {
+    // with the gyro on the car: exact turn done by the car itself — 2.3.8: the PC stops a turn that runs too long; after
+    // one such turn the gyro is not trusted for 10 minutes and turns are timed (the Mega hub's heading can lag, and
+    // the car then kept spinning full circles)
+    if (this.robot.gyroTurn && Date.now() > (this.gyroBadUntil || 0)) {
       const sp = look ? Math.min(this.cfg().turnSpeed, 58) : this.cfg().turnSpeed;
-      const g = await this.robot.gyroTurn(deg, sp).catch(() => null);
+      // the longest this turn should take: the measured full-turn time, scaled for the speed, with a generous margin
+      const maxMs = Math.round((Math.abs(deg) / 360) * this.cfg().turnMs360 * (this.cfg().turnSpeed / sp) * 1.5 + 400);
+      const g = await this.robot.gyroTurn(deg, sp, { maxMs }).catch(() => null);
+      if (g && g.result === 'timeout') { this.gyroBadUntil = Date.now() + 600000; this.log(`gyro turn ${deg}° did not finish: timed turns for the next 10 minutes`); }
       if (g) { if (g.result === 'cancelled') throw new Error('Turn interrupted (STOP or manual control)'); await sleep(settle); return { turned: deg, gyro: true, result: g.result }; }
     }
     const { turnMs360, turnSpeed } = this.cfg();

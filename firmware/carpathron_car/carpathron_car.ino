@@ -45,7 +45,7 @@
   - Then set up Wi-Fi from the phone (see above). Muse Carpathron > Robot > "Find my car" finds its IP.
 */
 
-#define FW_VERSION "2.4.0"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
+#define FW_VERSION "2.4.1"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -226,6 +226,10 @@ float leanX = NAN, leanY = NAN, levelX = NAN, levelY = NAN; int sideL = -1, side
 volatile bool cliffNow = false, cliffSensor = false, sideEyes = false;
 volatile unsigned long tiltStops = 0, cliffStops = 0, hazardLastMs = 0; const char* hazardKind = "";
 volatile int hazardDir = 0;      // the direction it was driving when the hazard stopped it: 1 forward, -1 backward
+// 2.4.1: the Mega measures its gyro zero at power-on; if the car was moving then, the heading drifts. /gyrozero (and the
+// car by itself, after standing still 3 s while the heading keeps turning > 1.5 deg/s) asks the Mega to measure again.
+volatile unsigned long stillSince = 0, lastZeroAsk = 0, driftSince = 0; volatile int zeroAsks = 0;
+static void megaZero() { if (megaOk) { Serial.print("$CAL\n"); lastZeroAsk = millis(); zeroAsks++; } }
 bool sensorTaskOn = false;
 VL53L0X tof;
 volatile int distMm = -1;                // -1 = nothing in range / no sensor
@@ -327,7 +331,8 @@ static bool megaParse(const String& ln) {
   megaWasBump = bump;
   if (megaImu) {
     float y = v[0];
-    if (!isnan(megaYawPrev)) yawDeg += (y - megaYawPrev) * CFG(S_GSCALE) / 1000.0f;   // same sign as the car: + = right
+    // a jump of more than 60 deg in one line (50 ms) = the Mega restarted or measured its zero again: no turn
+    if (!isnan(megaYawPrev) && fabsf(y - megaYawPrev) < 60) yawDeg += (y - megaYawPrev) * CFG(S_GSCALE) / 1000.0f;   // same sign as the car: + = right
     megaYawPrev = y; lastDps = v[1];
   }
   if (megaSonar) distMm = (v[2] <= 0 || v[2] >= 2000) ? -1 : max(1, (int)v[2] - CFG(S_TOFOFF));
@@ -462,6 +467,15 @@ static void sensorTask(void*) {
       }
     }
     if (backoffUntil && (long)(millis() - backoffUntil) >= 0) { backoffUntil = 0; drive(0, 0); }
+    // standing still but the Mega's heading keeps turning: its gyro zero is wrong -> ask it to measure again
+    if (megaNew && megaImu) {
+      if (curL || curR || turning) { stillSince = 0; driftSince = 0; }
+      else {
+        if (!stillSince) stillSince = millis();
+        if (millis() - stillSince > 3000 && fabsf(lastDps) > 1.5f) { if (!driftSince) driftSince = millis(); } else driftSince = 0;
+        if (driftSince && millis() - driftSince > 2000 && millis() - lastZeroAsk > 20000) { megaZero(); driftSince = 0; }
+      }
+    }
     if (curL > 0 && curR > 0 && safetyMm > 0 && megaLinkLost()) { drive(0, 0); blocked = true; linkStop = true; }
     if (tofOk && (tof.readReg(VL53L0X::RESULT_INTERRUPT_STATUS) & 0x07)) {
       uint16_t mm = tof.readReg16Bit(VL53L0X::RESULT_RANGE_STATUS + 10);
@@ -637,6 +651,11 @@ static esp_err_t turn_handler(httpd_req_t* req) {
   return send_text(req, "application/json", "{\"ok\":true,\"turning\":true}");
 }
 
+// /gyrozero: measure the gyro zero again (Mega hub: "$CAL", the car must stand still ~2 s; own MPU-6050: at the next start)
+static esp_err_t gyrozero_handler(httpd_req_t* req) {
+  if (megaOk && megaImu) { drive(0, 0); megaZero(); return send_text(req, "application/json", "{\"ok\":true,\"by\":\"mega\",\"waitMs\":2600}"); }
+  return send_text(req, "application/json", "{\"ok\":false,\"error\":\"no Mega hub gyro: restart the car standing still\"}");
+}
 static esp_err_t safety_handler(httpd_req_t* req) {
   safetyMm = constrain(queryInt(req, "mm", safetyMm), 0, 1000);
   char b[64]; snprintf(b, sizeof(b), "{\"ok\":true,\"stopMm\":%d}", (int)safetyMm);
@@ -1179,6 +1198,7 @@ void startServers() {
     { "/test", HTTP_GET, test_handler, NULL },
     { "/turn", HTTP_GET, turn_handler, NULL },
     { "/safety", HTTP_GET, safety_handler, NULL },
+    { "/gyrozero", HTTP_GET, gyrozero_handler, NULL },
     { "/config", HTTP_GET, config_handler, NULL },
     { "/settings", HTTP_GET, settings_handler, NULL },
     { "/diag", HTTP_GET, diag_handler, NULL },

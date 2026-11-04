@@ -76,8 +76,11 @@ class Calibrator {
     const d = await C.runDiag(this.host);
     const rest = Math.abs(Number(d.imu.restDps));
     if (rest <= 0.3) return { ok: true, text: `The gyro is steady (${d.imu.restDps}°/s at rest). Nothing to change.`, measured: { restDps: d.imu.restDps } };
-    await C.restart(this.host);
-    await sleep(7000);
+    // the gyro on the Arduino Mega hub (car firmware 2.4.1+): ask the Mega to measure its zero again — restarting the car
+    // does not restart the Mega
+    const viaMega = d.mega && d.mega.imu ? await C.carJson(this.host, '/gyrozero').catch(() => null) : null;
+    if (viaMega && viaMega.ok) await sleep((viaMega.waitMs || 2600) + 1500);
+    else { await C.restart(this.host); await sleep(7000); }
     const d2 = await C.runDiag(this.host).catch(() => null);
     const rest2 = d2 ? Math.abs(Number(d2.imu.restDps)) : null;
     return { ok: rest2 != null && rest2 <= 0.3, text: rest2 == null ? 'The car restarted to measure the gyro zero again but did not answer yet. Run this step again in a moment.' : rest2 <= 0.3 ? `The gyro drifted ${rest.toFixed(2)}°/s; the car restarted standing still and now drifts ${rest2.toFixed(2)}°/s.` : `Still drifting ${rest2.toFixed(2)}°/s after a restart: make sure the car stands completely still at start, and that the gyro board is firmly fixed.`, measured: { before: rest, after: rest2 } };

@@ -27,6 +27,9 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.2.3:** car firmware 2.4.1 — the gyro on the Mega hub gets its zero measured again when the car stands still but its
+> heading keeps turning (it measured it while being carried), Calibration → Gyro zero now re-zeroes the Mega's gyro, and a
+> restart of the Mega no longer looks like a turn.
 > **2.2.2:** the robot looks after itself — **car firmware 2.4 + Mega hub 1.1**: the Mega restarts by itself if it ever
 > freezes (a watchdog: no need to open the cover), the car never drives forward without its distance sensor, a **bump**
 > (a jolt) stops it and backs it off, a **step or an edge** (a sudden lean) stops it and backs it off, and the optional

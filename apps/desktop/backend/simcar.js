@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const C = require('./carsettings');
 
-const FW = '2.4.0';
+const FW = '2.4.1';
 const VIEW = fs.readFileSync(path.join(__dirname, 'simcar-view.jpg'));
 // room in cm: outer walls + boxes [x1, y1, x2, y2]; the car starts in the middle looking along +x (heading 0 = +x, clockwise positive)
 const ROOM = { w: 360, h: 280, start: [120, 140], boxes: [[250, 110, 290, 170], [40, 200, 120, 260], [170, 30, 200, 60]] };

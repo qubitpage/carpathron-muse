@@ -52,13 +52,21 @@ class Mapper {
     if (Math.abs(turn) > 4) await this.turn(Math.round(turn), source);
     if (abort()) throw new Error('stopped');
     let left = dist - stopAt, driven = 0, blocked = false;
+    let s = null;
     while (left > 0.05) {
       if (abort()) throw new Error('stopped');
-      const hop = Math.min(0.5, left);
-      const s = await this.robot.sensors().catch(() => null);
-      if (s && s.tof && s.dist > 0 && s.dist / 1000 < hop + 0.12) { blocked = true; break; }
+      const hop = Math.min(0.3, left);   // 2.2.2: 30 cm hops (was 50): the car checks the way more often
+      s = await this.robot.sensors().catch(() => null);
+      // the car's distance sensor went away (Mega hub restarting, loose wire): wait for it, never drive blind
+      for (let w = 0; s && s.tof === false && (s.mega === false || s.linkLost) && w < 8 && !abort(); w++) { await new Promise((r) => setTimeout(r, 700)); s = await this.robot.sensors().catch(() => null); }
+      if (s && s.tof === false && (s.mega === false || s.linkLost)) { blocked = true; break; }
+      const keep = ((s && s.stopMm) || 150) / 1000 + 0.05;   // the hop must end before the car's stop distance
+      if (s && s.tof && s.dist > 0 && s.dist / 1000 < hop + keep) { blocked = true; break; }
+      const felt = s ? (s.bumps | 0) + (s.tiltStops | 0) + (s.cliffStops | 0) : 0;
       await this.forward(hop, source);
       driven += hop; left -= hop;
+      const s2 = await this.robot.sensors().catch(() => null);
+      if (s2 && ((s2.bumps | 0) + (s2.tiltStops | 0) + (s2.cliffStops | 0) > felt || (s2.blocked && s2.dist > 0 && s2.dist < (s2.stopMm || 150) + 30))) { blocked = true; break; }
     }
     return { metres: Math.round(driven * 100) / 100, turned: Math.round(turn), blocked, text: blocked ? `Stopped after ${driven.toFixed(1)} m: something is in the way.` : `Arrived (${driven.toFixed(1)} m).` };
   }

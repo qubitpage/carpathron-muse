@@ -108,7 +108,7 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
   const car = await sim.start();
   await step('practice car: settings read, live change, restart change, pin swap, factory reset', async () => {
     const s = await C.getSettings(car.host);
-    assert.strictEqual(s.fw, '2.3.0'); assert.strictEqual(s.values.rEn, 12);
+    assert.strictEqual(s.fw, '2.4.0'); assert.strictEqual(s.values.rEn, 12);
     await C.setSetting(car.host, 'maxPct', 60);
     let s2 = await C.getSettings(car.host);
     assert.strictEqual(s2.values.maxPct, 60); assert.strictEqual(s2.restartPending, false);
@@ -215,7 +215,7 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
     assert.ok((await fw.otaInfo(c2.host)).other.valid, 'the previous firmware is kept');
     assert.strictEqual((await fw.rollback(c2.host, 'nope')).ok, false);
     assert.ok((await fw.rollback(c2.host, key)).ok); await sleep(500);
-    assert.strictEqual((await C.getSettings(c2.host)).fw, '2.3.0');
+    assert.strictEqual((await C.getSettings(c2.host)).fw, '2.4.0');
     // builds list keeps the newest 8
     for (let i = 0; i < 10; i++) { const d = fw.newBuildDir(tmpd, `2.2.${i}`); fs.writeFileSync(path.join(d, 'carpathron_car.ino.bin'), 'x'); fs.writeFileSync(path.join(d, 'build.json'), JSON.stringify({ version: `2.2.${i}`, at: new Date(Date.now() + i * 1000).toISOString() })); }
     const list = fw.listBuilds(tmpd);
@@ -298,7 +298,7 @@ const byPart = (h, part) => h.items.find((x) => x.part === part) || {};
     const pr = await api('/api/robot/car/practice', {});
     assert.ok(pr.running && /127\.0\.0\.1/.test(pr.host));
     const s = await api('/api/robot/car/settings');
-    assert.strictEqual(s.fw, '2.3.0');
+    assert.strictEqual(s.fw, '2.4.0');
     const bad = await api('/api/robot/car/settings', { changes: { rEn: 5 } });
     assert.strictEqual(bad.ok, false); assert.ok(bad.errors.rEn);
     const good = await api('/api/robot/car/settings', { changes: { maxPct: 70, name: 'Rover', apPass: 'secret123' } });

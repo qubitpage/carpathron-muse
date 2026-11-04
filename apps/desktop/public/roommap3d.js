@@ -1,7 +1,8 @@
 // Robot → 🗺 Map: the room map the car learns with its laser, in 3D. Light floor = measured free, orange blocks = walls
 // and furniture the laser hit, dark = not seen yet. Put the robot where it really is, name places, and send the car:
 // it plans a way around what it knows (and the laser still stops it before anything new). Explore lets it learn the
-// room by itself; a photo scan adds the objects the camera recognises.
+// room by itself; a photo scan adds the objects the camera recognises. 2.2.2: what the car FELT (a bump, a step or
+// edge, a drop) is drawn as red warning marks the routes keep away from, and 🎯 Find sends it to an object.
 import * as THREE from './lib/three.module.min.js';
 import { OrbitControls } from './lib/OrbitControls.js';
 import { buildScene, buildCar } from './sim3d.js';
@@ -114,11 +115,22 @@ function flag(p, color, kind) {
   for (const o of [pole, cloth, foot, t]) { o.userData.place = p; g.add(o); }
   return g;
 }
+// a spot the car felt: red disc (the zone routes keep away from) + a small warning post with what it was
+const HZ = { bump: ['💥 bump', 0xff5a5f], step: ['⤵ step / edge', 0xff2d55], drop: ['⚠ drop', 0xff1f1f] };
+function hazardMark(hz) {
+  const [txt, color] = HZ[hz.kind] || HZ.bump, g = new THREE.Group(); g.position.copy(W(hz.x, hz.y));
+  const zone = new THREE.Mesh(new THREE.CircleGeometry(0.22, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, depthWrite: false })); zone.position.y = 0.006;
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.22, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 })); ring.position.y = 0.007;
+  const post = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.12, 4), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4 })); post.position.y = 0.06;
+  const t = label(txt, '#fff', 'rgba(150,20,30,.88)'); t.scale.set(0.7, 0.13, 1); t.position.y = 0.26;
+  g.add(zone, ring, post, t); return g;
+}
 function drawMarks() {
   disposeAll(S.marks);
   const v = S.map; if (!v) return;
   for (const p of v.places || []) S.marks.add(flag(p, 0x2fbf71, 'place'));
   for (const o of v.objects || []) S.marks.add(flag(o, 0x9b6bff, 'object'));
+  for (const hz of v.hazards || []) S.marks.add(hazardMark(hz));
   S.patrol.forEach((p, i) => {
     const b = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.03, 24), new THREE.MeshStandardMaterial({ color: 0x4f8cff, emissive: 0x1d3f8a })); b.position.copy(W(p.x, p.y, 0.015)); b.userData.place = { ...p, patrolIndex: i }; S.marks.add(b);
     const t = label(`${i + 1}`, '#fff', 'rgba(40,90,200,.9)'); t.scale.set(0.35, 0.07, 1); t.position.copy(W(p.x, p.y, 0.2)); t.userData.place = b.userData.place; S.marks.add(t);
@@ -207,9 +219,23 @@ async function poll(once) {
     S.car.position.copy(W(st.pose.x, st.pose.y)); S.car.rotation.y = -(st.pose.heading * Math.PI) / 180;
     const last = S.trail[S.trail.length - 1], here = S.car.position.clone().setY(0.012);
     if (!last || last.distanceTo(here) > 0.03) { S.trail.push(here); if (S.trail.length > 800) S.trail.shift(); S.trailLine.geometry.setFromPoints(S.trail); }
+    if (S.els.safety) S.els.safety.textContent = feelText(st.sensors, st.state);
     S.els.where.textContent = `${st.state === 'online' ? '🟢' : '⚪'} Robot at ${st.pose.x.toFixed(2)} m right, ${st.pose.y.toFixed(2)} m ahead, facing ${Math.round(((st.pose.heading % 360) + 360) % 360)}°${st.state === 'online' ? '' : ' — not connected'}`;
   }
   if (!once) pollT = setTimeout(poll, 300);
+}
+
+function feelText(s, state) {
+  if (state !== 'online') return 'The car is not connected.';
+  if (!s) return 'No sensor data (car firmware 2.x needed).';
+  const cm = (mm) => (mm > 0 ? `${Math.round(mm / 10)} cm` : 'clear');
+  const parts = [];
+  parts.push(s.linkLost ? '⚠ Mega link lost — forward is blocked until it is back' : s.tof ? `Ahead: ${cm(s.dist)} (stops at ${Math.round((s.stopMm || 150) / 10)} cm)` : '⚠ No distance sensor');
+  if (s.sideEyes) parts.push(`Sides: ${cm(s.sideL)} left · ${cm(s.sideR)} right`);
+  if (s.lean != null) parts.push(`Lean: ${s.lean}° from level`);
+  parts.push(s.cliffSensor ? (s.cliff ? '⚠ No floor ahead!' : 'Floor ahead: ok') : 'Drop sensor: not fitted');
+  if (s.bumps != null) parts.push(`Felt so far: ${s.bumps | 0} bumps · ${s.tiltStops | 0} steps · ${s.cliffStops | 0} drops`);
+  return parts.join('  ·  ');
 }
 
 // ------------------------------------------------------------------ the side panel
@@ -226,8 +252,10 @@ function drawSide() {
   const all = [...(v.places || []).map((p) => ({ ...p, kind: 'place' })), ...(v.objects || []).map((p) => ({ ...p, kind: 'object' }))];
   if (!all.length) E.places.append(h('p', { class: 'small muted' }, 'No places yet. Choose 🚩 Name a place and click the map — or scan with photos: the camera names the objects it sees.'));
   for (const p of all) E.places.append(h('div', { class: 'rm-place' }, h('span', { class: `rm-dot ${p.kind}` }), h('span', { class: 'grow' }, p.name, h('small', { class: 'muted' }, p.kind === 'object' ? '  seen by the camera' : `  ${p.x}, ${p.y} m`)),
+    p.kind === 'object' ? h('button', { class: 'btn tiny', title: `Find the ${p.name} (map + camera)`, onclick: () => S.findGo && S.findGo(p.name) }, '🎯 Find') :
     h('button', { class: 'btn tiny', title: `Go to ${p.name}`, onclick: async () => { const r = await api('/api/robot/roommap/gotoplace', { body: { name: p.name } }).catch((e) => ({ error: e.message })); if (r.error) toast(r.error, true); else status(`🚗 Going to ${p.name}…`); } }, '▶ Go'),
     p.kind === 'place' ? h('button', { class: 'btn tiny ghost', title: 'Remove', onclick: async () => { await api('/api/robot/roommap/unplace', { body: { name: p.name } }); loadMap(); } }, '✕') : null));
+  if (E.findList) { E.findList.innerHTML = ''; for (const n of [...new Set(all.map((p) => p.name))]) E.findList.append(h('option', { value: n })); }
   E.patrolList.textContent = S.patrol.length ? S.patrol.map((p, i) => `${i + 1}: (${p.x}, ${p.y})`).join('   ') : 'No points yet: choose 🔁 Patrol points and click the map.';
   E.patrolGo.disabled = S.patrol.length < 2 || !!busy;
 }
@@ -243,14 +271,26 @@ async function render(el) {
   E.hint = h('div', { class: 'rm-hint' }, MODES[S.mode].hint);
   E.status = h('div', { class: 'rm-status small' }, '');
   E.where = h('div', { class: 'rm-where small muted' }, '');
-  const legend = h('div', { class: 'rm-legend small' }, ...[['free', 'measured floor'], ['solid', 'wall / furniture'], ['unknown', 'not seen yet'], ['robot', 'robot'], ['place', 'named place'], ['route', 'planned way']].map(([c, t]) => h('span', {}, h('i', { class: `rm-key ${c}` }), t)));
+  const legend = h('div', { class: 'rm-legend small' }, ...[['free', 'measured floor'], ['solid', 'wall / furniture'], ['unknown', 'not seen yet'], ['robot', 'robot'], ['place', 'named place'], ['object', 'object the camera named'], ['hazard', 'bump / step / drop the car felt'], ['route', 'planned way']].map(([c, t]) => h('span', {}, h('i', { class: `rm-key ${c}` }), t)));
   const job = (path, body, text) => h('button', { class: 'btn', onclick: async () => { const r = await api(path, { body: body() }).catch((e) => ({ error: e.message })); if (r.error) toast(r.error, true); else { S.busy = text; status(`⏳ ${text}…`); drawSide(); } } });
   const rounds = h('select', { 'aria-label': 'How many spots to explore' }, ...[3, 6, 10].map((n) => h('option', { value: n, selected: n === 6 ? '' : null }, `${n} spots`)));
   const exploreBtn = job('/api/robot/roommap/explore', () => ({ rounds: Number(rounds.value) }), 'exploring the room'); exploreBtn.classList.add('primary'); exploreBtn.textContent = '🧭 Explore by itself';
   const measureBtn = job('/api/robot/roommap/measure', () => ({}), 'measuring all around'); measureBtn.textContent = '🔄 Measure all around here';
   const scanBtn = h('button', { class: 'btn', onclick: async () => { const r = await api('/api/robot/scan', { body: { steps: 8 } }).catch((e) => ({ error: e.message })); if (r.error) toast(r.error, true); else status('📷 Scanning with photos: the camera names what it sees (about a minute)…'); } }, '📷 Scan with photos');
   E.stop = h('button', { class: 'btn stop rm-stop', onclick: async () => { await api('/api/robot/roommap/stop', { body: {} }); S.busy = null; status('■ Stopped.'); mapSoon(); } }, '■ Stop');
-  E.jobBtns = [exploreBtn, measureBtn, scanBtn];
+  // 🎯 Find: an object the camera named (or a place), or any word — not on the map yet = it scans and explores for it
+  E.findList = h('datalist', { id: 'rmFindList' });
+  E.findIn = h('input', { type: 'text', list: 'rmFindList', placeholder: 'e.g. chair, door, cage, shoe…', 'aria-label': 'What to find', style: 'flex:1;min-width:0' });
+  const findGo = async (name) => {
+    name = String(name || E.findIn.value || '').trim(); if (!name) return toast('Type what the car should find.', true);
+    const r = await api('/api/robot/roommap/find', { body: { name } }).catch((e) => ({ error: e.message }));
+    if (r.error) toast(r.error, true); else { S.busy = `finding the ${name}`; status(`🎯 Finding the ${name}…`); drawSide(); }
+  };
+  E.findBtn = h('button', { class: 'btn primary', onclick: () => findGo() }, '🎯 Find it');
+  E.findIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') findGo(); });
+  S.findGo = findGo;
+  E.safety = h('div', { class: 'rm-safety small' }, '');
+  E.jobBtns = [exploreBtn, measureBtn, scanBtn, E.findBtn];
   E.stats = h('div', { class: 'rm-stats' });
   E.places = h('div', { class: 'rm-places' });
   E.patrolList = h('div', { class: 'small muted rm-plist' });
@@ -265,7 +305,12 @@ async function render(el) {
       h('div', { class: 'card' }, h('h3', {}, '🧠 Learn the room'),
         h('p', { class: 'small muted' }, 'The car learns the room with its laser while it drives. To learn it on purpose:'),
         h('div', { class: 'rm-learn' }, h('div', { class: 'row' }, exploreBtn, rounds), measureBtn, scanBtn, E.stop), E.stats,
-        h('p', { class: 'small muted' }, 'Explore = measure all around, drive to the nearest unknown part, measure again… Needs the laser (VL53L0X); the gyro (MPU-6050) makes it much more exact.')),
+        h('p', { class: 'small muted' }, 'Explore = measure all around, drive to the nearest unknown part, measure again… Needs a distance sensor (the Mega hub\'s HC-SR04 eyes or the VL53L0X laser); the gyro (MPU-6050) makes it much more exact.')),
+      h('div', { class: 'card' }, h('h3', {}, '🎯 Find an object'),
+        h('p', { class: 'small muted' }, 'A mission: on the map → the car drives there around what it knows, then the camera guides the last part. Not on the map yet → it scans with photos and explores until it sees it.'),
+        h('div', { class: 'row' }, E.findIn, E.findBtn), E.findList),
+      h('div', { class: 'card' }, h('h3', {}, '🛡 What the car feels'), E.safety,
+        h('p', { class: 'small muted' }, 'Car firmware 2.4 + Mega hub 1.1: it stops and backs off by itself after a bump, a step or an edge (and a drop, with the drop sensor), and never drives forward without its distance sensor.')),
       h('div', { class: 'card' }, h('h3', {}, '🚩 Places'), E.places),
       h('div', { class: 'card' }, h('h3', {}, '🔁 Patrol'), E.patrolList, h('div', { class: 'row' }, h('label', { class: 'inline small' }, 'Rounds ', loops), E.patrolGo, h('button', { class: 'btn ghost', onclick: () => { S.patrol = []; drawMarks(); drawSide(); } }, 'Clear'))),
       h('div', { class: 'card' }, h('h3', {}, '🗺 This map'),

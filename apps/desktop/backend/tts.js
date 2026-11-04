@@ -65,7 +65,17 @@ class Tts {
       }
       await new Promise((r, j) => out.end((e) => (e ? j(e) : r())));
       this.downloads[id] = { pct: 100, unpacking: true }; onProgress(100);
-      await new Promise((resolve, reject) => execFile(process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar', ['-xjf', tmp, '-C', this.dir], { timeout: 600000 }, (e) => (e ? reject(new Error(`unpacking failed: ${e.message}`)) : resolve())));
+      // 2.2.2: unpack the .bz2 here (pure JavaScript) — Windows' own tar.exe often cannot run "bzip2 -d" — then let
+      // tar unpack the plain .tar, which every tar can do
+      const plain = tmp.replace(/\.tar\.bz2\.part$/, '.tar.part');
+      await new Promise((resolve, reject) => {
+        const src = fs.createReadStream(tmp), dst = fs.createWriteStream(plain);
+        src.on('error', reject); dst.on('error', reject); dst.on('finish', resolve);
+        src.pipe(require('unbzip2-stream')()).on('error', (e) => reject(new Error(`unpacking failed: the download is damaged (${e.message || e})`))).pipe(dst);
+      });
+      try {
+        await new Promise((resolve, reject) => execFile(process.platform === 'win32' ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar', ['-xf', plain, '-C', this.dir], { timeout: 600000 }, (e) => (e ? reject(new Error(`unpacking failed: ${e.message}`)) : resolve())));
+      } finally { try { fs.unlinkSync(plain); } catch {} }
       if (!this.installed(id)) throw new Error('the voice files are incomplete after unpacking');
       this.log(`Robot voice ${m.label} installed`);
       return { ok: true };

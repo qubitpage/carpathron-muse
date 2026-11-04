@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const C = require('./carsettings');
 
-const FW = '2.3.0';
+const FW = '2.4.0';
 const VIEW = fs.readFileSync(path.join(__dirname, 'simcar-view.jpg'));
 // room in cm: outer walls + boxes [x1, y1, x2, y2]; the car starts in the middle looking along +x (heading 0 = +x, clockwise positive)
 const ROOM = { w: 360, h: 280, start: [120, 140], boxes: [[250, 110, 290, 170], [40, 200, 120, 260], [170, 30, 200, 60]] };
@@ -34,7 +34,7 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
     values: { ...C.DEFAULTS }, saved: { ...C.DEFAULTS }, strings: { name: 'Practice car', apSsid: 'Carpathron-Car', apPass: 'carpathron' },
     restartPending: false, x: (room.start || [room.w / 2, room.h / 2])[0], y: (room.start || [room.w / 2, room.h / 2])[1], head: 0, l: 0, r: 0, lastCmd: Date.now(), led: 0, boot: Date.now(), reset: 'power-on',
     fw: FW, slots: { running: 'app0', other: null }, otaKey,
-    turn: null, turnResult: 0, blocked: false, faults: { ...faults }, sensorMode: 'auto', log: [], trail: [],
+    turn: null, turnResult: 0, blocked: false, bumps: 0, bumpAt: 0, hazard: '', backoff: 0, faults: { ...faults }, sensorMode: 'auto', log: [], trail: [],
   };
   const v = () => st.values;
   // motors → wheel speeds (cm/s) as the firmware would drive them, including the configured fixes and the faults
@@ -74,9 +74,14 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
     st.blocked = false;
     if (st.l > 0 && st.r > 0 && tofOk() && v().stopMm > 0 && dist < v().stopMm) { drive(0, 0); st.blocked = true; } else {
       const a = (st.head * Math.PI) / 180, nx = st.x + Math.cos(a) * fwd * dt, ny = st.y + Math.sin(a) * fwd * dt;
-      if (inside(room, nx, ny)) { st.x = nx; st.y = ny; } else if (fwd) st.bumped = now;
+      if (inside(room, nx, ny)) { st.x = nx; st.y = ny; }
+      else if (fwd) {   // firmware 2.4: the jolt of a bump stops the car and backs it off ~10 cm
+        st.bumped = now;
+        if (fwd > 0 && v().stopMm > 0 && !st.backoff) { st.bumps++; st.bumpAt = now; st.hazard = 'bump'; drive(-55, -55); st.backoff = now + 180; st.blocked = true; }
+      }
       st.head = st.head + rot * dt;
     }
+    if (st.backoff && now >= st.backoff) { st.backoff = 0; drive(0, 0); }
     if (fwd || rot) { const last = st.trail[st.trail.length - 1]; if (!last || Math.hypot(last[0] - st.x, last[1] - st.y) > 5) { st.trail.push([Math.round(st.x), Math.round(st.y)]); if (st.trail.length > 2000) st.trail.shift(); } }
   }, tickMs);
 
@@ -150,7 +155,7 @@ function start({ port = 0, faults = {}, room = ROOM, tickMs = 20, otaKey = '' } 
       case '/status': return json(res, {
         name: st.strings.name, fw: st.fw, restartPending: st.restartPending, ip: '127.0.0.1', mode: 'wifi', wifi: 'Simulator', wifiIp: '127.0.0.1', connecting: false,
         rssi: st.faults.weakWifi ? -80 : -52, left: st.l, right: st.r, camera: !st.faults.noCamera, psram: !st.faults.noPsram, uptime: Math.round((Date.now() - st.boot) / 1000), simulator: true,
-        sensors: { mode: st.sensorMode, ir: false, irLeft: false, irRight: false, tof: tofOk(), imu: imuOk(), dist: distMm(), stopMm: v().stopMm, blocked: st.blocked, yaw: Math.round(yaw() * 10) / 10, turning: !!st.turn, turnResult: st.turnResult, mega: false, tempC: null, humidity: null, tilt: null, pir: -1 },
+        sensors: { mode: st.sensorMode, ir: false, irLeft: false, irRight: false, tof: tofOk(), imu: imuOk(), dist: distMm(), stopMm: v().stopMm, blocked: st.blocked, yaw: Math.round(yaw() * 10) / 10, turning: !!st.turn, turnResult: st.turnResult, mega: false, tempC: null, humidity: null, tilt: null, pir: -1, bumps: st.bumps, bumpAgoMs: st.bumpAt ? Date.now() - st.bumpAt : -1, linkLost: false, sideL: -1, sideR: -1, sideEyes: false, cliffSensor: false, cliff: false, lean: null, tiltStops: 0, cliffStops: 0, hazard: st.hazard, hazardAgoMs: st.bumpAt ? Date.now() - st.bumpAt : -1, hazardDir: st.bumpAt ? 1 : 0 },
       });
       case '/drive': {
         if (st.turn) { st.turn = null; st.turnResult = 3; }

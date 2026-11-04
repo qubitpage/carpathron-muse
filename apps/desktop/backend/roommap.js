@@ -13,7 +13,8 @@ const path = require('path');
 const RES = 0.05, SIZE = 240, HALF = SIZE / 2; // 240 × 5 cm = 12 m
 const HIT = 30, MISS = -8, MAXV = 100, SOLID = 25, FREE = -8;
 const LASER_MAX = 2.0, LASER_AHEAD = 0.1; // metres; the laser sits about 10 cm in front of the car's centre
-const CAR_R = 0.13; // metres: half the car's width plus a little room
+const CAR_R = 0.16; // metres: half the car's width plus room to turn (2.2.2: was 0.13, the car scraped things)
+const HAZARD_R = 0.22; // metres kept away from a step / drop / bump the car felt
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 class Grid {
@@ -52,11 +53,14 @@ class Grid {
   cells() { const out = []; for (let j = 0; j < SIZE; j++) for (let i = 0; i < SIZE; i++) { const v = this.v[j * SIZE + i]; if (v <= FREE || v >= SOLID) out.push(i, j, v); } return out; }
   toJSON() { return Buffer.from(this.v.buffer, this.v.byteOffset, this.v.byteLength).toString('base64'); }
   // A* from (x0, y0) to (x1, y1) in metres. Solid cells are grown by the car's size; unknown cells cost more than free.
-  plan(x0, y0, x1, y1) {
+  // hazards: steps / drops / bumps the car felt ({ x, y }), kept HAZARD_R away.
+  plan(x0, y0, x1, y1, hazards = []) {
     const grow = Math.ceil(CAR_R / RES), blocked = new Uint8Array(SIZE * SIZE);
     for (let j = 0; j < SIZE; j++) for (let i = 0; i < SIZE; i++) if (this.v[j * SIZE + i] >= SOLID) {
       for (let dj = -grow; dj <= grow; dj++) for (let di = -grow; di <= grow; di++) if (di * di + dj * dj <= grow * grow && this.in(i + di, j + dj)) blocked[(j + dj) * SIZE + i + di] = 1;
     }
+    const hg = Math.ceil(HAZARD_R / RES);
+    for (const h of hazards) { const [hi, hj] = Grid.cell(h.x, h.y); for (let dj = -hg; dj <= hg; dj++) for (let di = -hg; di <= hg; di++) if (di * di + dj * dj <= hg * hg && this.in(hi + di, hj + dj)) blocked[(hj + dj) * SIZE + hi + di] = 1; }
     const [si, sj] = Grid.cell(x0, y0); let [gi, gj] = Grid.cell(x1, y1);
     if (!this.in(gi, gj)) return null;
     // the start may sit inside the grown border (next to a wall): free a small area around it
@@ -115,7 +119,8 @@ class Grid {
 class RoomMap {
   constructor({ robot, mapper, getSettings, emit, log }) {
     Object.assign(this, { robot, mapper, getSettings, emit, log });
-    this.grid = new Grid(); this.places = []; this.objects = []; this.createdAt = Date.now();
+    this.grid = new Grid(); this.places = []; this.objects = []; this.hazards = []; this.createdAt = Date.now();
+    this._counts = null;
     this.dirty = false; this.busy = null; this.stopFlag = false; this.route = null;
     this.load();
     this._save = setInterval(() => { if (this.dirty) this.save(); }, 5000);
@@ -126,11 +131,11 @@ class RoomMap {
   load() {
     try {
       const j = JSON.parse(fs.readFileSync(this.file(), 'utf8'));
-      this.grid = new Grid(j.grid); this.places = j.places || []; this.objects = j.objects || []; this.createdAt = j.createdAt || Date.now();
+      this.grid = new Grid(j.grid); this.places = j.places || []; this.objects = j.objects || []; this.hazards = j.hazards || []; this.createdAt = j.createdAt || Date.now();
     } catch {}
   }
   save() {
-    try { fs.mkdirSync(path.dirname(this.file()), { recursive: true }); fs.writeFileSync(this.file(), JSON.stringify({ version: 1, res: RES, size: SIZE, createdAt: this.createdAt, savedAt: Date.now(), grid: this.grid.toJSON(), places: this.places, objects: this.objects })); this.dirty = false; } catch (e) { this.log(`room map: not saved (${e.message})`); }
+    try { fs.mkdirSync(path.dirname(this.file()), { recursive: true }); fs.writeFileSync(this.file(), JSON.stringify({ version: 1, res: RES, size: SIZE, createdAt: this.createdAt, savedAt: Date.now(), grid: this.grid.toJSON(), places: this.places, objects: this.objects, hazards: this.hazards })); this.dirty = false; } catch (e) { this.log(`room map: not saved (${e.message})`); }
   }
   // while the car is online with the laser: add what it measures (only when it has moved or turned a little,
   // so a car standing still doesn't make one cell "very sure")
@@ -142,19 +147,43 @@ class RoomMap {
     this._busyListen = true;
     try {
       const s = await this.robot.sensors();
-      if (!s || !s.tof) return;
+      if (!s) return;
+      this.feel(s);
+      if (!s.tof) return;
       const p = this.robot.pose, m = s.dist > 0 ? s.dist / 1000 : null;
       const l = this._last;
       if (l && Math.hypot(p.x - l.x, p.y - l.y) < 0.03 && Math.abs(p.heading - l.heading) < 3) return;
       this._last = { x: p.x, y: p.y, heading: p.heading };
-      this.grid.ray(p.x, p.y, p.heading, m); this.dirty = true; this.changed();
+      this.grid.ray(p.x, p.y, p.heading, m);
+      // side eyes (Mega hub 1.1, optional): two more HC-SR04 at the front corners, turned 45° outwards
+      if (s.sideEyes) for (const [deg, mm] of [[-45, s.sideL], [45, s.sideR]]) this.grid.beam(p.x, p.y, p.heading + deg, mm > 0 ? mm / 1000 : null, true);
+      this.dirty = true; this.changed();
     } finally { this._busyListen = false; }
   }
+  // What the car FELT (car firmware 2.4): a bump, a step / edge (sudden lean) or a drop (no floor under the drop
+  // sensor). The car has already stopped and backed off by itself; here the spot goes on the map so routes avoid it.
+  feel(s) {
+    const now = { bump: s.bumps | 0, step: s.tiltStops | 0, drop: s.cliffStops | 0 };
+    const was = this._counts; this._counts = now;
+    if (!was) return null;
+    const p = this.robot.pose; let added = null;
+    for (const kind of ['bump', 'step', 'drop']) {
+      if (now[kind] <= was[kind]) continue;
+      const back = s.hazardDir === -1 && s.hazard === kind ? -1 : 1;   // a step met while reversing is behind the car
+      const a = (p.heading * Math.PI) / 180, d = 0.2 * back;              // the car backed off ~10 cm: the spot is ~20 cm ahead
+      const h = { kind, x: +(p.x + Math.sin(a) * d).toFixed(2), y: +(p.y + Math.cos(a) * d).toFixed(2), at: Date.now() };
+      this.hazards = this.hazards.filter((q) => q.kind !== h.kind || Math.hypot(q.x - h.x, q.y - h.y) > 0.12).concat(h).slice(-80);
+      if (kind === 'bump') { const [i, j] = Grid.cell(h.x, h.y); for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) this.grid.add(i + di, j + dj, 2 * MAXV); }   // surely solid, even where the floor looked free
+      this.dirty = true; this.changed(); added = h;
+      this.say(kind === 'bump' ? 'Bumped into something low — marked on the map.' : kind === 'drop' ? 'Edge: no floor ahead — stopped, marked on the map.' : 'Step / edge felt (the car leaned) — stopped, marked on the map.');
+    }
+    return added;
+  }
   changed() { clearTimeout(this._ch); this._ch = setTimeout(() => this.emit('robot:roommap', { stats: this.grid.stats() }), 400); }
-  view() { return { res: RES, size: SIZE, cells: this.grid.cells(), places: this.places, objects: this.objects, stats: this.grid.stats(), pose: this.robot.pose, route: this.route, busy: this.busy, createdAt: this.createdAt }; }
+  view() { return { res: RES, size: SIZE, cells: this.grid.cells(), places: this.places, objects: this.objects, hazards: this.hazards, stats: this.grid.stats(), pose: this.robot.pose, route: this.route, busy: this.busy, createdAt: this.createdAt }; }
   reset() {
     try { if (fs.existsSync(this.file())) fs.renameSync(this.file(), this.file().replace(/\.json$/, `-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`)); } catch {}
-    this.grid = new Grid(); this.places = []; this.objects = []; this.createdAt = Date.now(); this.route = null; this.dirty = true; this.save(); this.changed();
+    this.grid = new Grid(); this.places = []; this.objects = []; this.hazards = []; this.createdAt = Date.now(); this.route = null; this.dirty = true; this.save(); this.changed();
   }
   addPlace(name, x, y) {
     name = String(name || '').trim().slice(0, 40); if (!name) throw new Error('Give the place a name.');
@@ -170,7 +199,7 @@ class RoomMap {
   }
   setPose(x, y, heading) { this.robot.setPose({ x: +x, y: +y, heading: +heading }); this._last = null; return this.robot.pose; }
   plan(x, y) {
-    const p = this.robot.pose, r = this.grid.plan(p.x, p.y, +x, +y);
+    const p = this.robot.pose, r = this.grid.plan(p.x, p.y, +x, +y, this.hazards);
     if (!r) throw new Error('No way there on the map — it is behind walls the car has seen, or outside the map.');
     return r;
   }
@@ -203,6 +232,50 @@ class RoomMap {
     if (!p) throw new Error(`No place called "${name}" on the map. Places: ${this.places.map((q) => q.name).join(', ') || 'none yet'}.`);
     return this.goTo(p.x, p.y, p.name);
   }
+  // 🎯 Find an object: known on the map (a place, or something the camera named in a scan) → drive there around
+  // what the map knows; then the camera takes over for the last part (photo, turn, short hop … until close).
+  // Not known yet → photo scan here; still not seen → explore the nearest unknown part and scan again (up to `rounds`).
+  find(name, { rounds = 3, vision = true } = {}) {
+    const want = String(name || '').toLowerCase().trim();
+    if (!want) throw new Error('What should the car find?');
+    const match = () => this.places.find((q) => q.name.toLowerCase() === want) || this.objects.find((q) => q.name.toLowerCase() === want)
+      || this.places.find((q) => q.name.toLowerCase().includes(want) || want.includes(q.name.toLowerCase()))
+      || this.objects.find((q) => q.name.toLowerCase().includes(want) || want.includes(q.name.toLowerCase()));
+    return this.task(`finding the ${name}`, async () => {
+      let it = match();
+      const tried = [];
+      for (let n = 0; !it && n < rounds; n++) {
+        if (this.stopFlag) return { ok: false, text: 'Stopped.' };
+        if (!this.mapper.scan) break;
+        this.say(`Looking for the ${name}: photo scan ${n + 1}/${rounds}…`);
+        await this.mapper.scan({ steps: 8, source: 'map' }).catch((e) => this.say(`Scan: ${e.message}`));
+        it = match(); if (it) break;
+        const p = this.robot.pose, f = this.grid.frontier(p.x, p.y, tried);
+        if (!f) break;
+        tried.push(f);
+        this.say(`Not seen yet — going to look in an unknown part (${f.d.toFixed(1)} m away)…`);
+        await this.driveTo(f.x, f.y, 'the unknown part', 2).catch((e) => this.say(e.message));
+      }
+      if (!it) return { ok: false, text: `Could not find the ${name}. Objects on the map: ${this.objects.map((o) => o.name).join(', ') || 'none yet (Scan with photos)'}.` };
+      this.say(`The ${it.name} is on the map — driving there…`);
+      // stop ~40 cm before it: the route goes to the nearest free spot next to it
+      const p = this.robot.pose, d = Math.hypot(it.x - p.x, it.y - p.y);
+      const k = d > 0.45 ? (d - 0.4) / d : 0;
+      const r = k ? await this.driveTo(p.x + (it.x - p.x) * k, p.y + (it.y - p.y) * k, `the ${it.name}`) : { ok: true };
+      if (this.stopFlag) return { ok: false, text: 'Stopped.' };
+      if (vision && this.mapper.goto && this.mapper.vision) {
+        this.say(`Close to the ${it.name}: the camera takes over…`);
+        // face it first (the camera looks straight ahead)
+        const q = this.robot.pose, want2 = (Math.atan2(it.x - q.x, it.y - q.y) * 180) / Math.PI;
+        let turn = ((want2 - q.heading + 540) % 360) - 180;
+        if (Math.abs(turn) > 8) await this.mapper.turn(turn, 'map').catch(() => {});
+        const g = await this.mapper.goto(it.name, { stopAt: 0.35, maxHops: 4, source: 'map' }).catch((e) => ({ ok: false, text: e.message }));
+        if (!g || g.ok === false || g.found === false) return { ok: r.ok, text: `${r.ok ? 'Arrived near' : 'Got close to'} the ${it.name} by the map; the camera could not confirm it (${(g && g.text) || 'not in view'}).` };
+        return { ok: true, text: g.arrived ? `Found the ${it.name}: it is right in front of the car.` : `Found the ${it.name} (about ${Math.round((g.distance_m || 0) * 100)} cm ahead).`, log: g.log };
+      }
+      return { ok: r.ok, text: r.ok ? `Arrived at the ${it.name}.` : r.text };
+    });
+  }
   patrol(points, loops = 1) {
     if (!Array.isArray(points) || points.length < 2) throw new Error('Pick at least 2 points for a patrol.');
     loops = Math.max(1, Math.min(20, Math.round(+loops || 1)));
@@ -217,9 +290,19 @@ class RoomMap {
     });
   }
   // turn once around (with the gyro: one smooth turn, measured continuously; without: 12 steps of 30°)
+  // the distance sensor (laser, or the Mega hub's HC-SR04): wait up to `ms` for it — Mega hub 1.1 restarts itself
+  async waitSensor(ms = 7000) {
+    const t0 = Date.now();
+    for (;;) {
+      const s = await this.robot.sensors();
+      if (s && s.tof) return s;
+      if (Date.now() - t0 > ms || this.stopFlag) return s;
+      this.say('Waiting for the distance sensor to come back…'); await sleep(700);
+    }
+  }
   async measureAround(steps = 12) {
-    const s = await this.robot.sensors();
-    if (!s || !s.tof) throw new Error('The car needs the laser distance sensor (VL53L0X) to map the room.');
+    const s = await this.waitSensor();
+    if (!s || !s.tof) throw new Error('No distance sensor: the car needs the laser (VL53L0X) or the Mega hub\'s HC-SR04 eyes to map the room (Robot → Setup → Sensors on the car).');
     if (s.imu && this.robot.gyroTurn) {
       let done = false; const t = this.robot.gyroTurn(360, 50).catch(() => null).finally(() => { done = true; });
       const t0 = Date.now();

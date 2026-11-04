@@ -56,6 +56,24 @@ function readWav(file) {
     assert.strictEqual(w.length, 52); assert.strictEqual(w.readInt16LE(46), 16384); assert.strictEqual(w.readInt16LE(50), 32767);
   });
 
+  await step('2.2.2: download unpacks the .tar.bz2 without "bzip2" on the PC (Windows tar.exe has no bzip2)', async () => {
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-src-')), name = MODELS.kitten.name;
+    fs.mkdirSync(path.join(src, name)); fs.writeFileSync(path.join(src, name, MODELS.kitten.file), Buffer.alloc(300000, 7)); fs.writeFileSync(path.join(src, name, 'tokens.txt'), 'a 1\n');
+    const pack = path.join(src, 'k.tar.bz2'); execFileSync('tar', ['-cjf', pack, '-C', src, name]);
+    const srv = http.createServer((q, r) => { r.writeHead(200, { 'Content-Length': fs.statSync(pack).size }); fs.createReadStream(pack).pipe(r); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const url0 = MODELS.kitten.url; MODELS.kitten.url = `http://127.0.0.1:${srv.address().port}/k.tar.bz2`;
+    // a PATH without bzip2: only tar itself is reachable (like Windows' tar.exe that cannot run "bzip2 -d")
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'nobz-')); fs.symlinkSync(execFileSync('which', ['tar']).toString().trim(), path.join(bin, 'tar'));
+    const path0 = process.env.PATH; process.env.PATH = bin;
+    try {
+      const t2 = new Tts({ dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'voice-dl-')), getSettings: () => ({ robot: {} }) });
+      const r = await t2.download('kitten');
+      assert.ok(r.ok && t2.installed('kitten'), JSON.stringify(r));
+      assert.ok(!fs.readdirSync(t2.dir).some((f) => /\.part$/.test(f)), 'no temporary files left');
+    } finally { process.env.PATH = path0; MODELS.kitten.url = url0; srv.close(); }
+  });
+
   if (!M) { console.log('  (MC_TEST_MODELS not set — neural voice tests skipped)'); return finish(); }
   const sherpa = require(path.join(__dirname, '../build/voice-engine/node_modules/sherpa-onnx-node'));
   const W = path.join(M, 'sherpa-onnx-whisper-tiny.en');

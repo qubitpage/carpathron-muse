@@ -1100,6 +1100,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         if (roommap.busy) return send(res, 200, { error: `The car is busy: ${roommap.busy}. Press ■ Stop first.` });
         if (what === 'goto') { roommap.plan(b.x, b.y); return bg(roommap.goTo(b.x, b.y, b.label)); }
         if (what === 'gotoplace') return bg(roommap.goToPlace(b.name));
+        if (what === 'find') return bg(roommap.find(b.name));
         if (what === 'patrol') return bg(roommap.patrol(b.points, b.loops));
         if (what === 'measure') return bg(roommap.measureHere());
         if (what === 'explore') return bg(roommap.explore(b.rounds));

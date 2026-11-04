@@ -723,3 +723,5 @@ button.chip { cursor: pointer; }
 .supervisor .sv-ic{display:inline-block;width:18px;font-weight:700}.supervisor .sv-check.pass .sv-ic{color:#3ecf8e}.supervisor .sv-check.fail .sv-ic{color:#ff6b6b}
 .supervisor .sv-check pre{margin:4px 0 0;white-space:pre-wrap;font-size:12px;max-height:160px;overflow:auto}
 .supervisor .sv-fix{margin-top:8px;font-size:13px}
+.rm-key.object { background: #9b6bff; } .rm-key.hazard { background: #ff2d55; border-radius: 50%; }
+.rm-safety { line-height: 1.6; padding: 6px 8px; border-radius: 8px; background: rgba(255,255,255,.04); margin-bottom: 6px; }

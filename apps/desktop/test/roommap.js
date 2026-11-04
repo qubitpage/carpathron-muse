@@ -33,6 +33,65 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.strictEqual(at(4, 4), 0, 'outside: never seen');
     const st = room.stats(); assert.ok(st.freeM2 > 4 && st.freeM2 < 9.5, JSON.stringify(st));
   });
+  await step('2.2.2: a felt step / drop / bump goes on the map and routes keep away from it', () => {
+    const { RoomMap } = require('../backend/roommap');
+    const ws0 = fs.mkdtempSync(path.join(os.tmpdir(), 'rm-hz-'));
+    const robot = { pose: { x: 0, y: 0, heading: 0 }, state: 'offline', current: {} };
+    const rm = new RoomMap({ robot, mapper: {}, getSettings: () => ({ workspace: ws0 }), emit: () => {}, log: () => {} });
+    const g = new Grid(room.toJSON()); rm.grid = g;
+    rm.feel({ bumps: 0, tiltStops: 0, cliffStops: 0 });
+    assert.strictEqual(rm.hazards.length, 0, 'the first reading only remembers the counters');
+    robot.pose = { x: 0, y: -0.5, heading: 0 };
+    rm.feel({ bumps: 0, tiltStops: 1, cliffStops: 0, hazard: 'step', hazardDir: 1 });
+    assert.strictEqual(rm.hazards.length, 1); assert.strictEqual(rm.hazards[0].kind, 'step');
+    assert.ok(Math.abs(rm.hazards[0].y - -0.3) < 0.02 && Math.abs(rm.hazards[0].x) < 0.02, JSON.stringify(rm.hazards[0]));
+    const r = g.plan(0, -1, 0, 0.2, rm.hazards);
+    assert.ok(r, 'still a way round');
+    for (let i = 0; i < r.length; i++) { const a = i ? r[i - 1] : { x: 0, y: -1 }, b = r[i]; for (let k = 0; k <= 20; k++) { const x = a.x + ((b.x - a.x) * k) / 20, y = a.y + ((b.y - a.y) * k) / 20; assert.ok(Math.hypot(x - 0, y - -0.3) > 0.2, `route passes the step at ${x.toFixed(2)},${y.toFixed(2)}`); } }
+    robot.pose = { x: 0.8, y: -0.8, heading: 90 };
+    rm.feel({ bumps: 1, tiltStops: 1, cliffStops: 1, hazard: 'drop', hazardDir: 1 });
+    assert.deepStrictEqual(rm.hazards.map((h) => h.kind).sort(), ['bump', 'drop', 'step'], JSON.stringify(rm.hazards));
+    assert.ok(g.get(...Grid.cell(1.0, -0.8)) >= 25, 'a bump spot is solid on the map');
+    rm.close();
+  });
+  await step('2.2.2: Find — a known object: drives to ~40 cm before it, then the camera finishes', async () => {
+    const { RoomMap } = require('../backend/roommap');
+    const ws0 = fs.mkdtempSync(path.join(os.tmpdir(), 'rm-find-'));
+    const robot = { pose: { x: 0, y: -1, heading: 0 }, state: 'offline', current: {}, stop() {} };
+    const calls = [];
+    const mapper = { vision: {}, scan: async () => calls.push('scan'), turn: async (d) => calls.push(`turn ${Math.round(d)}`),
+      goto: async (t, o) => { calls.push(`camera ${t} ${o.stopAt}`); return { arrived: true, found: true }; } };
+    const rm = new RoomMap({ robot, mapper, getSettings: () => ({ workspace: ws0 }), emit: () => {}, log: () => {} });
+    rm.grid = new Grid(room.toJSON()); rm.objects = [{ name: 'chair', x: 0.9, y: 0.2 }];
+    rm.driveTo = async (x, y, label) => { calls.push(`drive ${x.toFixed(2)},${y.toFixed(2)} ${label}`); robot.pose = { x, y, heading: 0 }; return { ok: true }; };
+    const r = await rm.find('Chair');
+    assert.ok(r.ok && /Found the chair/.test(r.text), JSON.stringify(r));
+    const d = calls.find((c) => c.startsWith('drive')); const [x, y] = d.split(' ')[1].split(',').map(Number);
+    assert.ok(Math.abs(Math.hypot(0.9 - x, 0.2 - y) - 0.4) < 0.03, `stops ~40 cm before: ${d}`);
+    assert.ok(calls.some((c) => /^camera chair 0.35/.test(c)) && !calls.includes('scan'), calls.join(' | '));
+    // not on the map: scans first, explores, gives up with the list of what it knows
+    calls.length = 0; rm.objects = []; rm.grid = new Grid();
+    const r2 = await rm.find('shoe', { rounds: 2 });
+    assert.ok(!r2.ok && /Could not find the shoe/.test(r2.text) && calls.filter((c) => c === 'scan').length >= 1, JSON.stringify(r2) + calls.join('|'));
+    rm.close();
+  });
+  await step('2.2.2: map driving never goes forward blind and stops after a bump', async () => {
+    const { Mapper } = require('../backend/mapper');
+    let sens = { tof: false, mega: false, linkLost: true, dist: -1 }, moved = 0;
+    const robot = { pose: { x: 0, y: 0, heading: 0 }, status: () => ({ state: 'online' }), sensors: async () => sens };
+    const m = new Mapper({ robot, getSettings: () => ({ robot: {} }), emit: () => {}, log: () => {} });
+    m.forward = async (d) => { moved += d; robot.pose = { ...robot.pose, y: robot.pose.y + d }; if (sens.bumpNext) sens = { ...sens, bumps: 1 }; };
+    m.turn = async () => {};
+    const t0 = Date.now(); const r = await m.gotoPoint(0, 1);
+    assert.ok(r.blocked && moved === 0, `blind: ${JSON.stringify(r)} moved ${moved}`);
+    assert.ok(Date.now() - t0 > 3000, 'it waited for the sensor to come back first');
+    sens = { tof: true, mega: true, dist: 1500, stopMm: 300, bumps: 0, tiltStops: 0, cliffStops: 0, bumpNext: true }; moved = 0; robot.pose = { x: 0, y: 0, heading: 0 };
+    const r2 = await m.gotoPoint(0, 1.5);
+    assert.ok(r2.blocked && Math.abs(moved - 0.3) < 0.01, `bump: ${JSON.stringify(r2)} moved ${moved}`);
+    sens = { tof: true, mega: true, dist: 500, stopMm: 300, bumps: 0 }; moved = 0;
+    const r3 = await m.gotoPoint(0, 2);
+    assert.ok(r3.blocked && moved === 0, `50 cm free < 30 cm hop + 35 cm: ${JSON.stringify(r3)}`);
+  });
   await step('path planner: goes around the wall piece, keeps away from walls, refuses unreachable points', () => {
     const r = room.plan(0, 0, 0, 1.1);
     assert.ok(r && r.length >= 2, JSON.stringify(r));

@@ -27,6 +27,13 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.2.2:** the robot looks after itself — **car firmware 2.4 + Mega hub 1.1**: the Mega restarts by itself if it ever
+> freezes (a watchdog: no need to open the cover), the car never drives forward without its distance sensor, a **bump**
+> (a jolt) stops it and backs it off, a **step or an edge** (a sudden lean) stops it and backs it off, and the optional
+> **drop sensor** and **side eyes** on the Mega are used too. On the **🗺 Map** what the car felt is drawn as red marks that
+> routes keep away from, routes keep more room from walls, the car drives in 30 cm hops, and **🎯 Find an object** is a
+> mission: map + camera, or scan and explore until it sees it ("find the chair" also from chat and voice). The robot
+> voices download again on every PC (the unpacking no longer needs bzip2).
 > **2.2.1:** the wiring guide shows the Mega as it lies with the USB socket at the bottom, which jumper wire goes where and what to solder.
 > **2.2.0:** the **Arduino Mega sensor hub**: car firmware 2.3 takes heading, distance (HC-SR04 eyes), temperature,
 > humidity and tilt from an Arduino Mega 2560 over two wires; Robot → Setup has a **🔌 Flash the Mega** button and the new
@@ -321,6 +328,17 @@ for 2 seconds (the gyro measures its zero). Sensor mode *Auto* finds the Mega by
 Robot → Board & parts → **Arduino Mega 2560** shows the same pins on the board drawing. The printed insert (six keys that
 click into the cover's side vents, six pins for the Mega's holes, four clips) holds the Mega under the roof, behind the
 antenna; fold the antenna forward before the cover goes on.
+
+**Hub 1.1 + car firmware 2.4 (Muse Carpathron 2.2.2) — it looks after itself.** A watchdog restarts the Mega within 4 s if it
+ever freezes (a crash can pull the 5 V down), and the gyro is woken up again if it stops answering. While the Mega's line
+is missing the car refuses to drive forward. The gyro board's accelerometer feels a **bump** (a jolt of more than 0.8 g):
+the car stops and backs off ~10 cm. It also learns its **level** standing still; a lean of more than 10° while driving (the
+front wheels over a step or an edge, or climbing onto something) stops it and backs it off. Optional, found by themselves:
+**side eyes** — two more HC-SR04 at the front corners, turned 45° outwards and low (left Trig 26 / Echo 27, right Trig 28 /
+Echo 29) — and a **drop sensor**: an IR module (TCRT5000) at the very front looking down at the floor about 1 cm above it
+(DO → 30, VCC 5V, GND): no floor = the car stops before the edge. Robot → 🗺 Map → **🛡 What the car feels** shows them live.
+Flash the hub once from Robot → Setup → 🔌 Flash the Mega (Mega on its USB cable). Tip: leave a USB cable plugged into the
+Mega and lead it out of a vent, then the next update needs no screwdriver.
 
 ### 3.4.4 Car settings (firmware 2.2)
 

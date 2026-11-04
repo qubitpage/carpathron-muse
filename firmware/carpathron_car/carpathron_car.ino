@@ -31,6 +31,9 @@
     Or an Arduino Mega sensor hub (firmware/carpathron_mega) on the same two pins as a serial link: Mega TX1 (18)
     -> 1k -> RXD, 2k from RXD to GND, TXD -> Mega RX1 (19). The Mega sends heading (MPU-6050), distance (HC-SR04),
     temperature/humidity (DHT11) and tilt 20x per second; exact turns and the obstacle stop then use them.
+    2.4 with Mega hub 1.1: the car never drives forward blind (Mega link lost = stop), a jolt (bump) stops it and
+    backs it off ~10 cm, a sudden lean of more than 10 deg (a step down / up, an edge) stops it and backs it off, and
+    the optional drop sensor and side eyes on the Mega are used too. /status shows bumps, steps, drops and the sides.
     They are found by themselves at start. While they are connected the USB Serial Monitor is off (the same pins);
     without them everything works as before. The VL53L0X driver is Pololu's (MIT), included in this folder.
 
@@ -42,7 +45,7 @@
   - Then set up Wi-Fi from the phone (see above). Muse Carpathron > Robot > "Find my car" finds its IP.
 */
 
-#define FW_VERSION "2.3.0"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
+#define FW_VERSION "2.4.0"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -214,6 +217,15 @@ volatile unsigned long megaLast = 0;      // millis of the last good line
 float megaTempC = NAN, megaHum = NAN, megaTilt = NAN; int megaPir = -1;
 float megaYawPrev = NAN; unsigned long megaLines = 0, megaBad = 0;
 String megaBuf;
+volatile unsigned long bumpCount = 0, bumpLastMs = 0, backoffUntil = 0, moveStartMs = 0;
+volatile bool bumpPending = false, megaWasBump = false, linkStop = false;
+// 2.4: steps and edges. The Mega sends the car's lean (signed X/Y); standing still the car learns "level", driving it
+// stops and backs off when the lean changes by more than 10 deg (front wheels over a step / edge, or climbing onto
+// something). An optional drop sensor at the front stops it before an edge; optional side eyes measure the sides.
+float leanX = NAN, leanY = NAN, levelX = NAN, levelY = NAN; int sideL = -1, sideR = -1, tiltHits = 0;
+volatile bool cliffNow = false, cliffSensor = false, sideEyes = false;
+volatile unsigned long tiltStops = 0, cliffStops = 0, hazardLastMs = 0; const char* hazardKind = "";
+volatile int hazardDir = 0;      // the direction it was driving when the hazard stopped it: 1 forward, -1 backward
 bool sensorTaskOn = false;
 VL53L0X tof;
 volatile int distMm = -1;                // -1 = nothing in range / no sensor
@@ -255,13 +267,16 @@ void setLed(int v) { PWM_WRITE(LED_PIN, CH_LED, min(v, CFG(S_LEDMAX))); }
 
 static inline bool distOk() { return tofOk || (megaSonar && millis() - megaLast < 1000); }
 static inline bool gyroOk() { return imuOk || (megaImu && millis() - megaLast < 1000); }
+// 2.4: the Mega is the only distance sensor and its lines stopped (frozen, loose wire): never drive forward blind
+static inline bool megaLinkLost() { return megaOk && !tofOk && !irOk && megaLines > 0 && millis() - megaLast > 400; }
 
 void drive(int l, int r) {
   l = constrain(l, -100, 100);
   r = constrain(r, -100, 100);
   // distance sensor: never drive forward into something closer than safetyMm (turning and backing up are fine)
-  if (l > 0 && r > 0 && ((distOk() && safetyMm > 0 && distMm > 0 && distMm < safetyMm) || (irOk && (irLeft || irRight)))) { l = 0; r = 0; blocked = true; }
-  else if (l > 0 || r > 0) blocked = false;
+  if (l > 0 && r > 0 && ((distOk() && safetyMm > 0 && distMm > 0 && distMm < safetyMm) || (irOk && (irLeft || irRight)) || (safetyMm > 0 && megaLinkLost()))) { l = 0; r = 0; blocked = true; linkStop = megaLinkLost(); }
+  else if (l > 0 || r > 0) { blocked = false; linkStop = false; }
+  if ((l || r) && !curL && !curR) moveStartMs = millis();   // starting off jolts the car a little: not a bump
   curL = l; curR = r;
   if (l && r && ((l > 0) == (r > 0))) { l = l * (100 + CFG(S_TRIM)) / 100; r = r * (100 - CFG(S_TRIM)) / 100; }  // straight-driving trim
   l = constrain(l * CFG(S_MAXPCT) / 100, -100, 100); r = constrain(r * CFG(S_MAXPCT) / 100, -100, 100);
@@ -300,11 +315,16 @@ static bool megaParse(const String& ln) {
   if ((uint8_t)strtol(ln.substring(star + 1, star + 3).c_str(), NULL, 16) != cs) { megaBad++; return false; }
   String b = ln.substring(st + 1, star);
   if (!b.startsWith("CAR,")) return false;
-  float v[8]; int n = 0, from = 4;
-  while (n < 8) { int c = b.indexOf(',', from); String f = c < 0 ? b.substring(from) : b.substring(from, c); v[n++] = f.toFloat(); if (c < 0) break; from = c + 1; }
+  float v[12]; int n = 0, from = 4;
+  while (n < 12) { int c = b.indexOf(',', from); String f = c < 0 ? b.substring(from) : b.substring(from, c); v[n++] = f.toFloat(); if (c < 0) break; from = c + 1; }
   if (n < 8) { megaBad++; return false; }
   int flags = (int)v[7];
   megaImu = flags & 1; megaSonar = flags & 2; megaDht = flags & 4;
+  bool bump = flags & 8;                                  // Mega hub 1.1: a jolt = the car hit something
+  cliffNow = flags & 16; sideEyes = flags & 32; cliffSensor = flags & 64;
+  if (n >= 12) { sideL = (int)v[8]; sideR = (int)v[9]; leanX = v[10]; leanY = v[11]; }
+  if (bump && !megaWasBump) { bumpCount++; bumpLastMs = millis(); bumpPending = true; }
+  megaWasBump = bump;
   if (megaImu) {
     float y = v[0];
     if (!isnan(megaYawPrev)) yawDeg += (y - megaYawPrev) * CFG(S_GSCALE) / 1000.0f;   // same sign as the car: + = right
@@ -408,9 +428,41 @@ static void sensorTask(void*) {
       irLeft = digitalRead(I2C_SDA) == LOW; irRight = digitalRead(I2C_SCL) == LOW;   // "Avoid" modules pull LOW on an obstacle
       if (curL > 0 && curR > 0 && (irLeft || irRight)) { drive(0, 0); blocked = true; }
     }
-    if (megaOk && megaPoll() && megaSonar) {
+    bool megaNew = megaOk && megaPoll();             // a new line from the Mega (20x per second)
+    if (megaNew && megaSonar) {
       if (curL > 0 && curR > 0 && safetyMm > 0 && distMm > 0 && distMm < safetyMm) { drive(0, 0); blocked = true; }
     }
+    // hit something (not the jolt of starting off): stop; driving forward, back off ~10 cm
+    if (bumpPending) {
+      bumpPending = false;
+      if ((curL || curR) && millis() - moveStartMs > 300 && safetyMm > 0) {
+        bool fwd = curL > 0 && curR > 0;
+        turning = false; drive(0, 0); blocked = true; hazardKind = "bump"; hazardLastMs = millis(); hazardDir = fwd ? 1 : 0;
+        if (fwd) { drive(-55, -55); backoffUntil = millis() + 180; }
+      }
+    }
+    // the edge of a step or a table: the drop sensor sees no floor
+    if (cliffNow && curL > 0 && curR > 0 && safetyMm > 0 && !backoffUntil) {
+      turning = false; drive(0, 0); blocked = true; cliffStops++; hazardKind = "drop"; hazardLastMs = millis(); hazardDir = 1;
+      drive(-55, -55); backoffUntil = millis() + 250;
+    }
+    // lean: level is learned standing still; driving, a change of more than 10 deg in 3 lines in a row (0.15 s) = a step or an edge
+    if (megaNew && !isnan(leanX)) {
+      if (!curL && !curR && !backoffUntil) {
+        if (isnan(levelX)) { levelX = leanX; levelY = leanY; } else { levelX += (leanX - levelX) * 0.05f; levelY += (leanY - levelY) * 0.05f; }
+        tiltHits = 0;
+      } else if (!isnan(levelX) && !backoffUntil && safetyMm > 0 && millis() - moveStartMs > 300) {
+        float dev = hypotf(leanX - levelX, leanY - levelY);
+        tiltHits = dev > 10 ? tiltHits + 1 : 0;
+        if (tiltHits >= 3) {
+          int dir = (curL > 0 && curR > 0) ? 1 : (curL < 0 && curR < 0) ? -1 : 0;
+          turning = false; drive(0, 0); blocked = true; tiltStops++; hazardKind = "step"; hazardLastMs = millis(); hazardDir = dir; tiltHits = 0;
+          if (dir) { drive(-55 * dir, -55 * dir); backoffUntil = millis() + 250; }
+        }
+      }
+    }
+    if (backoffUntil && (long)(millis() - backoffUntil) >= 0) { backoffUntil = 0; drive(0, 0); }
+    if (curL > 0 && curR > 0 && safetyMm > 0 && megaLinkLost()) { drive(0, 0); blocked = true; linkStop = true; }
     if (tofOk && (tof.readReg(VL53L0X::RESULT_INTERRUPT_STATUS) & 0x07)) {
       uint16_t mm = tof.readReg16Bit(VL53L0X::RESULT_RANGE_STATUS + 10);
       tof.writeReg(VL53L0X::SYSTEM_INTERRUPT_CLEAR, 0x01);
@@ -607,12 +659,14 @@ static esp_err_t config_handler(httpd_req_t* req) {
 }
 
 static esp_err_t status_handler(httpd_req_t* req) {
-  char json[1000];
+  char json[1500];
   bool sta = WiFi.status() == WL_CONNECTED;
   snprintf(json, sizeof(json),
            "{\"name\":\"%s\",\"fw\":\"" FW_VERSION "\",\"restartPending\":%s,\"ip\":\"%s\",\"mode\":\"%s\",\"wifi\":\"%s\",\"wifiIp\":\"%s\",\"connecting\":%s,\"rssi\":%d,\"left\":%d,\"right\":%d,\"camera\":%s,\"psram\":%s,\"uptime\":%lu,"
            "\"sensors\":{\"mode\":\"%s\",\"ir\":%s,\"irLeft\":%s,\"irRight\":%s,\"tof\":%s,\"imu\":%s,\"dist\":%d,\"stopMm\":%d,\"blocked\":%s,\"yaw\":%.1f,\"turning\":%s,\"turnResult\":%d,"
-           "\"mega\":%s,\"tempC\":%s,\"humidity\":%s,\"tilt\":%s,\"pir\":%d}}",
+           "\"mega\":%s,\"tempC\":%s,\"humidity\":%s,\"tilt\":%s,\"pir\":%d,\"bumps\":%lu,\"bumpAgoMs\":%ld,\"linkLost\":%s,"
+           "\"sideL\":%d,\"sideR\":%d,\"sideEyes\":%s,\"cliffSensor\":%s,\"cliff\":%s,\"lean\":%s,\"tiltStops\":%lu,\"cliffStops\":%lu,"
+           "\"hazard\":\"%s\",\"hazardAgoMs\":%ld,\"hazardDir\":%d}}",
            robotName.c_str(), restartPending ? "true" : "false", (sta ? WiFi.localIP() : WiFi.softAPIP()).toString().c_str(), apMode ? "hotspot" : "wifi", savedSsid.c_str(),
            sta ? WiFi.localIP().toString().c_str() : "", wifiChangeRequested ? "true" : "false", sta ? WiFi.RSSI() : 0, curL, curR,
            cameraOk ? "true" : "false", psramFound() ? "true" : "false", millis() / 1000,
@@ -620,7 +674,11 @@ static esp_err_t status_handler(httpd_req_t* req) {
            distOk() ? "true" : "false", gyroOk() ? "true" : "false", (int)distMm, (int)safetyMm, blocked ? "true" : "false", (float)yawDeg,
            turning ? "true" : "false", (int)turnResult,
            (megaOk && millis() - megaLast < 1000) ? "true" : "false", isnan(megaTempC) ? "null" : String(megaTempC, 1).c_str(),
-           isnan(megaHum) ? "null" : String(megaHum, 0).c_str(), isnan(megaTilt) ? "null" : String(megaTilt, 0).c_str(), (int)megaPir);
+           isnan(megaHum) ? "null" : String(megaHum, 0).c_str(), isnan(megaTilt) ? "null" : String(megaTilt, 0).c_str(), (int)megaPir,
+           (unsigned long)bumpCount, bumpLastMs ? (long)(millis() - bumpLastMs) : -1L, megaLinkLost() ? "true" : "false",
+           sideL, sideR, sideEyes ? "true" : "false", cliffSensor ? "true" : "false", cliffNow ? "true" : "false",
+           (isnan(leanX) || isnan(levelX)) ? "null" : String(hypotf(leanX - levelX, leanY - levelY), 1).c_str(),
+           (unsigned long)tiltStops, (unsigned long)cliffStops, hazardKind, hazardLastMs ? (long)(millis() - hazardLastMs) : -1L, (int)hazardDir);
   return send_text(req, "application/json", json);
 }
 

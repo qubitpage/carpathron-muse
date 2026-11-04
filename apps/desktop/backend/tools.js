@@ -99,8 +99,8 @@ const BUILTIN = [
   },
   {
     name: 'robot_map', risk: 'robot',
-    description: 'The room map the car learns with its laser (Robot → Map): action "status" = how much floor is known, where the robot is, the named places and objects; "go" with place = a named place or object (e.g. "door") or x/y in metres = plans a way around known walls and drives there; "explore" = the car learns the room by itself (rounds 1-10); "measure" = turn around once measuring; "add_place" with place + x/y (or without x/y: where the robot is now); "stop". Driving actions run in the background: check "status" to see when they finish.',
-    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['status', 'go', 'explore', 'measure', 'add_place', 'stop'] }, place: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, rounds: { type: 'number' } }, required: ['action'] },
+    description: 'The room map the car learns with its laser (Robot → Map): action "status" = how much floor is known, where the robot is, the named places and objects; "go" with place = a named place or object (e.g. "door") or x/y in metres = plans a way around known walls and drives there; "explore" = the car learns the room by itself (rounds 1-10); "find" with place = a mission to find an object (e.g. "chair"): drives to it if the map knows it, otherwise scans with photos and explores until it sees it, then the camera guides the last part; "measure" = turn around once measuring; "add_place" with place + x/y (or without x/y: where the robot is now); "stop". Driving actions run in the background: check "status" to see when they finish.',
+    parameters: { type: 'object', properties: { action: { type: 'string', enum: ['status', 'go', 'find', 'explore', 'measure', 'add_place', 'stop'] }, place: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, rounds: { type: 'number' } }, required: ['action'] },
   },
   {
     name: 'robot_settings', risk: 'robot',
@@ -384,7 +384,7 @@ async function execBuiltin(name, args, ctx) {
     case 'robot_map': {
       const rm = ctx.roommap; if (!rm) throw new Error('not available');
       const a = args.action;
-      if (a === 'status') { const v = rm.view(); return JSON.stringify({ busy: v.busy, floorKnown_m2: v.stats.freeM2, walls_m: v.stats.wallM, robot: { x: +v.pose.x.toFixed(2), y: +v.pose.y.toFixed(2), heading: Math.round(v.pose.heading) }, places: v.places, objects: v.objects.map((o) => ({ name: o.name, x: o.x, y: o.y })), note: 'metres: x = right, y = ahead of where the map started' }); }
+      if (a === 'status') { const v = rm.view(); return JSON.stringify({ busy: v.busy, floorKnown_m2: v.stats.freeM2, walls_m: v.stats.wallM, robot: { x: +v.pose.x.toFixed(2), y: +v.pose.y.toFixed(2), heading: Math.round(v.pose.heading) }, places: v.places, objects: v.objects.map((o) => ({ name: o.name, x: o.x, y: o.y })), hazards: (v.hazards || []).map((h) => ({ kind: h.kind, x: h.x, y: h.y })), note: 'metres: x = right, y = ahead of where the map started' }); }
       if (a === 'stop') { rm.stop('Muse'); return 'Stopped.'; }
       if (a === 'add_place') { const x = args.x ?? rm.robot.pose.x, y = args.y ?? rm.robot.pose.y; rm.addPlace(args.place, x, y); return `Place "${args.place}" saved at (${(+x).toFixed(2)}, ${(+y).toFixed(2)}).`; }
       ctx.mapper.needCar();
@@ -394,6 +394,7 @@ async function execBuiltin(name, args, ctx) {
         if (Number.isFinite(args.x) && Number.isFinite(args.y)) { rm.plan(args.x, args.y); return run(rm.goTo(args.x, args.y), `going to (${args.x}, ${args.y})`); }
         throw new Error('give place or x and y');
       }
+      if (a === 'find') { if (!args.place) throw new Error('give place = what to find'); return run(rm.find(args.place), `finding the ${args.place}`); }
       if (a === 'explore') return run(rm.explore(args.rounds || 6), 'exploring the room');
       if (a === 'measure') return run(rm.measureHere(), 'measuring all around');
       throw new Error('unknown action');

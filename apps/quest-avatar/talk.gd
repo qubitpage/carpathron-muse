@@ -9,7 +9,8 @@ extends Node
 
 signal state_changed(state: String)          # idle | listening | thinking | speaking
 signal replied(reply: Dictionary)            # the whole answer (say, action, target, mood, heard, ...)
-signal level(v: float)                       # speaking loudness 0..1 (mouth / eyes)
+signal level(v: float)
+signal mic_silent()                          # 1.6.8: the microphone delivers only zeros: restart it                       # speaking loudness 0..1 (mouth / eyes)
 
 const RATE_OUT := 16000
 var muse: Node
@@ -116,6 +117,13 @@ func _finish_rec() -> void:
 		if f:
 			f.store_buffer(_to_wav(_rec))
 			f.close()
+	if secs >= 0.45 and pk == 0.0:
+		print("CARPATHRON_TALK the recording was pure silence (microphone dead): not sent, restarting the microphone")
+		_rt_stop()
+		_rec = PackedFloat32Array()
+		mic_silent.emit()
+		_on_reply_missed_silent()
+		return
 	if secs < 0.45:
 		_rt_stop()
 		_rec = PackedFloat32Array()
@@ -169,8 +177,24 @@ func _missed() -> void:
 		_deaf_until = Time.get_ticks_msec() + 300
 
 var _misses := 0
+var _zero_ms := 0.0
+
+## 1.6.8: the headset's microphone input can go dead (only zeros) after the app plays sound: notice it and ask for a
+## restart (main.gd recreates the microphone), at most every 3 s
+func _mic_watch(ms: float, zero: bool) -> void:
+	if not active:
+		return
+	_zero_ms = _zero_ms + ms if zero else minf(_zero_ms, 0.0)
+	if _zero_ms > 800.0:
+		print("CARPATHRON_TALK microphone silent for %d ms: restarting it" % int(_zero_ms))
+		_zero_ms = -3000.0
+		mic_silent.emit()
 var _dc := 0.0
 var _heard_n := 0
+
+func _on_reply_missed_silent() -> void:
+	set_state("thinking")
+	_on_reply({"heard": "", "say": "", "action": "none", "mood": "curious", "missed": true})
 
 func send_text(text: String) -> void:
 	set_state("thinking")
@@ -330,8 +354,15 @@ func _process(delta: float) -> void:
 		return
 	var n := capture.get_frames_available()
 	if n <= 0:
+		_mic_watch(delta * 1000.0, true)
 		return
 	var buf := capture.get_buffer(n)
+	var allz := true
+	for i in range(0, buf.size(), 7):
+		if buf[i].x != 0.0 or buf[i].y != 0.0:
+			allz = false
+			break
+	_mic_watch(buf.size() / mix_rate * 1000.0, allz)
 	var e := 0.0
 	var mono := PackedFloat32Array()
 	mono.resize(buf.size())

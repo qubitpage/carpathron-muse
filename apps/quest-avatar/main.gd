@@ -94,6 +94,7 @@ var _noticed := {}
 var _notice_at := -100000
 var _y_down_at := 0
 var _mic_off_at := 0
+var _mic_restart_at := 0
 var cam_win := "medium"    # 1.6.3: the robot's camera window in your room: small / medium / large (it follows your head)
 const CAM_WIN := {"small": 0.2, "medium": 0.3, "large": 0.42}
 var car_script: Array = [] # 1.6: timed wheel commands for the real car without the PC: [[l, r, ms], ...]
@@ -578,6 +579,8 @@ func _brain_now() -> String:
 	return "headset" if brain.has_key() else "pc"
 
 func _wire_talk(t: Node, ctx: Callable) -> void:
+	if not t.mic_silent.is_connected(_mic_restart):
+		t.mic_silent.connect(_mic_restart)
 	t.local = brain
 	t.brain_fn = _brain_now
 	t.ctx_fn = ctx
@@ -836,10 +839,21 @@ func _mic_ready() -> bool:
 ## 1.6.3: with "Talk without buttons" OFF the microphone is open only while you hold the grip, so the Quest's own
 ## screen recorder can record your voice (two apps cannot share the microphone on the headset)
 func _mic_gate(_grip_down: bool) -> void:
-	# 1.6.4: the microphone is never stopped and restarted (on the headset the input does not come back reliably);
-	# it stays open, and the app only listens hands-free or while you hold the grip
-	if mic != null and not mic.playing:
-		mic.play()
+	pass   # 1.6.8: the microphone stays open; a dead input is restarted by _mic_restart (talk.gd notices it)
+
+## 1.6.8: the headset microphone delivered only silence after Carpathron spoke: a brand-new microphone player
+func _mic_restart() -> void:
+	if Time.get_ticks_msec() < _mic_restart_at:
+		return
+	_mic_restart_at = Time.get_ticks_msec() + 2500
+	print("CARPATHRON_TALK microphone restarted")
+	if mic != null:
+		mic.stop()
+		mic.queue_free()
+		mic = null
+	if capture != null:
+		capture.clear_buffer()
+	_mic_ready()
 
 func _ptt(down: bool) -> void:
 	if down and not recording and muse.state == "linked":

@@ -207,7 +207,10 @@ func _ready() -> void:
 	_apply_view()
 	_refresh_panel()
 	if shots_dir != "":
-		_shots_run()
+		if OS.get_cmdline_user_args().has("--menu-shots"):
+			_menu_shots_run()
+		else:
+			_shots_run()
 	if film:
 		_film_run()
 	for a2 in OS.get_cmdline_user_args():
@@ -1701,6 +1704,19 @@ func _steer_to(target: Vector2, speed := 70.0) -> float:
 	var fw := speed if absf(err) < 0.5 else 0.0
 	demo.drive(int(fw - turn), int(fw + turn))
 	return to.length()
+
+## README pictures: the menus (welcome, main, settings, Meta AI, missions, robots) in front of the training room
+func _menu_shots_run() -> void:
+	await _wait(0.8)
+	if demo == null:
+		_start_demo()
+	await _wait(1.0)
+	for pg in ["welcome", "main", "settings", "meta", "missions", "robots"]:
+		menu3d.open_at(cam, pg)
+		await _wait(1.2)
+		await _snap("-menu-" + pg)
+	menu3d.close()
+	get_tree().quit()
 
 func _shots_run() -> void:
 	await _wait(0.5)

@@ -916,7 +916,7 @@ func _process(delta: float) -> void:
 	# 1.5: room status in the Android log every 5 s (adb logcat -s godot)
 	if room != null and Time.get_ticks_msec() > _room_log_at:
 		_room_log_at = Time.get_ticks_msec() + 5000
-		print("CARPATHRON_ROOM ", JSON.stringify({"passthrough": room.passthrough, "camera": room.cam_status, "frames_sent": room.frame_id, "anchors": room.anchors.keys(), "muse": muse.state, "talk": room.talk.state, "hands_free": room.talk.hands_free, "mic": mic != null, "noise": snappedf(room.talk.noise, 0.0001), "cam_luma": snappedf(room.cam_luma, 0.01), "pc_view": spectator.enabled}))
+		print("CARPATHRON_ROOM ", JSON.stringify({"passthrough": room.passthrough, "camera": room.cam_status, "frames_sent": room.frame_id, "anchors": room.anchors.keys(), "muse": muse.state, "talk": room.talk.state, "hands_free": room.talk.hands_free, "mic": mic != null, "noise": snappedf(room.talk.noise, 0.0001), "cam_luma": snappedf(room.cam_luma, 0.01), "cam": room.cam_index, "cams": room.cam_info, "peak": snappedf(room.talk.peak, 0.001), "muse_version": muse.version, "pc_view": spectator.enabled}))
 	if welcome_pending and (placed or not xr_on):
 		welcome_pending = false
 		menu3d.open_at(cam, "welcome")

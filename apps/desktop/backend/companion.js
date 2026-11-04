@@ -29,6 +29,7 @@ const QUICK = [
   [/^(dance|dance for me|do a dance|let's dance)$/, () => ({ say: 'Watch my moves!', action: 'dance', mood: 'excited' })],
   [/^(wave|say hi|say hello|wave at me)$/, () => ({ say: 'Hi there!', action: 'wave', mood: 'happy' })],
   [/^(spin|turn around|spin around|do a spin)$/, () => ({ say: 'Wheee!', action: 'spin', mood: 'excited' })],
+  [/^(?:go|walk|move|run|come) (?:over )?there$/, () => ({ say: 'Okay, over there!', action: 'goto', target: 'there', mood: 'happy' })],
   [/^(?:go|walk|drive|move|run) (?:to|over to|near) (?:the |that |this |my )?([a-z][a-z ]{1,24})$/, (m) => ({ say: `On my way to the ${m[1]}!`, action: 'goto', target: m[1], mood: 'happy' })],
 ];
 function quick(text) {

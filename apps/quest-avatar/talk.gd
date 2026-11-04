@@ -34,9 +34,12 @@ var test_wav := PackedByteArray()             # automated test: what "the user s
 func _ready() -> void:
 	mix_rate = AudioServer.get_mix_rate()
 
+var peak := 0.0                               # loudest microphone level in the last seconds (log)
+
 func set_state(s: String) -> void:
 	if s != state:
 		state = s
+		print("CARPATHRON_TALK_STATE ", s)
 		state_changed.emit(s)
 
 ## grip pressed: interrupt Carpathron and listen; released: send what you said
@@ -176,12 +179,13 @@ func _process(delta: float) -> void:
 		mono[i] = m
 		e += m * m
 	var rms := sqrt(e / maxi(1, buf.size()))
+	peak = maxf(peak * 0.995, rms)
 	var ms := buf.size() / mix_rate * 1000.0
 	if state == "listening":
 		_rec.append_array(mono)
 		if not _ptt:
 			# hands-free: send after 0.8 s of quiet (or 12 s of talking)
-			if rms > noise * 3.0 + 0.004:
+			if rms > noise * 2.2 + 0.004:
 				_quiet_ms = 0.0; _voice_ms += ms
 			else:
 				_quiet_ms += ms
@@ -199,7 +203,7 @@ func _process(delta: float) -> void:
 		_pre = _pre.slice(_pre.size() - keep)
 	if state == "idle":
 		noise = lerpf(noise, minf(rms, 0.05), 0.02)
-		if hands_free and Time.get_ticks_msec() > _deaf_until and rms > noise * 3.0 + 0.006:
+		if hands_free and Time.get_ticks_msec() > _deaf_until and rms > noise * 2.5 + 0.005:
 			_voice_ms += ms
 			if _voice_ms > 120.0:
 				_start_rec()

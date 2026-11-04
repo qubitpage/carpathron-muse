@@ -42,6 +42,10 @@ var room_image := ""          # desktop test: a picture used as "the headset cam
 var view_tex: ImageTexture = null   # the newest headset camera picture (tests)
 var view_img: Image = null          # the same picture, for the PC view (the 3D is laid over it there)
 var cam_luma := -1.0                # how bright the camera picture is (0..1), in the log
+var cam_info := ""                  # the cameras the headset offers ("id:source/position,...")
+var cam_index := 0                  # which of them is used
+var _cam_try := 0                   # cameras tried (a black picture -> the next one)
+var _black_since := 0
 var _view_at := 0
 var _view_frames := -1
 
@@ -60,6 +64,8 @@ var highlight: Node3D = null
 var shadow: MeshInstance3D
 var car_anchor := Vector3.ZERO   # real car: where his voice and words are (under the camera window)
 var man_v := 0.0
+var last_reply := {}
+var _warned_old := false
 var man_w := 0.0
 var highlight_t := 0.0
 
@@ -151,7 +157,7 @@ func _start_camera() -> void:
 		var have := OS.get_granted_permissions()
 		var missing := need.filter(func(x): return not have.has(x))
 		if missing.is_empty():
-			cam_status = cam_plugin.start(0)
+			_open_camera()
 		else:
 			cam_status = "asking"
 			for m in missing:
@@ -169,12 +175,44 @@ func on_permission(perm: String, granted: bool) -> void:
 		return
 	var have := OS.get_granted_permissions()
 	if have.has("android.permission.CAMERA") and have.has("horizonos.permission.HEADSET_CAMERA"):
-		cam_status = cam_plugin.start(0)
+		_open_camera()
+
+## the left passthrough camera (Meta metadata: source 0 = passthrough, position 0 = left); if its picture stays
+## black, the next camera is tried
+func _open_camera() -> void:
+	cam_info = str(cam_plugin.camInfo())
+	var ids := cam_info.split(",", false)
+	if _cam_try == 0:
+		cam_index = 0
+		for i in ids.size():
+			if ids[i].ends_with(":0/0"):
+				cam_index = i
+				break
+	cam_status = cam_plugin.start(cam_index)
+	_black_since = 0
+	print("CARPATHRON_CAM ", JSON.stringify({"cameras": cam_info, "using": cam_index, "status": cam_status}))
+
+func _camera_watchdog() -> void:
+	if cam_plugin == null or cam_status != "on" or cam_luma < 0.0:
+		return
+	var now := Time.get_ticks_msec()
+	if cam_luma > 0.03:
+		_black_since = 0
+		return
+	if _black_since == 0:
+		_black_since = now
+	elif now - _black_since > 4000 and _cam_try < 4:
+		var n := maxi(1, cam_info.split(",", false).size())
+		_cam_try += 1
+		cam_plugin.stop()
+		cam_index = (cam_index + 1) % n
+		cam_luma = -1.0
+		_open_camera()
 
 ## the newest headset camera picture as a texture, ~3 per second (for the PC view: Robots > Live)
 func _update_view_tex() -> void:
 	var now := Time.get_ticks_msec()
-	if now < _view_at or muse == null or muse.state != "linked":
+	if now < _view_at:
 		return
 	_view_at = now + 300
 	var jpg := PackedByteArray()
@@ -342,6 +380,12 @@ func _on_talk_state(s: String) -> void:
 
 func _on_reply(j: Dictionary) -> void:
 	mood = str(j.get("mood", "happy"))
+	last_reply = j
+	print("CARPATHRON_TALK ", JSON.stringify({"heard": j.get("heard", ""), "say": j.get("say", ""), "action": j.get("action", ""), "audio": (j.get("audio", []) as Array).size() if typeof(j.get("audio", [])) == TYPE_ARRAY else 0, "error": j.get("error", "")}))
+	if j.has("error"):
+		_say(str(j.get("say", "")), "sorry", 8.0)
+		note.emit(str(j.get("say", "")))
+		return
 	var heard := str(j.get("heard", ""))
 	note.emit(("You: " + heard + "\n") if heard != "" else "")
 	_say(str(j.get("say", "")), mood, 4.0 + str(j.get("say", "")).length() * 0.06)
@@ -495,6 +539,11 @@ func _process(delta: float) -> void:
 		(anchors[k]["node"] as Node3D).visible = true
 	_send_eyes()
 	_update_view_tex()
+	_camera_watchdog()
+	if muse and muse.state == "linked" and not muse.has_companion() and not _warned_old:
+		_warned_old = true
+		_say("Please install Muse Carpathron 2.3.0 on your PC — then I can hear you, talk and see your room.", "sorry", 12.0)
+		note.emit("Muse Carpathron on the PC is " + muse.version + ": install 2.3.0 for the companion")
 	if muse:
 		muse.want_vision = true
 		muse.vision_src = "room"

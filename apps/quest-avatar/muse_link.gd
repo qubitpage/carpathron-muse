@@ -38,6 +38,7 @@ var _eyes_req: HTTPRequest
 var _comp_req: HTTPRequest
 var _audio_req: HTTPRequest
 var companion_busy := false
+var version := ""          # Muse Carpathron version on the PC (from /avatar/hello)
 var _tls := TLSOptions.client_unsafe()   # the PC app uses its own self-signed certificate on the LAN
 
 func setup(cfg: ConfigFile) -> void:
@@ -121,6 +122,7 @@ func _on_hello(result: int, code: int, _h: PackedStringArray, body: PackedByteAr
 	var j = JSON.parse_string(body.get_string_from_utf8())
 	if typeof(j) != TYPE_DICTIONARY or str(j.get("app", "")) != "Muse Carpathron":
 		return
+	version = str(j.get("version", ""))
 	if state == "linked" and host == pc:
 		if not j.get("linked", false):
 			token = ""
@@ -264,13 +266,25 @@ func companion(wav: PackedByteArray, text: String, mode: String, done: Callable)
 		var j = JSON.parse_string(b.get_string_from_utf8()) if result == HTTPRequest.RESULT_SUCCESS else null
 		if code == 401:
 			state = "not found"; token = ""; find([pc]); changed.emit()
-		done.call(j if typeof(j) == TYPE_DICTIONARY else {"say": "I can't reach the PC right now.", "action": "none", "error": "PC not reachable"})
+		if code == 404:
+			done.call({"say": "Muse Carpathron on your PC is too old to talk with me. Please install Muse Carpathron 2.3.0.", "action": "none", "mood": "sorry", "error": "old muse"})
+		elif typeof(j) == TYPE_DICTIONARY and str(j.get("say", "")) != "":
+			done.call(j)
+		else:
+			done.call({"say": "I can't reach Muse Carpathron on your PC right now." + ((" (" + str(j.get("error", "")) + ")") if typeof(j) == TYPE_DICTIONARY else ""), "action": "none", "mood": "sorry", "error": "PC not reachable"})
 	, CONNECT_ONE_SHOT)
 	var path := "/avatar/companion?mode=" + mode
 	if wav.size() > 0:
 		_comp_req.request_raw(_base() + path, ["x-avatar-token: " + token, "Content-Type: audio/wav"], HTTPClient.METHOD_POST, wav)
 	else:
 		_comp_req.request(_base() + path, ["x-avatar-token: " + token, "Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify({"text": text}))
+
+## true when the PC runs Muse Carpathron 2.3.0 or newer (the companion needs it)
+func has_companion() -> bool:
+	if version == "":
+		return state == "linked"
+	var p := version.split(".")
+	return p.size() >= 2 and (int(p[0]) > 2 or (int(p[0]) == 2 and int(p[1]) >= 3))
 
 func cancel_companion() -> void:
 	if companion_busy:

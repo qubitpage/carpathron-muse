@@ -201,6 +201,74 @@
     return-void
 .end method
 
+
+# every camera: "id:source/position" (Meta: source 0 = passthrough camera, position 0 = left, 1 = right)
+.method public camInfo()Ljava/lang/String;
+    .locals 10
+    .annotation runtime Lorg/godotengine/godot/plugin/UsedByGodot;
+    .end annotation
+    :try_start_0
+    invoke-virtual {p0}, Lorg/godotengine/godot/plugin/GodotPlugin;->getActivity()Landroid/app/Activity;
+    move-result-object v0
+    const-string v1, "camera"
+    invoke-virtual {v0, v1}, Landroid/app/Activity;->getSystemService(Ljava/lang/String;)Ljava/lang/Object;
+    move-result-object v0
+    check-cast v0, Landroid/hardware/camera2/CameraManager;
+    invoke-virtual {v0}, Landroid/hardware/camera2/CameraManager;->getCameraIdList()[Ljava/lang/String;
+    move-result-object v1
+    new-instance v2, Ljava/lang/StringBuilder;
+    invoke-direct {v2}, Ljava/lang/StringBuilder;-><init>()V
+    new-instance v3, Landroid/hardware/camera2/CameraCharacteristics$Key;
+    const-string v8, "com.meta.extra_metadata.camera_source"
+    const-class v9, Ljava/lang/Integer;
+    invoke-direct {v3, v8, v9}, Landroid/hardware/camera2/CameraCharacteristics$Key;-><init>(Ljava/lang/String;Ljava/lang/Class;)V
+    new-instance v4, Landroid/hardware/camera2/CameraCharacteristics$Key;
+    const-string v8, "com.meta.extra_metadata.position"
+    invoke-direct {v4, v8, v9}, Landroid/hardware/camera2/CameraCharacteristics$Key;-><init>(Ljava/lang/String;Ljava/lang/Class;)V
+    array-length v5, v1
+    const/4 v6, 0x0
+    :goto_0
+    if-ge v6, v5, :cond_done
+    aget-object v7, v1, v6
+    invoke-virtual {v2, v7}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    const-string v8, ":"
+    invoke-virtual {v2, v8}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    :try_start_1
+    invoke-virtual {v0, v7}, Landroid/hardware/camera2/CameraManager;->getCameraCharacteristics(Ljava/lang/String;)Landroid/hardware/camera2/CameraCharacteristics;
+    move-result-object v7
+    invoke-virtual {v7, v3}, Landroid/hardware/camera2/CameraCharacteristics;->get(Landroid/hardware/camera2/CameraCharacteristics$Key;)Ljava/lang/Object;
+    move-result-object v8
+    invoke-virtual {v2, v8}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
+    const-string v8, "/"
+    invoke-virtual {v2, v8}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    invoke-virtual {v7, v4}, Landroid/hardware/camera2/CameraCharacteristics;->get(Landroid/hardware/camera2/CameraCharacteristics$Key;)Ljava/lang/Object;
+    move-result-object v8
+    invoke-virtual {v2, v8}, Ljava/lang/StringBuilder;->append(Ljava/lang/Object;)Ljava/lang/StringBuilder;
+    :try_end_1
+    .catch Ljava/lang/Throwable; {:try_start_1 .. :try_end_1} :catch_1
+    goto :goto_next
+    :catch_1
+    move-exception v8
+    const-string v8, "?"
+    invoke-virtual {v2, v8}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    :goto_next
+    const-string v8, ","
+    invoke-virtual {v2, v8}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    add-int/lit8 v6, v6, 0x1
+    goto :goto_0
+    :cond_done
+    invoke-virtual {v2}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+    move-result-object v0
+    :try_end_0
+    .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :catch_0
+    return-object v0
+    :catch_0
+    move-exception v0
+    invoke-virtual {v0}, Ljava/lang/Object;->toString()Ljava/lang/String;
+    move-result-object v0
+    return-object v0
+.end method
+
 # YUV_420_888 -> NV21 -> JPEG (quality 70)
 .method public static toJpeg(Landroid/media/Image;)[B
     .locals 15

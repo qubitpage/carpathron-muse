@@ -87,6 +87,12 @@ var brain: Node            # 1.6: the companion's brain on the headset (Meta API
 var key_page: Node         # 1.6: put the key in from a phone / PC on this Wi-Fi
 var brain_mode := "auto"   # auto | pc | headset
 var speech: Object = null  # the headset's speech engine (Android plugin)
+var car_seen: Array = []     # 1.6.1: what Baby Carpathron's camera recognised (Muse or the headset brain)
+var car_seen_at := 0
+var _car_eyes_at := 0
+var _noticed := {}
+var _notice_at := -100000
+var _y_down_at := 0
 var car_script: Array = [] # 1.6: timed wheel commands for the real car without the PC: [[l, r, ms], ...]
 var _car_step_until := 0
 var demo_manual := false
@@ -228,7 +234,7 @@ func _build_world() -> void:
 		left_hand.pose = &"grip"; right_hand.pose = &"grip"
 		ctrl_l = ControllerModel.new(false); left_hand.add_child(ctrl_l)
 		ctrl_r = ControllerModel.new(true); right_hand.add_child(ctrl_r)
-		ctrl_l.set_hints.call_deferred({"stick": "Drive / turn  ·  click: missions", "a": "STOP", "b": "Head steering", "menu": "Menu", "trigger": "Turbo  ·  select", "grip": "What do you see?"})
+		ctrl_l.set_hints.call_deferred({"stick": "Drive / turn  ·  click: missions", "a": "STOP", "b": "Head steering  ·  HOLD: room / robot view", "menu": "Menu", "trigger": "Turbo  ·  select", "grip": "What do you see?"})
 		ctrl_r.set_hints.call_deferred({"stick": "Drive / turn", "a": "STOP", "b": "Photo  ·  back", "trigger": "Turbo  ·  select", "grip": "Hold: talk to Muse"})
 		# the laser pointers come from the aim pose (where the controller points)
 		aim_l = XRController3D.new(); aim_l.tracker = "left_hand"; aim_l.pose = &"aim"; origin.add_child(aim_l)
@@ -536,13 +542,23 @@ func _start_room(with_robot := false) -> void:
 			room_note = t
 			_refresh_panel())
 	_mic_ready()
-	_wire_talk(room.talk, func(text): return room.local_ctx(text))
+	_wire_talk(room.talk, _ctx_for)
 	room.brain = brain
 	room.brain_fn = _brain_now
 	room.car_action.connect(_car_action)
 	room.begin(muse, cam, capture, hands_free)
 	room_note = ("Baby Carpathron: talk to him, he answers here and drives for real" if room.real else "") + ("" if room.passthrough or not xr_on else "  (passthrough is not available on this headset)")
 	_room_layout(true)
+	_refresh_panel()
+
+## Baby Carpathron: your room with his camera window (mixed reality) <-> only his camera all around you (VR)
+func _toggle_robot_view() -> void:
+	if room != null:
+		_stop_room()
+		link.note = "Robot's eyes: only Baby Carpathron's camera (hold Y for your room again)"
+	else:
+		_start_room(true)
+		room_note = "Your room + Baby Carpathron's camera window (hold Y: only his camera)"
 	_refresh_panel()
 
 ## where the companion thinks: Muse on the PC, or Meta's models straight from the headset (standalone)
@@ -560,6 +576,99 @@ func _wire_talk(t: Node, ctx: Callable) -> void:
 	t.brain_fn = _brain_now
 	t.ctx_fn = ctx
 	t.speech = speech
+	t.rt_fn = _rt_cfg
+
+## realtime speech to text: straight to Meta with the headset's key, or through Muse 2.3.3+ (its key)
+func _rt_cfg() -> Dictionary:
+	if _brain_now() == "headset" and brain.has_key():
+		var u: String = brain.base.replace("https://", "wss://").replace("http://", "ws://") + "/asr/realtime"
+		return {"url": u, "key": brain.key, "headers": PackedStringArray(), "tls": null}
+	if muse.state == "linked" and muse.token != "" and _ver_at_least(str(muse.version), "2.3.3"):
+		return {"url": "wss://" + muse.pc + "/avatar/listen", "key": "", "headers": PackedStringArray(["x-avatar-token: " + muse.token]), "tls": muse._tls}
+	return {}
+
+static func _ver_at_least(v: String, want: String) -> bool:
+	var a := v.split("."); var b := want.split(".")
+	for i in 3:
+		var x := int(a[i]) if i < a.size() else 0
+		var y := int(b[i]) if i < b.size() else 0
+		if x != y:
+			return x > y
+	return true
+
+## automated tests: one spoken sentence through realtime speech to text
+func _rt_test(r: Dictionary) -> void:
+	var t: Node = room.talk
+	while t.state != "idle":
+		await get_tree().create_timer(0.1).timeout
+	r["rt_cfg"] = not _rt_cfg().is_empty()
+	var got := {}
+	t.replied.connect(func(j): got["j"] = j, CONNECT_ONE_SHOT)
+	var t0 := Time.get_ticks_msec()
+	t.test_utterance(1.2)
+	for i in 150:
+		await get_tree().create_timer(0.1).timeout
+		if got.has("j"):
+			break
+	r["rt_heard"] = str(got.get("j", {}).get("heard", ""))
+	r["rt_ms"] = Time.get_ticks_msec() - t0
+
+## what the headset brain gets with what you said. With Baby Carpathron connected HE is talking: his camera picture
+## (always) and what his camera recognised; otherwise the 3D Carpathron with the headset camera and the room.
+func _ctx_for(text: String) -> Dictionary:
+	var real_car: bool = demo == null and link.host != "" and (room == null or room.real)
+	if not real_car:
+		return room.local_ctx(text) if room != null else {"real": false, "objects": []}
+	var c := {"real": true, "objects": [], "car_objects": car_seen.map(func(o): return str(o.get("label", "")) + (" (very close)" if bool(o.get("near", false)) else ""))}
+	if room != null:
+		c["objects"] = room.local_ctx("")["objects"]
+	var jpg := _car_jpg()
+	if jpg.size() > 0:
+		c["jpg"] = jpg
+	return c
+
+func _car_jpg() -> PackedByteArray:
+	if screen_mat.albedo_texture == null or not link.online:
+		return PackedByteArray()
+	var im: Image = screen_mat.albedo_texture.get_image()
+	return im.save_jpg_to_buffer(0.75) if im else PackedByteArray()
+
+## Baby Carpathron's eyes: to Muse (when the PC does not stream that car itself) or, without the PC, looked at
+## by the headset brain; people and pets that come into view get a word from him
+func _car_eyes() -> void:
+	var real_car: bool = demo == null and link.host != "" and link.online and (room == null or room.real)
+	if not real_car:
+		car_seen = []
+		return
+	var now := Time.get_ticks_msec()
+	if now < _car_eyes_at:
+		return
+	if _brain_now() == "pc":
+		_car_eyes_at = now + 1200
+		if muse.state == "linked" and not link._relay_used:
+			muse.post_car(_car_jpg())
+		var st: Dictionary = muse.state_data
+		if int(st.get("seenAgoMs", -1)) >= 0 and int(st.get("seenAgoMs", -1)) < 8000:
+			car_seen = st.get("seen", [])
+		return
+	_car_eyes_at = now + 2500
+	if brain.has_key() and not brain.car_busy:
+		var jpg := _car_jpg()
+		if jpg.size() == 0:
+			return
+		brain.car_vision(jpg, func(seen: Array, err: String):
+			if err != "":
+				return
+			car_seen = seen
+			car_seen_at = Time.get_ticks_msec()
+			for o in seen:
+				var k := str(o.get("label", "")).to_lower()
+				var kind := str(o.get("kind", ""))
+				if (kind == "human" or kind == "animal") and Time.get_ticks_msec() - int(_noticed.get(k, -100000)) > 90000 and Time.get_ticks_msec() - _notice_at > 25000:
+					_noticed[k] = Time.get_ticks_msec(); _notice_at = Time.get_ticks_msec()
+					var t: Node = room.talk if room != null else robot_talk
+					t.say_now({"say": ("Oh, hello! I can see a %s in front of me." if kind == "human" else "Hey, look! There's a %s right here.") % str(o.get("label", "")), "action": "none", "mood": "excited", "heard": "", "local": true})
+					break)
 
 static func _visual(text: String) -> bool:
 	return RegEx.create_from_string("(?i)\\b(see|look|looking|what'?s (this|that|here|there)|what is (this|that)|colou?r|wearing|holding|show me|how many|read|describe|around|in front|which one|recogni[sz]e|room)\\b").search(text) != null
@@ -652,13 +761,7 @@ func _setup_audio() -> void:
 	robot_talk.player = AudioStreamPlayer.new()
 	add_child(robot_talk.player)
 	robot_talk.mode_fn = func(): return "real"
-	_wire_talk(robot_talk, func(text):
-		var c := {"real": true, "objects": []}
-		if _visual(text) and screen_mat.albedo_texture != null:
-			var im: Image = screen_mat.albedo_texture.get_image()
-			if im:
-				c["jpg"] = im.save_jpg_to_buffer(0.75)
-		return c)
+	_wire_talk(robot_talk, _ctx_for)
 	robot_talk.state_changed.connect(func(st):
 		if room == null and demo == null:
 			link.note = {"listening": "🎤 listening...", "thinking": "Carpathron is thinking...", "speaking": ""}.get(st, link.note)
@@ -846,9 +949,9 @@ func _menu_items(p: String) -> Dictionary:
 		its.append({"id": "page", "arg": "missions", "icon": "✦", "color": C_ORANGE, "label": "Missions", "sub": "explore, scan, measure, find an object"})
 	its.append({"id": "page", "arg": "robots", "icon": "◆", "color": C_GREEN, "label": "Your robots", "sub": "choose a robot on this Wi-Fi", "value": "%d found" % link.found.size()})
 	if room != null and room.real:
-		its.append({"id": "robotvr", "arg": "", "icon": "◐", "color": C_GREEN, "label": "Robot's eyes (VR view)", "sub": "see only through Baby Carpathron's camera, all around you"})
+		its.append({"id": "robotvr", "arg": "", "icon": "◐", "color": C_GREEN, "label": "Only the robot's camera (VR)", "sub": "his camera all around you, no room — e.g. to drive him outside   ·   or hold Y"})
 	elif room == null and demo == null and link.host != "":
-		its.append({"id": "robotroom", "arg": "", "icon": "◉", "color": C_GREEN, "label": "See my room (mixed reality)", "sub": "your room + the robot's camera window; talk to Baby Carpathron"})
+		its.append({"id": "robotroom", "arg": "", "icon": "◉", "color": C_GREEN, "label": "My room + the robot's camera (mixed reality)", "sub": "your room with his camera window; talk to Baby Carpathron   ·   or hold Y"})
 	its.append({"id": "room", "arg": "", "icon": "◉", "color": C_ORANGE, "label": "Leave my room" if room != null else "Carpathron in my room", "sub": "back to the welcome screen" if room != null else "mixed reality: he stands in your room, sees it and talks with you"})
 	its.append({"id": "demo", "arg": "", "icon": "▶", "color": C_BLUE, "label": "Leave the virtual tour" if demo != null else "Virtual tour", "sub": "back to the robots" if demo != null else "the 3D robot in a virtual room: learn and test"})
 	its.append({"id": "page", "arg": "settings", "icon": "⚙", "color": C_GREY, "label": "Settings", "sub": "view, driving, head steering, controller labels"})
@@ -1008,6 +1111,12 @@ func _vision_update() -> void:
 		room.car_anchor = screen.global_position + screen.global_basis.y.normalized() * -0.36
 	muse.want_vision = on or room != null
 	var st: Dictionary = muse.state_data
+	if _brain_now() == "headset" and cfg.get_value("ui", "vision", true) and link.online and demo == null:
+		if Time.get_ticks_msec() - car_seen_at < 8000 and not car_seen.is_empty():
+			vision.show_seen(car_seen, car_seen_at)
+		else:
+			vision.clear()
+		return
 	var fresh: bool = on and st.has("seen") and str(st.get("seenSrc", "car")) == "car" and int(st.get("seenAgoMs", -1)) >= 0 and int(st.get("seenAgoMs", -1)) < 7000
 	if not fresh:
 		vision.clear()
@@ -1082,6 +1191,10 @@ func _process(delta: float) -> void:
 	if key_page.running and not (menu3d.is_open and menu3d.page in ["meta", "key"]):
 		key_page.stop()
 	_car_script_step()
+	_car_eyes()
+	robot_talk.active = room == null
+	if room != null:
+		room.talk.active = true
 	info.visible = not menu3d.is_open   # the tour / robot text never shows through an open menu
 	var ls := Vector2.ZERO
 	var rs := Vector2.ZERO
@@ -1153,8 +1266,19 @@ func _process(delta: float) -> void:
 				else:
 					link.take_photo()
 				right_hand.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.08, 0.0)
-			if _pressed("Y", left_hand.is_button_pressed("by_button")):
+			# Y: short = head steering; HOLD (with Baby Carpathron) = switch "my room + his camera window" <-> "only
+			# his camera, all around you" (VR: to drive him somewhere else, e.g. outside)
+			var ydown := left_hand.is_button_pressed("by_button")
+			if ydown and not prev.get("YH", false):
+				_y_down_at = Time.get_ticks_msec()
+			if ydown and _y_down_at > 0 and Time.get_ticks_msec() - _y_down_at > 650 and demo == null and link.host != "":
+				_y_down_at = 0
+				_toggle_robot_view()
+				left_hand.trigger_haptic_pulse("haptic", 0.0, 0.6, 0.1, 0.0)
+			elif not ydown and prev.get("YH", false) and _y_down_at > 0:
+				_y_down_at = 0
 				_toggle_head()
+			prev["YH"] = ydown
 			if _pressed("RS", right_hand.is_button_pressed("primary_click")):
 				_toggle_tank()
 			if _pressed("LS", left_hand.is_button_pressed("primary_click")):
@@ -1399,6 +1523,7 @@ func _room_test_run() -> void:
 					break
 			r["real_say"] = room.bubble.text
 			await get_tree().create_timer(2.0).timeout
+	await _rt_test(r)
 	r["states"] = room_test["states"]
 	r["camera"] = room.cam_status
 	r["frames_sent"] = room.frame_id
@@ -1461,6 +1586,15 @@ func _standalone_test_run() -> void:
 				if link.online:
 					break
 			r["car_online"] = link.online
+			# he looks through his own camera (headset brain) and speaks up when he sees someone
+			for i in 120:
+				await get_tree().create_timer(0.1).timeout
+				if room.bubble.text.contains("I can see") or room.bubble.text.contains("There's a"):
+					break
+			r["notice"] = room.bubble.text
+			r["car_seen"] = car_seen.map(func(o): return o["label"])
+			while room.talk.state != "idle":
+				await get_tree().create_timer(0.1).timeout
 			room.talk.send_text("drive forward a bit")
 			for i in 200:
 				await get_tree().create_timer(0.1).timeout
@@ -1468,6 +1602,7 @@ func _standalone_test_run() -> void:
 					break
 			r["car_script"] = car_script.size()
 			await get_tree().create_timer(2.0).timeout
+	await _rt_test(r)
 	r["states"] = room_test["states"]
 	print("STANDALONE_TEST ", JSON.stringify(r))
 	get_tree().quit()

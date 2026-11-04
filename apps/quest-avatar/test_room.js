@@ -49,6 +49,7 @@ const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
     'companion events in Muse': events.includes('companion'),
     'guided driving: the headset brings the car to the chair (unknown heading, learns its speed)': r.nav_dist < 0.5 && Math.abs(r.nav_speed_learned - 0.42) < 0.12,
     'Baby Carpathron picked: mixed reality + camera window, no 3D robot': r.real && r.car_online && r.car_window,
+    'realtime speech to text through Muse (relay adds the key)': r.rt_cfg === true && r.rt_heard === 'Look left' && fake.rt().length >= 1,
     'talking to Baby Carpathron drives the real car': /forward/i.test(r.real_say) && car.log.some((d) => /l=[1-9]|ws:[1-9]/.test(d)),
     ...(process.env.MC_TEST_KOKORO ? { 'spoke in the headset (natural voice)': r.states.includes('speaking') } : {}),
   };

@@ -286,6 +286,17 @@ func has_companion() -> bool:
 	var p := version.split(".")
 	return p.size() >= 2 and (int(p[0]) > 2 or (int(p[0]) == 2 and int(p[1]) >= 3))
 
+## 1.6.1: Baby Carpathron's camera picture for Muse (when the PC does not stream that car itself)
+var _car_req: HTTPRequest = null
+func post_car(jpg: PackedByteArray) -> void:
+	if state != "linked" or jpg.size() < 200:
+		return
+	if _car_req == null:
+		_car_req = _mk(3.0)
+	if _car_req.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		return
+	_car_req.request_raw(_base() + "/avatar/eyes?src=car", ["x-avatar-token: " + token, "Content-Type: image/jpeg"], HTTPClient.METHOD_POST, jpg)
+
 ## 1.6: copy the Meta API key saved in Muse Carpathron on the PC into the headset (the headset is linked = allowed)
 func get_key(done: Callable) -> void:
 	if state != "linked":

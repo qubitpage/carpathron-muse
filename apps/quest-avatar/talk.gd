@@ -36,10 +36,17 @@ var brain_fn: Callable                        # -> "pc" / "headset"
 var ctx_fn: Callable                          # (text) -> {real, objects, jpg} for the headset brain
 var speech: Object = null                     # Android plugin CarpathronRoomCam (ttsSay / ttsState)
 var speech_rate := 1.0
-var _tts_wait := {}                           # {id, path, since} while a sentence is being made
+var _tts_wait := {}
+var active := true                            # only the talk in use plays what Carpathron says by himself
+var rt: Node = null                           # rt_asr.gd: words sent while you talk
+var rt_fn: Callable                           # -> {url, key, headers, tls} or {} (no realtime speech)
+var _rt_on := false
+var _said_id := 0                           # {id, path, since} while a sentence is being made
 
 func _ready() -> void:
 	mix_rate = AudioServer.get_mix_rate()
+	rt = preload("res://rt_asr.gd").new()
+	add_child(rt)
 
 var peak := 0.0                               # loudest microphone level in the last seconds (log)
 
@@ -60,6 +67,7 @@ func ptt(down: bool) -> void:
 		_finish_rec()
 
 func interrupt() -> void:
+	_rt_stop()
 	_queue.clear()
 	_tts_wait = {}
 	if player and player.playing:
@@ -75,13 +83,42 @@ func _start_rec() -> void:
 	_rec = _pre.duplicate()
 	_voice_ms = 0.0; _quiet_ms = 0.0
 	set_state("listening")
+	# realtime speech to text: start sending right away (the lead-in too)
+	_rt_on = false
+	var c: Dictionary = rt_fn.call() if rt_fn.is_valid() else {}
+	if not c.is_empty():
+		_rt_on = rt.begin(str(c["url"]), str(c.get("key", "")), c.get("headers", PackedStringArray()), c.get("tls", null), mix_rate, peak)
+		if _rt_on:
+			rt.feed(_rec)
+
+func _rt_stop() -> void:
+	if _rt_on:
+		rt.cancel()
+	_rt_on = false
 
 func _finish_rec() -> void:
 	if state != "listening":
 		return
 	var secs := _rec.size() / mix_rate
 	if secs < 0.45:
+		_rt_stop()
 		set_state("idle")
+		return
+	if _rt_on:
+		_rt_on = false
+		var rec := _rec
+		_rec = PackedFloat32Array()
+		set_state("thinking")
+		rt.finish(func(text: String, err: String):
+			if state != "thinking":
+				return
+			if err != "":
+				print("CARPATHRON_RT_ASR fallback (", err, "): sending the recording")
+				send_wav(_to_wav(rec))
+			elif text == "":
+				_on_reply({"heard": "", "say": "Sorry, I didn't catch that.", "action": "none", "mood": "sorry"})
+			else:
+				send_text(text))
 		return
 	send_wav(_to_wav(_rec))
 	_rec = PackedFloat32Array()
@@ -215,7 +252,22 @@ func _play_bytes(b: PackedByteArray) -> void:
 	player.play()
 	_play_t = 0.0
 
+## Carpathron says something by himself (Muse: a scan summary, he noticed someone) or the headset brain does
+func say_now(j: Dictionary) -> void:
+	if state != "idle" or not active:
+		return
+	set_state("thinking")
+	_on_reply(j)
+
 func _process(delta: float) -> void:
+	if active and muse and state == "idle":
+		var cs = muse.state_data.get("companion", {})
+		var said = cs.get("say", null) if typeof(cs) == TYPE_DICTIONARY else null
+		if typeof(said) == TYPE_DICTIONARY and int(said.get("id", 0)) > _said_id:
+			var first := _said_id == 0 and Time.get_ticks_msec() < 15000
+			_said_id = int(said["id"])
+			if not first and _brain() == "pc":
+				say_now({"say": str(said.get("text", "")), "audio": said.get("audio", []), "action": "none", "mood": "excited", "heard": ""})
 	# the headset's speech engine finished a sentence file
 	if not _tts_wait.is_empty() and speech != null:
 		var stt := str(speech.ttsState(_tts_wait["id"]))
@@ -256,15 +308,18 @@ func _process(delta: float) -> void:
 	var ms := buf.size() / mix_rate * 1000.0
 	if state == "listening":
 		_rec.append_array(mono)
+		if _rt_on:
+			rt.feed(mono)
 		if not _ptt:
 			# hands-free: send after 0.8 s of quiet (or 12 s of talking)
 			if rms > noise * 2.2 + 0.004:
 				_quiet_ms = 0.0; _voice_ms += ms
 			else:
 				_quiet_ms += ms
-			if (_quiet_ms > 650.0 and _voice_ms > 250.0) or _rec.size() > mix_rate * 12.0:
+			if (_quiet_ms > 800.0 and _voice_ms > 250.0) or _rec.size() > mix_rate * 12.0:
 				_finish_rec()
 			elif _quiet_ms > 2500.0 and _voice_ms <= 250.0:
+				_rt_stop()
 				set_state("idle")
 		elif _rec.size() > mix_rate * 20.0:
 			_finish_rec()
@@ -283,6 +338,19 @@ func _process(delta: float) -> void:
 				_voice_ms = 120.0
 		else:
 			_voice_ms = 0.0
+
+## automated test: "say" something for secs seconds (a tone) through the normal listening path
+func test_utterance(secs: float) -> void:
+	interrupt()
+	_start_rec()
+	var x := PackedFloat32Array()
+	x.resize(int(mix_rate * secs))
+	for i in x.size():
+		x[i] = sin(i * 0.05) * 0.2
+	_rec.append_array(x)
+	if _rt_on:
+		rt.feed(x)
+	_finish_rec()
 
 ## mono float samples at the mix rate -> 16 kHz 16-bit WAV
 func _to_wav(x: PackedFloat32Array) -> PackedByteArray:

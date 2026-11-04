@@ -151,4 +151,39 @@ function voiceToCommand(t) {
   return null;
 }
 
-module.exports = { decodeOggOpus, toWav, oggToWav, anyToWav, decodeWav, normalizeWav, transcribe, voiceToCommand };
+// Realtime speech to text for the Quest companion (2.3.3): the headset streams its microphone here while you talk;
+// Muse forwards it to Meta's realtime transcriber with its own key, so the words are ready ~0.2 s after you stop
+// (instead of uploading the recording and waiting 2–3 s). The headset speaks Meta's protocol; Muse only adds the key.
+function relayRealtime(client, { apiKey, apiBase = 'https://api.meta.ai/v1', log = () => {} } = {}) {
+  const WebSocket = require('ws');
+  const url = String(apiBase || 'https://api.meta.ai/v1').replace(/\/+$/, '').replace(/^http/, 'ws') + '/asr/realtime';
+  let up = null; let acked = false; const pending = [];
+  const fail = (m) => { try { client.send(JSON.stringify({ type: 'error', message: m })); client.close(1011, 'error'); } catch {} };
+  if (!apiKey) return fail('Muse has no Meta API key');
+  client.on('message', (data, isBinary) => {
+    if (!up) {
+      let hs = {}; try { hs = JSON.parse(String(data)); } catch {}
+      hs.authorization = { accessToken: `Bearer ${apiKey}` };
+      hs.model = hs.model || 'muse-voice-transcribe-1.0';
+      up = new WebSocket(url, { handshakeTimeout: 8000, perMessageDeflate: false });
+      up.on('open', () => up.send(JSON.stringify(hs)));
+      up.on('message', (d) => {
+        const s = String(d);
+        if (!acked) {
+          let j = {}; try { j = JSON.parse(s); } catch {}
+          if (!j.type) { acked = true; for (const [x, b] of pending.splice(0)) up.send(x, { binary: b }); }
+        }
+        try { client.send(s); } catch {}
+      });
+      up.on('close', (code) => { try { client.close(code === 1000 ? 1000 : 1011); } catch {} });
+      up.on('error', (e) => { log(`Realtime transcription: ${e.message}`); fail(e.message); });
+      return;
+    }
+    if (acked && up.readyState === WebSocket.OPEN) up.send(data, { binary: isBinary });
+    else pending.push([data, isBinary]);
+  });
+  client.on('close', () => { try { up && up.close(); } catch {} });
+  client.on('error', () => {});
+}
+
+module.exports = { relayRealtime, decodeOggOpus, toWav, oggToWav, anyToWav, decodeWav, normalizeWav, transcribe, voiceToCommand };

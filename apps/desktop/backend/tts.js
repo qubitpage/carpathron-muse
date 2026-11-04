@@ -48,12 +48,17 @@ class Tts {
   // 2.3: the companion's own voice (natural by default); falls back to the robot voice
   companionVoiceId() { const v = (this.getSettings().robot || {}).companionVoice; return VOICES[v] ? v : 'nicole'; }
   // a Kokoro voice uses the HD model once it is installed
-  modelFor(v) { return v.model === 'kokoro' && this.installed('kokorohd') ? 'kokorohd' : v.model; }
+  // fast = the companion's conversation: the quick int8 model even when HD is installed (HD takes 3-4x longer)
+  modelFor(v, fast = false) {
+    if (v.model !== 'kokoro') return v.model;
+    if (fast && this.installed('kokoro')) return 'kokoro';
+    return this.installed('kokorohd') ? 'kokorohd' : 'kokoro';
+  }
   status() {
     return { engine: !!this.engineDir(), voice: this.voiceId(), companionVoice: this.companionVoiceId(), hd: this.installed('kokorohd'), voices: Object.entries(VOICES).map(([id, v]) => ({ id, ...v, ready: this.installed(v.model) })),
       models: Object.fromEntries(Object.entries(MODELS).map(([id, m]) => [id, { label: m.label, mb: m.mb, installed: this.installed(id), downloading: this.downloads[id] || null }])) };
   }
-  ready(voiceId = this.voiceId()) { const v = VOICES[voiceId]; return !!(v && this.engineDir() && this.installed(this.modelFor(v))); }
+  ready(voiceId = this.voiceId(), fast = false) { const v = VOICES[voiceId]; return !!(v && this.engineDir() && this.installed(this.modelFor(v, fast))); }
 
   // ---- download a voice model (once)
   async download(id, onProgress = () => {}) {
@@ -111,8 +116,8 @@ class Tts {
     w.on('exit', (code) => { for (const p of this.pending.values()) p.reject(new Error(`speech worker stopped (${code}) ${err.slice(-300)}`)); this.pending.clear(); this.worker = null; });
     return (this.worker = w);
   }
-  async speak(text, { voice = this.voiceId(), rate = 1, id: wantId = null } = {}) {
-    const v = VOICES[voice] || VOICES.bella, mid = this.modelFor(v), m = MODELS[mid];
+  async speak(text, { voice = this.voiceId(), rate = 1, id: wantId = null, fast = false } = {}) {
+    const v = VOICES[voice] || VOICES.bella, mid = this.modelFor(v, fast), m = MODELS[mid];
     if (!this.installed(mid)) throw new Error('voice not downloaded');
     const id = /^[a-f0-9]{12}$/.test(wantId || '') ? wantId : crypto.randomBytes(6).toString('hex'), out = path.join(this.outDir, `${id}.wav`);
     this.cleanup();

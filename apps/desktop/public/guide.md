@@ -27,6 +27,11 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.3:** Carpathron answers much sooner. Your words now go to Meta's realtime transcriber **while you talk**
+> (through this PC, which adds your key), so the text is ready a moment after you stop instead of 2–3 s later. If the
+> model is slow to start answering, the same question is asked again in parallel and the first answer wins. His voice
+> uses the fast neural voice, a new answer drops the rest of the old one, and a misheard name ("car patron, ...") no
+> longer gets in the way of short commands like *scan the room*. Needs Carpathron Avatar 1.6.1 on the headset.
 > **2.3.2:** Carpathron Avatar 1.6 also works **on its own, without this PC**: in the headset open *Settings > Meta AI*
 > and add your Meta API key (type it, paste it from your phone on the same Wi-Fi, or press *Copy the key from Muse*
 > once while linked). The headset then listens, thinks, sees your room and drives the Wi-Fi car by itself.

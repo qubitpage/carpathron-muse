@@ -9,10 +9,10 @@ function plan(body) {
   if (/careful research analyst/.test(sys)) return { text: '# Report\n\nRobots are useful [1].\n\n## Sources\n[1] Carpathron — https://example.com/a' };
   if (/eyes of a small robot car; the camera is about 10 cm/.test(sys)) return { text: '{"objects":[{"label":"person","kind":"human","box":[0.3,0.15,0.22,0.7],"near":false},{"label":"cat","kind":"animal","box":[0.65,0.6,0.2,0.25],"near":true}]}' };
   if (/eyes of Carpathron, a friendly robot companion/.test(sys)) return { text: '{"objects":[{"label":"person","kind":"human","box":[0.4,0.1,0.2,0.8],"dist":1.8,"near":false},{"label":"chair","kind":"furniture","box":[0.1,0.45,0.25,0.5],"dist":1.4,"near":false},{"label":"plant","kind":"item","box":[0.75,0.3,0.15,0.4],"dist":2.5,"near":false}]}' };
-  if (/You are Carpathron, a small friendly robot and the user's companion/.test(sys)) {
+  if (/You are (Baby )?Carpathron, a small (friendly robot|REAL robot car)/.test(sys)) {
     const u = Array.isArray(last.content) ? String(last.content[0].text || '') : String(last.content);
     const pic = Array.isArray(last.content) ? 'picture' : 'no picture';
-    const room = /Things you have seen in this room \(newest first\): ([^\n]*)/.exec(sys);
+    const room = /Things (?:you|the headset) ha(?:ve|s) seen in this room \(newest first\): ([^\n]*)/.exec(sys);
     if (/chair/i.test(u)) return { text: JSON.stringify({ say: `Off to the chair! (${pic})`, action: 'goto', target: 'chair' }) };
     if (/dance/i.test(u)) return { text: JSON.stringify({ say: 'Watch my moves!', action: 'dance' }) };
     if (/plant/i.test(u)) return { text: JSON.stringify({ say: 'That green one, there.', action: 'outline', target: 'plant' }) };
@@ -206,4 +206,26 @@ const server = http.createServer((req, res) => {
     if (slow) setTimeout(go, 3000); else go();
   });
 });
-module.exports = { opts, start: (port) => new Promise((r) => server.listen(port, () => r(server))), calls: () => calls, asr: () => asr, media: () => media };
+// realtime transcription (wss .../asr/realtime): key in the first frame, ack, PCM frames, endStream -> final
+const rt = [];
+{
+  const { WebSocketServer } = require('ws');
+  const wss = new WebSocketServer({ server, path: '/v1/asr/realtime' });
+  wss.on('connection', (ws) => {
+    let hs = null; let bytes = 0;
+    ws.on('message', (d, bin) => {
+      if (!hs) {
+        try { hs = JSON.parse(String(d)); } catch { hs = {}; }
+        if (!hs.authorization || hs.authorization.accessToken !== 'Bearer test-key') { ws.send(JSON.stringify({ type: 'error', message: 'Unauthorized' })); return ws.close(1008, 'Unauthorized'); }
+        if (hs.audioEncoding !== 'PCM_16KHZ' && hs.audioEncoding !== 'PCM_24KHZ') { ws.send(JSON.stringify({ type: 'error', message: 'audioEncoding' })); return ws.close(1008, 'Bad Request'); }
+        return setTimeout(() => ws.send(JSON.stringify({ sessionId: 'rt-1' })), 150);
+      }
+      if (bin) { bytes += d.length; if (bytes > 8000) ws.send(JSON.stringify({ type: 'transcript', transcript: 'look', final: false, audioProcessedMs: 300 })); return; }
+      if (/endStream/.test(String(d))) {
+        rt.push(bytes);
+        setTimeout(() => { ws.send(JSON.stringify({ type: 'transcript', transcript: bytes > 16000 ? 'Look left' : '', final: true, audioProcessedMs: Math.round(bytes / 32) })); setTimeout(() => ws.close(1000, 'No more transcript segments'), Number(process.env.FAKE_RT_CLOSE_MS || 60)); }, 120);
+      }
+    });
+  });
+}
+module.exports = { opts, rt: () => rt, start: (port) => new Promise((r) => server.listen(port, () => r(server))), calls: () => calls, asr: () => asr, media: () => media };

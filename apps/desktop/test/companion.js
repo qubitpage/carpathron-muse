@@ -89,6 +89,25 @@ const step = async (n, f) => { try { await f(); console.log('ok  ', n); } catch 
     console.log(`      ${r.audio.length} sentences; quick phrase ${t1} ms first, ${t2} ms cached; voice ${srv.tts ? '' : ''}`);
   });
 
+  await step('connected Baby Carpathron: his own persona and camera, and he speaks up when he sees someone', async () => {
+    // his camera picture comes from the headset (this PC does not stream that car here)
+    srv.robot && (srv.robot._hub = null);
+    await post('/avatar/eyes?src=car', jpg, 'image/jpeg');
+    const n0 = fake.calls().length;
+    const r = await post('/avatar/companion?mode=real', { text: 'hello buddy, how is it going down there' });
+    const call = fake.calls().slice(n0).find((c) => /You are (Baby )?Carpathron/.test(String(c.messages[0].content)));
+    assert.ok(call, 'companion call');
+    assert.ok(/You are Baby Carpathron, a small REAL robot car/.test(call.messages[0].content), 'real persona');
+    assert.ok(/YOUR OWN camera/.test(call.messages[0].content), 'talks about his own camera');
+    const last = call.messages[call.messages.length - 1];
+    assert.ok(Array.isArray(last.content) && last.content.some((c) => c.type === 'image_url'), 'his picture attached');
+    assert.strictEqual(r.mode, 'real');
+    let say = null;
+    for (let i = 0; i < 20 && !say; i++) { await post('/avatar/eyes?src=car', jpg, 'image/jpeg'); const st = await get('/avatar/state?vision=1'); say = st.companion && st.companion.say; await sleep(500); }
+    assert.ok(say && /I can see a person|There's a cat/.test(say.text), 'noticed: ' + JSON.stringify(say));
+    console.log('      he said by himself:', say.text);
+  });
+
   await step('speech file for the headset (when the neural voice is installed) / 401 without the token', async () => {
     assert.strictEqual((await fetch(base + '/avatar/companion', { method: 'POST', body: '{}' })).status, 401);
     assert.strictEqual((await fetch(base + '/avatar/speech/aaaaaaaaaaaa.wav', { headers: H })).status, 404);

@@ -157,6 +157,9 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   // the newest headset camera picture and its number (the headset keeps where it looked for each number, so the
   // names land on the right things in the room)
   const roomEyes = { last: null, at: 0, id: 0 };
+  // 2.3.3: Baby Carpathron's camera as the headset receives it (when this PC does not stream that car itself)
+  const carEyes = { last: null, at: 0 };
+  const carFrame = () => { const hub = robot._hub; if (hub && hub.last && Date.now() - hub.lastAt < 2500) return hub.last; return carEyes.last && Date.now() - carEyes.at < 2500 ? carEyes.last : null; };
   const KINDS = ['human', 'animal', 'obstacle', 'furniture', 'item', 'door'];
   const ROOM_PROMPT = 'You are the eyes of Carpathron, a friendly robot companion. The picture comes from the camera of a VR headset, at the eye height of the person wearing it, in their room. Find people, animals (pets), furniture, doors, obstacles on the floor and notable items. A small robot car (white or grey body, yellow wheels, round eyes) is "robot car" — always list it when you see it. Reply with JSON only, no text: {"objects":[{"label":"short name","kind":"human|animal|obstacle|furniture|item|door","box":[x,y,w,h],"dist":metres,"near":true|false}]} where box is the bounding box in fractions of the picture (0..1, x,y = top-left) and dist your best estimate of the distance from the camera in metres. At most 10 objects, the most interesting first. near = closer than about 1 m.';
   const CAR_PROMPT = 'You are the eyes of a small robot car; the camera is about 10 cm above the floor. Find what matters for driving and for a person watching: people, animals (pets), obstacles in the way, furniture, doors and notable items. Reply with JSON only, no text: {"objects":[{"label":"short name","kind":"human|animal|obstacle|furniture|item|door","box":[x,y,w,h],"near":true|false}]} where box is the bounding box in fractions of the picture (0..1, x,y = top-left). At most 8 objects, the most important first. near = closer than about 50 cm or blocking the way.';
@@ -164,10 +167,10 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (V.busy || Date.now() - V.wantedAt > 8000) return;
     const s = store.settings, hub = robot._hub;
     if (!s.apiKey) return;
-    if (room ? (!roomEyes.last || Date.now() - roomEyes.at > 4000) : (!hub || !hub.last || Date.now() - hub.lastAt > 2500)) return;
+    if (room ? (!roomEyes.last || Date.now() - roomEyes.at > 4000) : !carFrame()) return;
     V.busy = true;
     try {
-      const jpg = room ? roomEyes.last : hub.last, frame = room ? roomEyes.id : 0, t0 = Date.now();
+      const jpg = room ? roomEyes.last : carFrame(), frame = room ? roomEyes.id : 0, t0 = Date.now();
       const r = await agent.api.complete({ model: s.model, effort: 'minimal', messages: [
         { role: 'system', content: room ? ROOM_PROMPT : CAR_PROMPT },
         { role: 'user', content: [{ type: 'text', text: room ? 'What is in this room?' : 'What is in this picture?' }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpg.toString('base64')}` } }] },
@@ -203,6 +206,19 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
         if (V.memory.size > 60) V.memory.delete([...V.memory.entries()].sort((x, y) => x[1].at - y[1].at)[0][0]);
       }
       Object.assign(V, { seen, at: Date.now(), frame });
+      // the real car notices people and pets that come into view and says so (in the headset)
+      if (!room && companion && Date.now() - (companion.realAt || 0) < 60000) {
+        const nowT = Date.now();
+        V.noticed = V.noticed || new Map();
+        for (const o of seen) {
+          const k = o.label.toLowerCase();
+          if ((o.kind === 'human' || o.kind === 'animal') && nowT - (V.noticed.get(k) || 0) > 90000 && nowT - (V.lastNotice || 0) > 25000) {
+            V.noticed.set(k, nowT); V.lastNotice = nowT;
+            companionSay(o.kind === 'human' ? `Oh, hello! I can see a ${o.label} in front of me.` : `Hey, look! There's a ${o.label} right here.`);
+            break;
+          }
+        }
+      }
     } catch (e) { logFn(`Smart vision${room ? ' (room)' : ''}: ${e.message}`); }
     V.busy = false;
   };
@@ -299,7 +315,21 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   missions = new Missions({ robot, mapper, camera, emit, log: logFn, getSettings: () => store.settings });
   const phraseCache = new Map();  // quick answers ("Coming!") are made once per voice
   const speechJobs = new Map();   // companion sentence id -> promise (its WAV is being made)
+  // things the companion says on its own (a scan summary, noticing someone): spoken in the headset via /avatar/state
+  let companionSayMsg = null;
+  let companionGen = 0;
+  const companionSay = async (text) => {
+    const msg = { id: Date.now(), text: String(text).slice(0, 300), audio: [] };
+    try {
+      const cv = tts && (tts.ready(tts.companionVoiceId()) ? tts.companionVoiceId() : tts.voiceId());
+      if (tts && tts.ready(cv, true)) { const r = await tts.speak(msg.text, { voice: cv, fast: true }); msg.audio = [`/avatar/speech/${r.id}.wav`]; }
+    } catch (e) { logFn(`Companion voice: ${e.message}`); }
+    companionSayMsg = msg;
+    emit('companion', { say: msg.text, action: 'none', mode: 'real' });
+  };
   const companion = new Companion({ agent, store, tts, robot, mapper, roommap, missions, liveVision, roomVision, roomEyes, log: logFn, emit });
+  companion.onSay = companionSay;
+  companion.carEyes = carEyes;
   missions.roommap = roommap;
   agent.mapper = mapper;
   const shield = new Shield({ store, remote, log: logFn, emit, dataDir });
@@ -1307,7 +1337,10 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
           }
           if (url.pathname === '/avatar/eyes' && req.method === 'POST') {
             const jpg = await readBody(req, 2 * 1024 * 1024);
-            if (jpg.length > 200 && jpg[0] === 0xff && jpg[1] === 0xd8) Object.assign(roomEyes, { last: jpg, at: Date.now(), id: Number(url.searchParams.get('id')) || 0 });
+            if (jpg.length > 200 && jpg[0] === 0xff && jpg[1] === 0xd8) {
+              if (url.searchParams.get('src') === 'car') Object.assign(carEyes, { last: jpg, at: Date.now() });
+              else Object.assign(roomEyes, { last: jpg, at: Date.now(), id: Number(url.searchParams.get('id')) || 0 });
+            }
             return send(res, 200, { ok: true });
           }
           if (url.pathname === '/avatar/companion' && req.method === 'POST') {
@@ -1324,11 +1357,14 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
             const sttMs = Date.now() - t0;
             if (voice.voiceToCommand(text) === '/robot stop') { roommap.stop('Quest'); missions.stop('Quest'); robot.stop('Quest'); }
             // the companion's natural voice; the first sentence is made while the model is still writing the rest
-            const cv = tts && (tts.ready(tts.companionVoiceId()) ? tts.companionVoiceId() : tts.voiceId());
-            const canSpeak = !!(tts && tts.ready(cv));
+            const cv = tts && (tts.ready(tts.companionVoiceId(), true) ? tts.companionVoiceId() : tts.voiceId());
+            const canSpeak = !!(tts && tts.ready(cv, true));
+            // a new turn: the rest of the previous answer is not spoken any more (it would delay this one)
+            const gen = ++companionGen;
+            const say1 = (t, id) => (gen === companionGen ? tts.speak(t, { voice: cv, id, fast: true, rate: 1.05 }) : Promise.resolve());
             const newId = () => require('crypto').randomBytes(6).toString('hex');
             let first = null;
-            const onFirst = canSpeak ? (t) => { const id = newId(); const job = tts.speak(t, { voice: cv, id }).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, job); setTimeout(() => speechJobs.delete(id), 120000).unref(); first = { text: t, id, job }; } : null;
+            const onFirst = canSpeak ? (t) => { const id = newId(); const job = say1(t, id).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, job); setTimeout(() => speechJobs.delete(id), 120000).unref(); first = { text: t, id, job }; } : null;
             const out = await companion.turn({ text, mode, guide, onFirst });
             const pk = `${cv}|${out.say}`, cached = out.quick && phraseCache.get(pk);
             if (cached && tts.file(`${cached}.wav`)) { fs.utimesSync(tts.file(`${cached}.wav`), new Date(), new Date()); out.audio = [`/avatar/speech/${cached}.wav`]; }
@@ -1338,7 +1374,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
               const parts = [];
               for (const sn of rest ? rest.split(/(?<=[.!?…])\s+/) : []) { if (parts.length && (parts[parts.length - 1] + ' ' + sn).length < 80) parts[parts.length - 1] += ' ' + sn; else parts.push(sn); }
               let chain = ids.length ? first.job : Promise.resolve();
-              for (const part of parts) { const id = newId(); ids.push(id); chain = chain.then(() => tts.speak(part, { voice: cv, id })).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, chain); setTimeout(() => speechJobs.delete(id), 120000).unref(); }
+              for (const part of parts) { const id = newId(); ids.push(id); chain = chain.then(() => say1(part, id)).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, chain); setTimeout(() => speechJobs.delete(id), 120000).unref(); }
               await speechJobs.get(ids[0]);
               if (tts.file(`${ids[0]}.wav`)) { out.audio = ids.map((id) => `/avatar/speech/${id}.wav`); if (out.quick && ids.length === 1) phraseCache.set(pk, ids[0]); }
             }
@@ -1371,14 +1407,14 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
           // ---- Carpathron Avatar 1.2: the room map, the car's state and missions from the headset
           if (url.pathname === '/avatar/state' && req.method === 'GET') {
             const wv = url.searchParams.get('vision');
-            if (wv === '1' || wv === 'both') liveVision.wantedAt = Date.now();
+            if (wv === '1' || wv === 'both') { liveVision.wantedAt = Date.now(); companion.realAt = Date.now(); }
             if (wv === 'room' || wv === 'both') roomVision.wantedAt = Date.now();
             const v = roommap.view();
             return send(res, 200, { pose: robot.pose, busy: v.busy || (mapper.busy ? 'scanning with photos' : null), news: mapNews.text, newsAt: mapNews.at, sensors: (robot.info && robot.info.sensors) || null,
               // 2.2.5: the car this PC drives, so the headset can list it even when its own Wi-Fi search misses it
               seen: liveVision.seen, seenAt: liveVision.at, seenAgoMs: liveVision.at ? Date.now() - liveVision.at : -1, seenSrc: 'car',
               room: { seen: roomVision.seen, at: roomVision.at, frame: roomVision.frame, agoMs: roomVision.at ? Date.now() - roomVision.at : -1, ms: roomVision.ms || 0 },
-              companion: { busy: companion.busy, task: companion.task },
+              companion: { busy: companion.busy, task: companion.task, say: companionSayMsg && Date.now() - companionSayMsg.id < 30000 ? companionSayMsg : null },
               car: store.settings.robot.carIp ? { ip: String(store.settings.robot.carIp), name: (robot.info && robot.info.name) || 'Baby Carpathron', online: robot.state === 'online' } : null,
               targets: [...v.places.map((p) => ({ name: p.name, kind: 'place' })), ...v.objects.map((o) => ({ name: o.name, kind: 'object' }))].filter((t, i, l) => l.findIndex((q) => q.name.toLowerCase() === t.name.toLowerCase()) === i) });
           }
@@ -1468,8 +1504,14 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   });
 
   const wss = new WebSocketServer({ noServer: true });
+  const listenWss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'https://localhost');
+    if (url.pathname === '/avatar/listen') {
+      // the Quest companion's realtime speech to text (linked headsets only)
+      if (!avatarAuthed(req)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy(); }
+      return listenWss.handleUpgrade(req, socket, head, (ws) => voice.relayRealtime(ws, { apiKey: store.settings.apiKey, apiBase: store.settings.apiBase, log: logFn }));
+    }
     if (url.pathname !== '/ws' || !authed(req, url)) { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); return socket.destroy(); }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });

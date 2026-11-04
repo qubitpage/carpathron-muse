@@ -29,8 +29,10 @@ var map_data: Dictionary = {}     # {res, half, i0, j0, w, h, cells(base64), pos
 var _state_req: HTTPRequest
 var _map_req: HTTPRequest
 var _mission_req: HTTPRequest
+var _view_req: HTTPRequest
 var _next_state := 0
 var _next_map := 0
+var want_vision := false   # 1.4: ask Muse to look at the live picture (people, animals, obstacles, items)
 var _tls := TLSOptions.client_unsafe()   # the PC app uses its own self-signed certificate on the LAN
 
 func setup(cfg: ConfigFile) -> void:
@@ -55,6 +57,7 @@ func setup(cfg: ConfigFile) -> void:
 				map_data = j
 				map_changed.emit())
 	_mission_req = _mk(8.0)
+	_view_req = _mk(2.0)
 	for i in 16:
 		var s := _mk(0.8)
 		s.set_meta("host", "")
@@ -223,12 +226,28 @@ func mission(action: String, name := "") -> void:
 	, CONNECT_ONE_SHOT)
 	_mission_req.request(_base() + "/avatar/mission", ["x-avatar-token: " + token, "Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify({"action": action, "name": name}))
 
+## 1.4: the headset view for Muse (Robots > Live) — one picture at a time, skipped while the last one is on its way
+func view_busy() -> bool:
+	return _view_req.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED
+
+func post_view(jpg: PackedByteArray, mode: String) -> void:
+	if state != "linked" or view_busy() or jpg.is_empty():
+		return
+	_view_req.request_raw(_base() + "/avatar/view?mode=" + mode.uri_encode(), ["x-avatar-token: " + token, "Content-Type: image/jpeg"], HTTPClient.METHOD_POST, jpg)
+
+## where the car video comes through Muse (one shared camera connection on the PC = a steadier picture)
+func relay() -> Dictionary:
+	if state != "linked" or pc == "":
+		return {}
+	var p := pc.split(":")
+	return {"host": p[0], "port": int(p[1]) if p.size() > 1 else 8443, "token": token}
+
 func _process(_dt: float) -> void:
 	var now := Time.get_ticks_msec()
 	if state == "linked":
 		if now >= _next_state and _state_req.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
 			_next_state = now + 600
-			_state_req.request(_base() + "/avatar/state", ["x-avatar-token: " + token])
+			_state_req.request(_base() + "/avatar/state" + ("?vision=1" if want_vision else ""), ["x-avatar-token: " + token])
 		if now >= _next_map and _map_req.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
 			_next_map = now + 2500
 			_map_req.request(_base() + "/avatar/map", ["x-avatar-token: " + token])

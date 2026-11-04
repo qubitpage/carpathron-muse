@@ -15,12 +15,16 @@ render_mode unshaded, cull_disabled, depth_draw_opaque;
 uniform sampler2D tex : source_color, filter_linear_mipmap;
 uniform vec4 tint : source_color = vec4(1.0);
 uniform float has_tex = 0.0;
+uniform sampler2D overlay : source_color, filter_linear;
+uniform float has_overlay = 0.0;
 void fragment() {
 	vec2 uv = UV;
 	vec3 c = mix(vec3(0.04, 0.05, 0.07), texture(tex, uv).rgb, has_tex);
 	// soft dark edges so the picture melts into the dark instead of ending in a hard frame
 	float ex = smoothstep(0.0, 0.06, uv.x) * smoothstep(1.0, 0.94, uv.x);
 	float ey = smoothstep(0.0, 0.07, uv.y) * smoothstep(1.0, 0.93, uv.y);
+	vec4 ov = texture(overlay, uv) * has_overlay;
+	c = mix(c, ov.rgb, ov.a);
 	ALBEDO = c * tint.rgb * ex * ey;
 }
 """
@@ -68,6 +72,18 @@ static func _build(hspan: float, vspan: float) -> ArrayMesh:
 	var m := ArrayMesh.new()
 	m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 	return m
+
+func set_overlay(t: Texture2D) -> void:
+	mat.set_shader_parameter("overlay", t)
+	mat.set_shader_parameter("has_overlay", 1.0 if t != null else 0.0)
+
+## where a picture point (u, v in 0..1) is, a little in front of the curved screen (for labels)
+func point(u: float, v: float) -> Vector3:
+	var hs := deg_to_rad(SIZES[size_name])
+	var vs := hs * 0.75
+	var yaw := (u - 0.5) * hs
+	var pitch := (0.5 - v) * vs
+	return Vector3(sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch)) * (R - 0.15)
 
 func sync(t: Texture2D, tint: Color) -> void:
 	mat.set_shader_parameter("tex", t)

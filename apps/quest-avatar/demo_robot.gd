@@ -17,13 +17,13 @@ const TARGET := Vector2(1.6, -1.75)   # in front of the orange crate
 const STEPS := [
 	"Hi, I'm Carpathron! I'll teach you how to drive me.\nPush BOTH sticks forward: I walk towards you.",
 	"Great! Now pull BOTH sticks back: I walk backwards.",
-	"Spin me around: LEFT stick forward + RIGHT stick back.\n(Tank mode: each stick drives one side of the robot.)",
+	"Turn me: push a stick LEFT or RIGHT.\nForward + sideways together = a smooth curve.",
 	"Hold a TRIGGER while you drive: TURBO, full speed!",
 	"Press A or X: STOP at once. You can always stop me this way.",
 	"Head steering: look left or right and I turn where you look.\nPress Y to switch head steering on or off.",
 	"Press B to take a photo with my camera.\nThe screen on your left shows what I see.",
-	"Click the RIGHT stick: ARCADE mode.\nThen drive with the right stick alone: up = forward, sideways = turn.",
-	"Now drive me through the cones to the orange crate.\nFollow the orange marker! (Click the right stick again for tank mode.)",
+	"Click the RIGHT stick: TANK mode. Each stick drives one side:\nleft stick = left wheels, right stick = right wheels. Drive a little like this.",
+	"Click the right stick again (simple driving), then drive me through\nthe cones to the orange crate. Follow the orange marker!",
 	"Voice: hold the RIGHT grip and speak, e.g. \"look left\", \"scan the room\".\nLEFT grip asks \"what do you see?\". Squeeze a grip to try it.\n(Voice needs the Carpathron PC app on your Wi-Fi.)",
 	"Tour complete! A real Carpathron robot drives exactly the same way.\nMenu = choose your real robot or leave the training room   ·   Left stick click = replay the tour",
 ]
@@ -37,7 +37,10 @@ var model: Node3D
 var marker: Node3D
 var l := 0.0
 var r := 0.0
-var arcade := false
+var tank := false
+var lv := 0.0             # 1.4: wheel speeds ease in and out (feels like the real car, no jumps)
+var rv := 0.0
+signal bumped
 var cfg: ConfigFile
 var step := 0
 var acc := {}
@@ -46,6 +49,7 @@ var photos := 0
 var note := ""           # short feedback line ("Photo saved", ...)
 var note_t := 0.0
 var step_t := 0.0
+var _was_blocked := false
 
 func _ready() -> void:
 	if cfg:
@@ -166,18 +170,25 @@ func _free(p: Vector2) -> bool:
 	return true
 
 func _process(delta: float) -> void:
-	var v := (l + r) / 2.0
-	var w := (r - l) * 0.35 / TRACK * MAX_SPEED       # yaw rate (rad/s), + = turn left
+	lv = move_toward(lv, l, delta * 4.0)
+	rv = move_toward(rv, r, delta * 4.0)
+	var v := (lv + rv) / 2.0
+	var w := (rv - lv) * 0.26 / TRACK * MAX_SPEED       # yaw rate (rad/s), + = turn left (about 1 turn in 2.8 s at full)
 	body.rotation.y += w * delta
 	var fwd := -body.transform.basis.z
 	var step_v := fwd * v * MAX_SPEED * delta
 	var p := Vector2(body.position.x, body.position.z)
 	var moved := 0.0
+	var blocked := step_v.length() > 0.0005
 	for tryv in [Vector2(step_v.x, step_v.z), Vector2(step_v.x, 0), Vector2(0, step_v.z)]:   # slide along walls
 		if tryv.length() > 0.0 and _free(p + tryv):
 			p += tryv
 			moved = tryv.length() * signf(v)
+			blocked = tryv.length() < step_v.length() * 0.5
 			break
+	if blocked and absf(v) > 0.2 and step_t > 0.3 and not _was_blocked:
+		bumped.emit()
+	_was_blocked = blocked and absf(v) > 0.2
 	body.position = Vector3(p.x, 0, p.y)
 	model.animate(delta, v if absf(moved) > 0.0001 or absf(v) < 0.04 else v * 0.3, clampf(w / 3.0, -1.0, 1.0))
 	# camera in the visor
@@ -207,7 +218,7 @@ func _process(delta: float) -> void:
 			if maxf(absf(l), absf(r)) >= 0.97: _add("turbo", delta)
 			if acc.get("turbo", 0.0) >= 0.6: _next()
 		7:
-			if arcade and absf(moved) > 0.0: _add("adist", absf(moved))
+			if tank and absf(moved) > 0.0: _add("adist", absf(moved))
 			if acc.get("adist", 0.0) >= 0.4: _next()
 		8:
 			if p.distance_to(TARGET) < 0.6: _next()

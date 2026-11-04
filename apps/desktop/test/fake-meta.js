@@ -7,6 +7,7 @@ function plan(body) {
   const firstUser = [...msgs].reverse().find((m) => m.role === 'user')?.content || '';
   if (/Plan web research/.test(sys)) return { text: '{"queries":["carpathron robots price","carpathron news"]}' };
   if (/careful research analyst/.test(sys)) return { text: '# Report\n\nRobots are useful [1].\n\n## Sources\n[1] Carpathron — https://example.com/a' };
+  if (/eyes of a small robot car; the camera is about 10 cm/.test(sys)) return { text: '{"objects":[{"label":"person","kind":"human","box":[0.3,0.15,0.22,0.7],"near":false},{"label":"cat","kind":"animal","box":[0.65,0.6,0.2,0.25],"near":true}]}' };
   if (/long-term memory about the user\. From the exchange/.test(sys)) return { text: '{"facts":["User is building a robot named Baby Carpathron"]}' };
   if (last.role === 'user' && Array.isArray(last.content) && /robot car's camera/.test(last.content[0].text || '')) {
     const heads = last.content.filter((c) => /^Heading/.test(c.text || '')).map((c) => Number(c.text.match(/\d+/)[0]));

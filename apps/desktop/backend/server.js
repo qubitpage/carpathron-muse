@@ -128,6 +128,51 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   };
 
   tts = new Tts({ dataDir, getSettings: () => store.settings, log: logFn });
+  // 2.2.5: the Quest headset's view (what the user sees in the headset), shown in Muse > Robots > Live
+  const questView = {
+    clients: new Set(), last: null, at: 0, mode: '',
+    push(jpg, mode) {
+      const first = Date.now() - this.at > 5000;
+      this.last = jpg; this.at = Date.now(); this.mode = mode;
+      if (first) emit('avatar:view', { live: true, mode });
+      for (const c of this.clients) if (c.writableLength < 600000) this.send(c, jpg);
+    },
+    send(c, jpg) { try { c.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpg.length}\r\n\r\n`); c.write(jpg); c.write('\r\n'); } catch {} },
+    add(res) {
+      res.writeHead(200, { 'Content-Type': 'multipart/x-mixed-replace; boundary=frame', 'Cache-Control': 'no-store', Connection: 'close' });
+      this.clients.add(res);
+      if (this.last) this.send(res, this.last);
+      res.on('close', () => this.clients.delete(res));
+    },
+  };
+  // 2.2.5: smart vision for the headset — while Carpathron Avatar asks for it (and the car's video flows through this
+  // PC), Muse looks at the newest camera picture every few seconds and names people, animals, obstacles and room
+  // items with a box around each. The headset draws them on the robot's picture.
+  const liveVision = { wantedAt: 0, busy: false, seen: [], at: 0 };
+  const KINDS = ['human', 'animal', 'obstacle', 'furniture', 'item', 'door'];
+  setInterval(async () => {
+    if (liveVision.busy || Date.now() - liveVision.wantedAt > 8000) return;
+    const s = store.settings;
+    const hub = robot._hub;
+    if (!s.apiKey || !hub || !hub.last || Date.now() - hub.lastAt > 2500) return;
+    liveVision.busy = true;
+    try {
+      const jpg = hub.last;
+      const r = await agent.api.complete({ model: s.model, messages: [
+        { role: 'system', content: 'You are the eyes of a small robot car; the camera is about 10 cm above the floor. Find what matters for driving and for a person watching: people, animals (pets), obstacles in the way, furniture, doors and notable items. Reply with JSON only, no text: {"objects":[{"label":"short name","kind":"human|animal|obstacle|furniture|item|door","box":[x,y,w,h],"near":true|false}]} where box is the bounding box in fractions of the picture (0..1, x,y = top-left). At most 8 objects, the most important first. near = closer than about 50 cm or blocking the way.' },
+        { role: 'user', content: [{ type: 'text', text: 'What is in this picture?' }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpg.toString('base64')}` } }] },
+      ] });
+      const txt = String(r.content || ''), a = txt.indexOf('{'), b = txt.lastIndexOf('}');
+      const j = a >= 0 && b > a ? JSON.parse(txt.slice(a, b + 1)) : { objects: [] };
+      const num = (v) => Math.max(0, Math.min(1, Number(v) || 0));
+      liveVision.seen = (Array.isArray(j.objects) ? j.objects : []).slice(0, 8).map((o) => {
+        const bx = Array.isArray(o.box) ? o.box.map(num) : [0, 0, 0, 0];
+        return { label: String(o.label || 'object').slice(0, 30), kind: KINDS.includes(o.kind) ? o.kind : 'item', box: [bx[0], bx[1], Math.min(1 - bx[0], bx[2]), Math.min(1 - bx[1], bx[3])], near: !!o.near };
+      }).filter((o) => o.box[2] > 0.01 && o.box[3] > 0.01);
+      liveVision.at = Date.now();
+    } catch (e) { logFn(`Smart vision: ${e.message}`); }
+    liveVision.busy = false;
+  }, 3000).unref();
   const robot = new Robot({ getCfg: () => store.settings.robot || {}, getIp: () => store.settings.robot.carIp, emit: (e, d) => (e === 'log' ? logFn(d) : emit(e, d)) });
   const mcp = new McpManager({ log: logFn, dataDir });
   // First run with this version: set up the built-in MCP servers (they need nothing installed).
@@ -718,6 +763,8 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     // robot + camera
     if (p === '/api/robot') return send(res, 200, robot.status());
     if (p === '/api/robot/stream') return robot.pipeStream(res);
+    if (p === '/api/avatar/view.mjpg') return questView.add(res);
+    if (p === '/api/avatar/view') return send(res, 200, { live: Date.now() - questView.at < 3000, at: questView.at, mode: questView.mode });
     if (p === '/api/robot/find' && m === 'POST') {
       const b = await readJson(req);
       const { Robot } = require('./robot');
@@ -1194,7 +1241,9 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
               { role: 'user', content: [{ type: 'text', text: String(b.question || 'What do you see?').slice(0, 500) }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${ph.buffer.toString('base64')}` } }] },
             ] });
             agent.track && agent.track({ kind: 'cloud', text: `Avatar asked Muse: ${String(b.question || '').slice(0, 60)}` });
-            return send(res, 200, { answer: String(r.content || '').trim(), photo: ph.path });
+            const answer = String(r.content || '').trim();
+            emit('robot:say', { text: answer.replace(/[*_`#>]/g, '').slice(0, 400), by: 'muse' });
+            return send(res, 200, { answer, photo: ph.path });
           }
           if (url.pathname === '/avatar/voice' && req.method === 'POST') {
             const raw = await readBody(req, 12 * 1024 * 1024);
@@ -1203,7 +1252,11 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
             if (!heard) return send(res, 200, { heard: '', replies: ['I did not hear any words.'] });
             const cmd = voice.voiceToCommand(heard);
             const replies = [];
-            await wa.handle('quest', 'avatar', cmd || heard, async (t) => { if (!/^⏳ Working on it/.test(t)) replies.push(String(t)); }, async () => {});
+            if (cmd === '/robot stop') robot.stop('quest');
+            // 2.2.5: what you said in the headset and the robot's answers are also spoken by the PC speakers
+            emit('robot:say', { text: heard, by: 'you' });
+            await wa.handle('quest', 'avatar', cmd || heard, async (t) => { if (!/^⏳ Working on it/.test(t)) { replies.push(String(t)); emit('robot:say', { text: String(t).replace(/[*_`#>]/g, '').slice(0, 400), by: 'muse' }); } }, async () => {});
+            logFn(`Quest voice: "${heard}"${cmd ? ` → ${cmd}` : ''}`);
             return send(res, 200, { heard, command: cmd, replies });
           }
           if (url.pathname === '/avatar/look' && req.method === 'POST') {
@@ -1211,10 +1264,22 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
             const ph = await mapper.look(b.direction || 'back', { source: 'quest' });
             return send(res, 200, { ok: true, path: ph.path });
           }
+          // ---- 2.2.5: the car's video through this PC (one shared camera connection = steady picture) and the
+          // headset's own view, sent here so Muse shows (and you can record) what the Quest user sees
+          if (url.pathname === '/avatar/stream' && req.method === 'GET') return robot.pipeStream(res);
+          if (url.pathname === '/avatar/view' && req.method === 'POST') {
+            const jpg = await readBody(req, 1024 * 1024);
+            if (jpg.length > 200 && jpg[0] === 0xff && jpg[1] === 0xd8) questView.push(jpg, url.searchParams.get('mode') || '');
+            return send(res, 200, { ok: true, watchers: questView.clients.size });
+          }
           // ---- Carpathron Avatar 1.2: the room map, the car's state and missions from the headset
           if (url.pathname === '/avatar/state' && req.method === 'GET') {
+            if (url.searchParams.get('vision') === '1') liveVision.wantedAt = Date.now();
             const v = roommap.view();
             return send(res, 200, { pose: robot.pose, busy: v.busy || (mapper.busy ? 'scanning with photos' : null), news: mapNews.text, newsAt: mapNews.at, sensors: (robot.info && robot.info.sensors) || null,
+              // 2.2.5: the car this PC drives, so the headset can list it even when its own Wi-Fi search misses it
+              seen: liveVision.seen, seenAt: liveVision.at, seenAgoMs: liveVision.at ? Date.now() - liveVision.at : -1,
+              car: store.settings.robot.carIp ? { ip: String(store.settings.robot.carIp), name: (robot.info && robot.info.name) || 'Baby Carpathron', online: robot.state === 'online' } : null,
               targets: [...v.places.map((p) => ({ name: p.name, kind: 'place' })), ...v.objects.map((o) => ({ name: o.name, kind: 'object' }))].filter((t, i, l) => l.findIndex((q) => q.name.toLowerCase() === t.name.toLowerCase()) === i) });
           }
           if (url.pathname === '/avatar/map' && req.method === 'GET') {

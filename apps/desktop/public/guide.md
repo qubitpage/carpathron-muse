@@ -27,6 +27,15 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.2.5:** **Robot voices fixed**: the installed voices failed in the app with "External buffers are not allowed" — they work
+> now, every word is spoken (a short silence before each sentence so speakers don't swallow the start; long answers go
+> sentence by sentence), and what you say is made louder and cleaner before it is transcribed. **Meta Quest view**:
+> while Carpathron Avatar 1.4 is linked, *Robots > Live* shows what the headset user sees (virtual tour or the real
+> robot) — press *Full screen* and record the PC screen. What you say in the headset and the robot's answers are
+> also spoken by the PC speakers. **Steadier video**: the car camera has only one connection, shared by every window
+> and the headset (several connections made the picture drop). The headset gets the car Muse drives in its robot
+> list. Car firmware **2.4.2**: a bigger serial buffer for the Mega sensor hub (no more short "sensor link lost").
+
 > **2.2.4:** for **Carpathron Avatar 1.2** (Meta Quest): the headset shows the room map, what the car is doing and runs
 > missions — explore, scan with photos, measure, **find an object**, stop — through Muse Carpathron on the PC.
 > **2.2.3:** car firmware 2.4.1 — the gyro on the Mega hub gets its zero measured again when the car stands still but its

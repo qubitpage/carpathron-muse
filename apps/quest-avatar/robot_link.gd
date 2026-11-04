@@ -28,6 +28,19 @@ var _was_lost := false
 var _lost_since := 0   # 1.3: a short gap in the Mega lines is normal while video streams; warn only after 2 s
 
 var _tex: ImageTexture
+## 1.4: {host, port, token} = take the video through Muse Carpathron on the PC (/avatar/stream, HTTPS) instead of
+## straight from the car: the car then serves only one video client, which keeps the picture steady
+var relay: Dictionary = {}
+var _relay_used := false
+var _relay_fail := 0
+
+func set_relay(r: Dictionary) -> void:
+	if r == relay:
+		return
+	relay = r
+	_relay_fail = 0
+	_video_fail()
+	_vretry = 0
 # video (MJPEG over a raw HTTPClient)
 var _vc: HTTPClient
 var _vstate := 0
@@ -47,6 +60,7 @@ var _next_stop_at := 0
 var _next_status := 0
 # discovery
 var _scan_queue: Array = []
+var _scan_total := 1
 var _scanners: Array = []
 
 func _ready() -> void:
@@ -54,8 +68,8 @@ func _ready() -> void:
 	_stop_req = _mk(1.0)
 	_status_req = _mk(2.0); _status_req.request_completed.connect(_on_status)
 	_photo_req = _mk(8.0); _photo_req.request_completed.connect(_on_photo)
-	for i in 24:
-		var s := _mk(0.7)
+	for i in 32:
+		var s := _mk(1.6)   # 1.4: a busy car (streaming video) can take more than 0.7 s to answer
 		s.request_completed.connect(_on_scan.bind(s))
 		s.set_meta("host", "")
 		_scanners.append(s)
@@ -179,7 +193,7 @@ func scan(extra: Array = []) -> void:
 	if scanning:
 		return
 	scanning = true
-	found.clear()
+	found = found.filter(func(f): return bool(f.get("muse", false)))
 	_scan_queue = extra.duplicate()
 	for a in IP.get_local_addresses():
 		var s := str(a)
@@ -189,8 +203,31 @@ func scan(extra: Array = []) -> void:
 				var h := "%s.%s.%s.%d" % [p[0], p[1], p[2], i]
 				if h != s and not _scan_queue.has(h):
 					_scan_queue.append(h)
+	_scan_total = maxi(1, _scan_queue.size())
 	note = "Looking for robots on this Wi-Fi..."
 	changed.emit()
+
+## 0..1 while searching
+func scan_progress() -> float:
+	if not scanning:
+		return 1.0
+	var busy := 0
+	for s in _scanners:
+		if str(s.get_meta("host")) != "":
+			busy += 1
+	return clampf(1.0 - float(_scan_queue.size() + busy) / _scan_total, 0.0, 1.0)
+
+## a robot known another way (Muse Carpathron on the PC knows its car): add it once; true when new
+func add_found(h: String, name: String, via_muse := false) -> bool:
+	for f in found:
+		if f["key"] == h or f["host"] == h:
+			if via_muse and not f.get("muse", false):
+				f["muse"] = true
+				return true
+			return false
+	found.append({"host": h, "name": name, "key": h, "fw": "", "muse": via_muse})
+	changed.emit()
+	return true
 
 func _on_scan(result: int, code: int, _h: PackedStringArray, body: PackedByteArray, req: HTTPRequest) -> void:
 	var h: String = req.get_meta("host")
@@ -236,7 +273,9 @@ func _video_poll() -> void:
 				return
 			var hp := _video_host_port()
 			_vc = HTTPClient.new()
-			if _vc.connect_to_host(hp[0], hp[1]) != OK:
+			_relay_used = not relay.is_empty() and _relay_fail % 3 != 2   # every third try straight to the car
+			var err := _vc.connect_to_host(relay["host"], relay["port"], TLSOptions.client_unsafe()) if _relay_used else _vc.connect_to_host(hp[0], hp[1])
+			if err != OK:
 				_video_fail()
 				return
 			_vstate = 1
@@ -245,7 +284,10 @@ func _video_poll() -> void:
 			_vc.poll()
 			var s := _vc.get_status()
 			if s == HTTPClient.STATUS_CONNECTED:
-				_vc.request(HTTPClient.METHOD_GET, "/stream", ["Accept: multipart/x-mixed-replace"])
+				if _relay_used:
+					_vc.request(HTTPClient.METHOD_GET, "/avatar/stream", ["Accept: multipart/x-mixed-replace", "x-avatar-token: " + str(relay["token"])])
+				else:
+					_vc.request(HTTPClient.METHOD_GET, "/stream", ["Accept: multipart/x-mixed-replace"])
 				_vstate = 2
 			elif s != HTTPClient.STATUS_CONNECTING and s != HTTPClient.STATUS_RESOLVING:
 				_video_fail()
@@ -267,15 +309,17 @@ func _video_poll() -> void:
 					break
 				_buf.append_array(chunk)
 			_extract()
-	if _vstate >= 1 and now - _last_frame_ms > 6000:
-		_video_fail()   # no picture for 6 s: reconnect
+	if _vstate >= 1 and now - _last_frame_ms > 4000:
+		if _relay_used:
+			_relay_fail += 1
+		_video_fail()   # no picture for 4 s: reconnect (through Muse; every third try straight to the car)
 
 func _video_fail() -> void:
 	if _vc:
 		_vc.close()
 	_vstate = 0
 	_buf.clear()
-	_vretry = Time.get_ticks_msec() + 1500
+	_vretry = Time.get_ticks_msec() + 700
 
 static func _find2(b: PackedByteArray, a: int, c: int, from: int) -> int:
 	var i := from

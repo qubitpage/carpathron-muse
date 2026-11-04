@@ -177,6 +177,12 @@
         <div class="robot-pane" data-rtab="devices" id="robotDevices" hidden></div>
         <div class="robot-pane" data-rtab="studio" id="robotStudio" hidden></div>
         <div class="robot-grid robot-pane" data-rtab="control">
+          <div class="card quest-card" id="questCard" hidden>
+            <h3>🥽 Meta Quest view <span class="pill ok" id="questMode">live</span></h3>
+            <div class="video-wrap"><img id="questVideo" class="cam-preview" alt="what the Quest user sees"></div>
+            <div class="row"><button class="btn" id="btnQuestFull" type="button">⛶ Full screen (to record it)</button></div>
+            <p class="muted small">What the Carpathron Avatar user sees in the headset right now (virtual tour or the real robot), sent by the headset to this PC. Record this window with any screen recorder to show what happens inside the Quest.</p>
+          </div>
           <div class="card">
             <div class="pad" id="pad">
               <button data-dir="fl">↖</button><button data-dir="f">▲</button><button data-dir="fr">↗</button>

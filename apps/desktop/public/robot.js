@@ -127,6 +127,23 @@
     if (on && visible && !videoOn) { img.src = '/api/robot/stream?v=' + Date.now(); videoOn = true; }
     if ((!on || !visible) && videoOn) { img.removeAttribute('src'); videoOn = false; }
   }
+  // 2.2.5: the Meta Quest view (what the headset user sees), shown while the headset sends it
+  let questOn = false, questOffT = null;
+  async function questPoll() {
+    try {
+      const v = await (await fetch('/api/avatar/view', { credentials: 'same-origin' })).json();
+      const card = $('#questCard'), img = $('#questVideo');
+      if (v.live) {
+        clearTimeout(questOffT); questOffT = null;
+        $('#questMode').textContent = v.mode === 'tour' ? 'virtual tour · live' : v.mode === 'robot' ? 'robot · live' : 'live';
+        if (!questOn) { card.hidden = false; img.src = '/api/avatar/view.mjpg?v=' + Date.now(); questOn = true; }
+      } else if (questOn && !questOffT) {
+        questOffT = setTimeout(() => { card.hidden = true; img.removeAttribute('src'); questOn = false; questOffT = null; }, 6000);
+      }
+    } catch (_) {}
+  }
+  setInterval(questPoll, 2000); questPoll();
+  $('#btnQuestFull').onclick = () => { const w = $('#questVideo'); (w.requestFullscreen || w.webkitRequestFullscreen || (() => {})).call(w); };
   let ledT;
   $('#carLed').oninput = (e) => { clearTimeout(ledT); ledT = setTimeout(() => window.MCapi('/api/robot/led', { body: { v: Number(e.target.value) } }).catch(() => {}), 120); };
   // Driving display over the live video: heading tape, distance ahead with a colour bar, Wi-Fi, blocked warning, wheels.

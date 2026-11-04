@@ -1,26 +1,26 @@
 extends Node3D
-## Carpathron Avatar — be the robot (Meta Quest 3S, OpenXR).
-## The robot's live camera fills a big screen in front of you. Sticks drive. Head steering (the robot turns
-## where you look) is OFF by default since 1.3 — switch it on with Y or in the menu.
+## Carpathron Avatar — be the robot (Meta Quest 3 / 3S, OpenXR).
+## 1.4: a WELCOME screen at start: "Virtual tour" (3D robot in a virtual room) or one of YOUR ROBOTS found on the
+##      Wi-Fi (or known by Muse Carpathron on the PC). A modern menu (Menu button, left controller): point with the
+##      laser and pull the trigger, or use a stick + trigger. Quest-style controllers in your hands show what each
+##      button does when you look at them. The robot's camera wraps around you (VR view) or plays on a flat screen.
 ##
-##   1.3: MENU button (left controller) = one menu in front of you: missions, choose robot (list of the robots
-##        found on the Wi-Fi), training room (3D demo robot), bring the screen in front of me, head steering,
-##        driving mode, EXIT. Stick up/down chooses, trigger selects, B/Y back, Menu closes.
-##   Left stick  = left wheels, right stick = right wheels  (tank)   — click right stick: arcade mode
-##   A / X       = STOP          B = photo        Y = head steering on/off
-##   Trigger     = turbo (100 %)
-##   Right grip  = hold and talk to Muse (voice -> Muse Voice Transcribe -> Muse agent: "look left", "scan the room", questions)
-##   Left grip   = ask Muse "what do you see?" (Muse Spark looks through the robot's camera)
-##   Both grips (hold 1 s) = search robots + Muse PC again
-##   1.2: left stick click = MISSIONS menu (explore, scan, measure, find <object>, stop): left stick chooses, trigger
-##        runs, B closes; while it is open the sticks do not drive. A dashboard above the screen shows the distance
-##        ahead, lean, side eyes and what the car felt (the controllers buzz); the room map is on the left.
+##   Sticks      = drive: push forward / back to drive, sideways to turn (either stick). Tank mode in the menu.
+##   A / X       = STOP          B = photo        Y = head steering on/off (off by default)
+##   Trigger     = turbo (100 %) · in the menu: select
+##   Right grip  = hold and talk to Muse          Left grip = ask Muse "what do you see?"
+##   Left stick click = missions (explore, scan, measure, find <object>)    Both grips 1 s = search again
+##   A dashboard above the picture shows the distance ahead, lean, side eyes and what the car felt (the controllers
+##   buzz); the room map is on the left, the controls card on the right.
 
 const RobotLink = preload("res://robot_link.gd")
 const MuseLink = preload("res://muse_link.gd")
 const DemoRobot = preload("res://demo_robot.gd")
 const Cockpit = preload("res://cockpit.gd")
-const MainMenu = preload("res://main_menu.gd")
+const UiPanel = preload("res://ui_panel.gd")
+const ControllerModel = preload("res://controller_model.gd")
+const Spectator = preload("res://spectator.gd")
+const Vision = preload("res://vision.gd")
 const VrView = preload("res://vr_view.gd")
 const DEAD := 0.15
 const TURN_MS_360 := 2400.0   # calibrated full turn of the car at TURN_SPEED (same setting as Muse Carpathron)
@@ -38,7 +38,7 @@ var screen_mat: StandardMaterial3D
 var panel: Label3D
 var info: Label3D
 var cfg := ConfigFile.new()
-var arcade := false
+var tank := false         # 1.4: default = simple driving (a stick: forward/back + turn); tank = one stick per side
 var head_steer := false
 var steer_on := false
 var placed := false
@@ -60,7 +60,18 @@ var floor_mesh: MeshInstance3D
 var screen_title: Label3D
 var cockpit: Node3D
 var menu_rep := 0.0
-var menu3d: MainMenu
+var menu3d: UiPanel
+var ctrl_l: Node3D
+var ctrl_r: Node3D
+var aim_l: XRController3D
+var aim_r: XRController3D
+var beams := {}            # hand -> [beam, dot]
+var laser_hand := "right"
+var welcome_pending := false
+var rescan_at := 0
+var spectator: Node
+var vision: Node3D
+var overlay_quad: MeshInstance3D
 var vr: VrView
 var view_mode := "vr"      # 1.3: "vr" = the picture all around you, "flat" = the cinema screen
 var demo_manual := false   # training room opened from the menu: stays even when a real robot is online
@@ -68,7 +79,7 @@ var demo_manual := false   # training room opened from the menu: stays even when
 func _ready() -> void:
 	cfg.load("user://avatar.cfg")
 	head_steer = cfg.get_value("ui", "head_steer13", false)
-	arcade = cfg.get_value("ui", "arcade", false)
+	tank = cfg.get_value("ui", "tank14", false)
 	view_mode = cfg.get_value("ui", "view", "vr")
 	_build_world()
 	link = RobotLink.new()
@@ -81,6 +92,27 @@ func _ready() -> void:
 	add_child(muse)
 	muse.changed.connect(_on_muse)
 	muse.map_changed.connect(func(): cockpit.set_map(muse.map_data))
+	# 1.4: what you see goes live to Muse Carpathron (Robots > Live) so the PC screen can be recorded
+	spectator = Spectator.new()
+	spectator.src = cam
+	spectator.muse = muse
+	spectator.mode_fn = func(): return "tour" if demo != null else ("robot" if link.host != "" else "")
+	spectator.enabled = cfg.get_value("ui", "share_view", true)
+	add_child(spectator)
+	vision = Vision.new()
+	add_child(vision)
+	vr.set_overlay(vision.tex)
+	overlay_quad = MeshInstance3D.new()   # the same boxes on the flat screen
+	var oq := QuadMesh.new(); oq.size = Vector2(3.2, 2.4)
+	overlay_quad.mesh = oq
+	var om := StandardMaterial3D.new()
+	om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	om.albedo_texture = vision.tex
+	overlay_quad.material_override = om
+	overlay_quad.position = Vector3(0, 0, 0.01)
+	overlay_quad.layers = 2
+	screen.add_child(overlay_quad)
 	_setup_audio()
 	for a in OS.get_cmdline_user_args() + OS.get_cmdline_args():
 		if str(a).begins_with("--test-host="):
@@ -101,10 +133,8 @@ func _ready() -> void:
 	else:
 		muse.setup(cfg)
 		var saved: String = cfg.get_value("robot", "host", "")
-		if saved != "":
-			link.connect_to(saved)
-		else:
-			_start_demo()   # something to see and drive at once; a real robot found on the Wi-Fi replaces it
+		_start_demo()             # the virtual room behind the welcome screen
+		welcome_pending = true    # 1.4: the welcome screen opens as soon as the headset knows where you look
 		link.scan(["carpathron.local"] + ([saved] if saved != "" else []))
 	_apply_view()
 	_refresh_panel()
@@ -136,11 +166,16 @@ func _build_world() -> void:
 		origin.add_child(cam)
 		left_hand = XRController3D.new(); left_hand.tracker = "left_hand"; origin.add_child(left_hand)
 		right_hand = XRController3D.new(); right_hand.tracker = "right_hand"; origin.add_child(right_hand)
-		for h in [left_hand, right_hand]:
-			var m := MeshInstance3D.new()
-			var bx := BoxMesh.new(); bx.size = Vector3(0.04, 0.03, 0.12)
-			m.mesh = bx
-			h.add_child(m)
+		left_hand.pose = &"grip"; right_hand.pose = &"grip"
+		ctrl_l = ControllerModel.new(false); left_hand.add_child(ctrl_l)
+		ctrl_r = ControllerModel.new(true); right_hand.add_child(ctrl_r)
+		ctrl_l.set_hints.call_deferred({"stick": "Drive / turn  ·  click: missions", "a": "STOP", "b": "Head steering", "menu": "Menu", "trigger": "Turbo  ·  select", "grip": "What do you see?"})
+		ctrl_r.set_hints.call_deferred({"stick": "Drive / turn", "a": "STOP", "b": "Photo  ·  back", "trigger": "Turbo  ·  select", "grip": "Hold: talk to Muse"})
+		# the laser pointers come from the aim pose (where the controller points)
+		aim_l = XRController3D.new(); aim_l.tracker = "left_hand"; aim_l.pose = &"aim"; origin.add_child(aim_l)
+		aim_r = XRController3D.new(); aim_r.tracker = "right_hand"; aim_r.pose = &"aim"; origin.add_child(aim_r)
+		for pair in [["left", aim_l], ["right", aim_r]]:
+			beams[pair[0]] = _make_beam(pair[1])
 	else:
 		var c := Camera3D.new()
 		c.position = Vector3(0, 1.6, 0)
@@ -212,10 +247,57 @@ func _build_world() -> void:
 	vr = VrView.new()
 	vr.size_name = cfg.get_value("ui", "vr_size", "normal")
 	pivot.add_child(vr)
-	menu3d = MainMenu.new()
+	menu3d = UiPanel.new()
 	add_child(menu3d)
 	menu3d.provider = _menu_items
 	menu3d.chosen.connect(_on_menu)
+
+## a laser beam (thin glowing line) and a dot where it meets the menu
+func _make_beam(parent: Node3D) -> Array:
+	var bm := StandardMaterial3D.new()
+	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bm.albedo_color = Color(1.0, 0.62, 0.25, 0.75)
+	bm.no_depth_test = true
+	bm.render_priority = 8
+	var beam := MeshInstance3D.new()
+	var cm := CylinderMesh.new(); cm.top_radius = 0.0012; cm.bottom_radius = 0.0025; cm.height = 1.0; cm.radial_segments = 8; cm.rings = 1
+	beam.mesh = cm
+	beam.material_override = bm
+	beam.rotation_degrees = Vector3(-90, 0, 0)
+	beam.layers = 2
+	beam.visible = false
+	parent.add_child(beam)
+	var dot := MeshInstance3D.new()
+	var sm := SphereMesh.new(); sm.radius = 0.008; sm.height = 0.016; sm.radial_segments = 12; sm.rings = 6
+	dot.mesh = sm
+	var dm := bm.duplicate(); dm.albedo_color = Color(1.0, 0.75, 0.4, 1.0)
+	dot.material_override = dm
+	dot.layers = 2
+	dot.visible = false
+	add_child(dot)
+	return [beam, dot]
+
+## laser from the hand into the menu; returns true when it points at the menu
+func _laser(hand: String, aim: XRController3D, on: bool) -> bool:
+	var beam: MeshInstance3D = beams[hand][0]
+	var dot: MeshInstance3D = beams[hand][1]
+	if not on or not menu3d.is_open:
+		beam.visible = false; dot.visible = false
+		return false
+	var from := aim.global_position
+	var dir := -aim.global_basis.z.normalized()
+	var hit = menu3d.pointer(from, dir) if hand == laser_hand else null
+	var length := 1.2
+	if hit != null:
+		length = from.distance_to(hit)
+		dot.global_position = hit
+	dot.visible = hit != null
+	beam.visible = true
+	beam.scale = Vector3(1, length, 1)
+	beam.position = Vector3(0, 0, -length / 2)
+	(beam.material_override as StandardMaterial3D).albedo_color.a = 0.8 if hand == laser_hand else 0.25
+	return hit != null
 
 func _refresh_panel() -> void:
 	var l = link
@@ -227,7 +309,7 @@ func _refresh_panel() -> void:
 	var found := ""
 	if l.found.size() > 1:
 		found = " · %d robots found" % l.found.size()
-	panel.text = "CARPATHRON AVATAR " + str(ProjectSettings.get_setting("application/config/version", "")) + " · %s%s\nMENU button (left controller): missions · robots · training room · exit     %s · head steering %s" % [who, found, "arcade (right stick)" if arcade else "tank (two sticks)", "ON" if head_steer else "off"]
+	panel.text = "CARPATHRON AVATAR " + str(ProjectSettings.get_setting("application/config/version", "")) + " · %s%s\nMENU button (left controller): missions · robots · training room · exit     %s · head steering %s" % [who, found, "tank (two sticks)" if tank else "simple driving", "ON" if head_steer else "off"]
 	info.text = demo.tour_text() if demo != null else l.note
 	if muse:
 		panel.text += "\n" + muse.status_text() + ("   🎤 listening..." if recording else "")
@@ -238,24 +320,20 @@ func _refresh_panel() -> void:
 				info.text = muse.last_answer
 	if menu3d:
 		menu3d.refresh()
-	if test or demo_manual:
-		return
-	if demo != null and l.online:
-		_stop_demo()
-	if l.found.size() > 0 and (l.host == "" or demo != null) and not l.online:
-		_stop_demo()
-		_pick(0)
-	elif demo == null and not l.scanning and l.found.is_empty() and not l.online and l.note.begins_with("No robot"):
-		_start_demo()
+	# 1.4: nothing switches by itself any more: you choose on the welcome screen or in the menu
 
 func _start_demo() -> void:
 	if demo != null:
 		return
 	demo = DemoRobot.new()
 	demo.cfg = cfg
-	demo.arcade = arcade
+	demo.tank = tank
 	add_child(demo)
 	demo.changed.connect(_refresh_panel)
+	demo.bumped.connect(func():
+		if xr_on:
+			for h in [left_hand, right_hand]:
+				h.trigger_haptic_pulse("haptic", 0.0, 0.8, 0.12, 0.0))
 	_place_demo()
 	screen_mat.albedo_texture = demo.texture
 	link.note = "Training room: drive the 3D robot. Menu button: choose your real robot or leave."
@@ -315,7 +393,7 @@ func _apply_view() -> void:
 	vr.visible = on
 	screen.visible = not on
 	floor_mesh.visible = not on and demo == null
-	panel.visible = not on
+	panel.visible = not on and demo == null
 	if demo == null:
 		info.position = Vector3(0, -1.0, -1.5) if on else Vector3(0, 1.62, -2.15)
 		info.pixel_size = 0.0016 if on else 0.0025
@@ -413,49 +491,98 @@ func _toggle_head() -> void:
 		steer_on = false
 	_refresh_panel()
 
-func _toggle_arcade() -> void:
-	arcade = not arcade
-	cfg.set_value("ui", "arcade", arcade); cfg.save("user://avatar.cfg")
-	link.note = "Arcade mode (right stick)" if arcade else "Tank mode (two sticks)"
-	if demo != null: demo.arcade = arcade
+func _toggle_tank() -> void:
+	tank = not tank
+	cfg.set_value("ui", "tank14", tank); cfg.save("user://avatar.cfg")
+	link.note = "Tank mode: left stick = left wheels, right stick = right wheels" if tank else "Simple driving: a stick forward / back to drive, sideways to turn"
+	if demo != null:
+		demo.tank = tank
+		demo.event("tank")
 	_refresh_panel()
 
 const MISSIONS := ["explore", "scan", "measure", "find", "stop"]
 
-## what the menu shows on each page
+const C_ORANGE := Color(1.0, 0.56, 0.16)
+const C_BLUE := Color(0.33, 0.56, 1.0)
+const C_GREEN := Color(0.27, 0.8, 0.5)
+const C_GREY := Color(0.6, 0.65, 0.73)
+const C_RED := Color(0.95, 0.32, 0.32)
+const C_PURPLE := Color(0.66, 0.5, 1.0)
+
+func _ver() -> String:
+	return str(ProjectSettings.get_setting("application/config/version", ""))
+
+func _chips() -> Array:
+	var c: Array = []
+	if demo == null and link.host != "":
+		c.append([("● " + (link.robot_name if link.robot_name != "" else "robot")) + ("" if link.online else "  offline"), C_GREEN if link.online else C_RED])
+	elif demo != null and demo_manual:
+		c.append(["● Virtual tour", C_BLUE])
+	c.append(["Muse PC  " + str({"linked": "linked", "approve": "click Allow on the PC", "searching": "searching..."}.get(muse.state, "not found")), C_GREEN if muse.state == "linked" else C_GREY])
+	return c
+
+func _robot_rows() -> Array:
+	var rows: Array = []
+	for i in link.found.size():
+		var f: Dictionary = link.found[i]
+		var here: bool = f["host"] == link.host and demo == null
+		var sub := str(f["host"]) + (("   ·   firmware " + str(f["fw"])) if str(f.get("fw", "")) != "" else "") + ("   ·   known by Muse PC" if bool(f.get("muse", false)) else "")
+		rows.append({"id": "robot", "arg": str(i), "label": str(f["name"]), "sub": sub, "value": ("Connected" if link.online else "Connecting...") if here else "Connect", "color": C_GREEN})
+	return rows
+
+## what each page shows
 func _menu_items(p: String) -> Dictionary:
 	var its: Array = []
 	match p:
+		"welcome":
+			var n: int = link.found.size()
+			var rt := ""
+			if link.scanning:
+				rt = "Searching on this Wi-Fi...  %d%%" % int(link.scan_progress() * 100)
+			elif n > 0:
+				rt = "%d robot%s found" % [n, "" if n == 1 else "s"]
+			else:
+				rt = "None found yet: switch the robot on, same Wi-Fi as the headset"
+			return {"layout": "welcome", "title": "Carpathron Avatar", "subtitle": "Be the robot: see through its camera, drive it, give it missions   ·   version " + _ver(),
+				"chips": _chips(), "tour_text": "Learn every control with the 3D Carpathron robot in a virtual room: driving, turbo, stop, photos, head steering. No robot needed.",
+				"robots": _robot_rows(), "robots_text": rt, "robot_first": n > 0,
+				"hint": "Point with the controller and pull the trigger   ·   or a stick + trigger   ·   Menu button: the full menu"}
 		"missions":
 			for it in cockpit.items:
-				its.append(it)
-			its.append(["page", "main", "◀  Back"])
-			var t := "MISSIONS  ·  run by Muse Carpathron on the PC" if muse.state == "linked" else "MISSIONS  ·  needs Muse Carpathron (PC) linked"
-			return {"title": t, "items": its}
+				var ic: String = {"explore": "✦", "scan": "◉", "measure": "↔", "find": "⌖", "stop": "■"}.get(str(it[0]), "•")
+				var col: Color = C_RED if it[0] == "stop" else (C_PURPLE if it[0] == "find" else C_ORANGE)
+				var sub: String = {"explore": "drives around and maps the room by itself", "scan": "turns around, takes photos and names the objects", "measure": "measures the distances all around", "stop": "stops the car and the mission"}.get(str(it[0]), "drives there on the room map")
+				its.append({"id": it[0], "arg": it[1], "icon": ic, "color": col, "label": str(it[2]), "sub": sub})
+			its.append({"id": "page", "arg": "main", "icon": "‹", "color": C_GREY, "label": "Back"})
+			return {"title": "Missions", "subtitle": "Run by Muse Carpathron on the PC" if muse.state == "linked" else "Needs Muse Carpathron on the PC: open it and allow the headset", "chips": _chips(), "items": its, "parent": "main"}
 		"robots":
-			for i in link.found.size():
-				var f: Dictionary = link.found[i]
-				var here: bool = f["host"] == link.host and demo == null
-				its.append(["robot", str(i), "%s   %s%s" % [f["name"], f["host"], ("   ✓ " + ("online" if link.online else "connecting")) if here else ""]])
+			its = _robot_rows()
 			if link.found.is_empty():
-				its.append(["search", "", "Searching on this Wi-Fi..." if link.scanning else "No robot found yet — select to search again"])
-			its.append(["search", "", "Search again on this Wi-Fi" + ("  (searching...)" if link.scanning else "")])
-			its.append(["page", "main", "◀  Back"])
-			return {"title": "CHOOSE ROBOT  ·  %d found" % link.found.size(), "items": its}
+				its.append({"id": "search", "arg": "", "icon": "…", "color": C_GREY, "label": "Searching on this Wi-Fi..." if link.scanning else "No robot found yet", "sub": "Switch the robot on and connect it to the same Wi-Fi as the headset"})
+			its.append({"id": "search", "arg": "x", "icon": "⟳", "color": C_BLUE, "label": "Search again", "sub": ("searching...  %d%%" % int(link.scan_progress() * 100)) if link.scanning else "looks on this Wi-Fi and asks Muse on the PC"})
+			its.append({"id": "page", "arg": "main", "icon": "‹", "color": C_GREY, "label": "Back"})
+			return {"title": "Your robots", "subtitle": "%d found" % link.found.size(), "chips": _chips(), "items": its, "parent": "main"}
+		"settings":
+			if demo == null:
+				its.append({"id": "view", "arg": "", "icon": "◐", "color": C_BLUE, "label": "View", "sub": "VR: the camera picture all around you   ·   Flat: a cinema screen", "value": "VR" if view_mode == "vr" else "Flat screen"})
+				if view_mode == "vr":
+					its.append({"id": "vrsize", "arg": "", "icon": "⤢", "color": C_BLUE, "label": "VR picture size", "value": "Large  104°" if vr.size_name == "large" else "Normal  84°"})
+			its.append({"id": "drive", "arg": "", "icon": "✥", "color": C_ORANGE, "label": "Driving", "sub": "Simple: a stick forward / back + sideways   ·   Tank: one stick per side", "value": "Tank" if tank else "Simple"})
+			its.append({"id": "head", "arg": "", "icon": "◎", "color": C_ORANGE, "label": "Head steering", "sub": "the robot turns where you look", "value": "On" if head_steer else "Off"})
+			its.append({"id": "hints", "arg": "", "icon": "?", "color": C_GREY, "label": "Button labels on the controllers", "sub": "shown when you look at your controllers", "value": "On" if cfg.get_value("ui", "hints", true) else "Off"})
+			its.append({"id": "vision", "arg": "", "icon": "◈", "color": C_ORANGE, "label": "Smart vision", "sub": "Muse marks people, animals, obstacles and items on the robot's picture", "value": "On" if cfg.get_value("ui", "vision", true) else "Off"})
+			its.append({"id": "share", "arg": "", "icon": "⇪", "color": C_BLUE, "label": "Show my view on the PC", "sub": "Muse Carpathron > Robots > Live shows what you see (to record it)", "value": "On" if spectator.enabled else "Off"})
+			its.append({"id": "recenter", "arg": "", "icon": "⊙", "color": C_GREY, "label": "Bring the screen in front of me"})
+			its.append({"id": "page", "arg": "main", "icon": "‹", "color": C_GREY, "label": "Back"})
+			return {"title": "Settings", "subtitle": "View, driving and controls", "chips": _chips(), "items": its, "parent": "main"}
 	if demo == null:
-		its.append(["page", "missions", "Missions: explore, scan, measure, find an object"])
-	its.append(["page", "robots", "Choose robot  (%d found)" % link.found.size()])
-	its.append(["demo", "", "Leave the training room" if demo != null else "Training room: 3D demo robot (learn and test)"])
-	if demo == null:
-		its.append(["view", "", "View: VR — picture all around you" if view_mode == "vr" else "View: flat cinema screen"])
-		if view_mode == "vr":
-			its.append(["vrsize", "", "VR picture size: " + ("large (104°)" if vr.size_name == "large" else "normal (84°)")])
-	its.append(["recenter", "", "Bring the screen in front of me"])
-	its.append(["head", "", "Head steering: " + ("ON (robot turns where you look)" if head_steer else "off")])
-	its.append(["arcade", "", "Driving: " + ("arcade (right stick)" if arcade else "tank (two sticks)")])
-	its.append(["close", "", "Close menu"])
-	its.append(["exit", "", "Exit Carpathron Avatar"])
-	return {"title": "CARPATHRON AVATAR " + str(ProjectSettings.get_setting("application/config/version", "")), "items": its}
+		its.append({"id": "page", "arg": "missions", "icon": "✦", "color": C_ORANGE, "label": "Missions", "sub": "explore, scan, measure, find an object"})
+	its.append({"id": "page", "arg": "robots", "icon": "◆", "color": C_GREEN, "label": "Your robots", "sub": "choose a robot on this Wi-Fi", "value": "%d found" % link.found.size()})
+	its.append({"id": "demo", "arg": "", "icon": "▶", "color": C_BLUE, "label": "Leave the virtual tour" if demo != null else "Virtual tour", "sub": "back to the robots" if demo != null else "the 3D robot in a virtual room: learn and test"})
+	its.append({"id": "page", "arg": "settings", "icon": "⚙", "color": C_GREY, "label": "Settings", "sub": "view, driving, head steering, controller labels"})
+	its.append({"id": "close", "arg": "", "icon": "✕", "color": C_GREY, "label": "Close the menu"})
+	its.append({"id": "exit", "arg": "", "icon": "⏻", "color": C_RED, "label": "Exit Carpathron Avatar"})
+	return {"title": "Carpathron Avatar", "subtitle": "Menu   ·   version " + _ver(), "chips": _chips(), "items": its}
 
 func _on_menu(action: String, arg: String) -> void:
 	if action in MISSIONS:
@@ -472,9 +599,29 @@ func _on_menu(action: String, arg: String) -> void:
 			_stop_demo()
 			_pick(int(arg))
 			menu3d.close()
+		"tour":
+			link.stop_now()
+			demo_manual = true
+			if demo == null:
+				_start_demo()
+			demo._enter(0)
+			menu3d.close()
+			_refresh_panel()
+		"drive":
+			_toggle_tank()
+			menu3d.refresh()
+		"vision":
+			cfg.set_value("ui", "vision", not cfg.get_value("ui", "vision", true)); cfg.save("user://avatar.cfg")
+			menu3d.refresh()
+		"share":
+			spectator.enabled = not spectator.enabled
+			cfg.set_value("ui", "share_view", spectator.enabled); cfg.save("user://avatar.cfg")
+			menu3d.refresh()
+		"hints":
+			cfg.set_value("ui", "hints", not cfg.get_value("ui", "hints", true)); cfg.save("user://avatar.cfg")
+			menu3d.refresh()
 		"search":
-			link.scan(["carpathron.local"] + ([link.host] if link.host != "" else []))
-			muse.find([muse.pc] if muse.pc != "" else [])
+			_search_all()
 			menu3d.refresh()
 		"demo":
 			if demo != null:
@@ -504,8 +651,6 @@ func _on_menu(action: String, arg: String) -> void:
 			menu3d.refresh()
 		"head":
 			_toggle_head()
-		"arcade":
-			_toggle_arcade()
 		"close":
 			menu3d.close()
 		"exit":
@@ -515,6 +660,53 @@ func _on_menu(action: String, arg: String) -> void:
 			_refresh_panel()
 			await get_tree().create_timer(0.8).timeout   # the 3 stop commands go out first
 			get_tree().quit()
+
+## smart vision: the boxes and names Muse found on the live picture (only the real robot, setting on, fresh)
+func _vision_update() -> void:
+	if test.has("shot"):
+		return
+	var on: bool = cfg.get_value("ui", "vision", true) and demo == null and link.online and muse.state == "linked"
+	muse.want_vision = on
+	var st: Dictionary = muse.state_data
+	var fresh: bool = on and st.has("seen") and int(st.get("seenAgoMs", -1)) >= 0 and int(st.get("seenAgoMs", -1)) < 7000
+	if not fresh:
+		vision.clear()
+		return
+	if view_mode == "vr":
+		vision.show_seen(st["seen"], int(st.get("seenAt", 0)), func(u, v): return vr.point(u, v), vr)
+	else:
+		vision.show_seen(st["seen"], int(st.get("seenAt", 0)), func(u, v): return Vector3((u - 0.5) * 3.2, (0.5 - v) * 2.4, 0.03), screen)
+
+## look for robots on the Wi-Fi again and ask Muse on the PC
+func _search_all() -> void:
+	link.scan(["carpathron.local"] + ([link.host] if link.host != "" else []) + ([str(cfg.get_value("robot", "host", ""))] if str(cfg.get_value("robot", "host", "")) != "" else []))
+	if muse.state != "linked":
+		muse.find([muse.pc] if muse.pc != "" else [])
+
+## background jobs: the robot Muse knows joins the list, a quiet search every 30 s while nothing is connected,
+## and the open menu follows the search progress
+func _background(_dt: float) -> void:
+	# the car's video through Muse when Muse drives this same car (one camera connection = steady picture)
+	var car = muse.state_data.get("car", null) if muse else null
+	var via := {}
+	if typeof(car) == TYPE_DICTIONARY and link.host != "" and str(car.get("ip", "")) == link.host and demo == null:
+		via = muse.relay()
+	link.set_relay(via)
+	_vision_update()
+	if test.has("host"):
+		test["relay"] = test.get("relay", false) or link._relay_used
+	if test:
+		return
+	if typeof(car) == TYPE_DICTIONARY and str(car.get("ip", "")) != "":
+		if link.add_found(str(car["ip"]), str(car.get("name", "Baby Carpathron")), true):
+			menu3d.refresh()
+	var now := Time.get_ticks_msec()
+	if not link.scanning and not link.online and now > rescan_at:
+		rescan_at = now + 30000
+		if rescan_at > 30000 + 5000:
+			_search_all()
+	if menu3d.is_open and link.scanning and Engine.get_process_frames() % 30 == 0:
+		menu3d.refresh()
 
 func _pick(i: int) -> void:
 	if link.found.is_empty():
@@ -539,6 +731,10 @@ func _process(delta: float) -> void:
 		pivot.rotation.y = cam.rotation.y
 		placed = true
 		_place_demo()
+	if welcome_pending and (placed or not xr_on):
+		welcome_pending = false
+		menu3d.open_at(cam, "welcome")
+	_background(delta)
 	var ls := Vector2.ZERO
 	var rs := Vector2.ZERO
 	var stop := false
@@ -548,33 +744,59 @@ func _process(delta: float) -> void:
 		rs = right_hand.get_vector2("primary")
 		stop = left_hand.is_button_pressed("ax_button") or right_hand.is_button_pressed("ax_button")
 		turbo = right_hand.get_float("trigger") > 0.5 or left_hand.get_float("trigger") > 0.5
-		var trig_now := right_hand.get_float("trigger") > 0.6 or left_hand.get_float("trigger") > 0.6
+		var trig_r := right_hand.get_float("trigger") > 0.6
+		var trig_l := left_hand.get_float("trigger") > 0.6
+		# the controllers in your hands follow your fingers; their labels show when you look at them
+		var show_hints: bool = cfg.get_value("ui", "hints", true)
+		for c in [[ctrl_l, left_hand], [ctrl_r, right_hand]]:
+			var h: XRController3D = c[1]
+			c[0].update(h.get_vector2("primary"), h.is_button_pressed("ax_button"), h.is_button_pressed("by_button"), h.is_button_pressed("menu_button"), h.get_float("trigger"), h.get_float("grip"))
+			var to_c: Vector3 = (h.global_position - cam.global_position)
+			var look := -cam.global_basis.z
+			c[0].hints.visible = show_hints and h.get_has_tracking_data() and to_c.length() < 0.7 and look.angle_to(to_c) < deg_to_rad(22)
 		if _pressed("MENU", left_hand.is_button_pressed("menu_button")):
-			if menu3d.is_open:
+			if menu3d.is_open and menu3d.page != "welcome":
 				menu3d.close()
 			else:
 				menu3d.open_at(cam, "main")
 			left_hand.trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
+		# the hand whose trigger you pull last is the pointing hand
+		if trig_l and not prev.get("TRIG_L", false): laser_hand = "left"
+		if trig_r and not prev.get("TRIG_R", false): laser_hand = "right"
+		var pointing := _laser("left", aim_l, menu3d.is_open)
+		pointing = _laser("right", aim_r, menu3d.is_open) or pointing
 		if menu3d.is_open:
-			# the menu is open: sticks choose, trigger selects, B / Y back, nothing drives (A / X still STOP)
+			# menu open: point + trigger, or stick + trigger; B / Y back; nothing drives (A / X still STOP)
 			if _pressed("B", right_hand.is_button_pressed("by_button")) or _pressed("Y", left_hand.is_button_pressed("by_button")):
 				menu3d.back()
-			if _pressed("LS", left_hand.is_button_pressed("primary_click")):
-				menu3d.close()
+			_pressed("LS", left_hand.is_button_pressed("primary_click"))
 			_pressed("RS", right_hand.is_button_pressed("primary_click"))
-			var y := ls.y if absf(ls.y) >= absf(rs.y) else rs.y
+			var st := ls if ls.length() >= rs.length() else rs
 			menu_rep -= delta
-			if absf(y) < 0.4:
+			if st.length() < 0.5:
 				menu_rep = 0.0
 			elif menu_rep <= 0.0:
-				menu3d.move(-1 if y > 0 else 1)
-				menu_rep = 0.28
-			if _pressed("TRIG", trig_now):
-				menu3d.activate()
-				right_hand.trigger_haptic_pulse("haptic", 0.0, 0.5, 0.06, 0.0)
+				if absf(st.y) >= absf(st.x):
+					menu3d.nav("ui_up" if st.y > 0 else "ui_down")
+				else:
+					menu3d.nav("ui_right" if st.x > 0 else "ui_left")
+				menu_rep = 0.25
+				(left_hand if laser_hand == "left" else right_hand).trigger_haptic_pulse("haptic", 0.0, 0.15, 0.02, 0.0)
+			var hand_trig := trig_l if laser_hand == "left" else trig_r
+			var pressed_now := _pressed("TRIG", hand_trig)
+			if pressed_now:
+				if pointing:
+					menu3d.click(true)
+				else:
+					menu3d.nav("ui_accept")
+				(left_hand if laser_hand == "left" else right_hand).trigger_haptic_pulse("haptic", 0.0, 0.5, 0.05, 0.0)
+			elif not hand_trig and prev.get("TRIG_DOWN", false) and pointing:
+				menu3d.click(false)
+			prev["TRIG_DOWN"] = hand_trig
 			ls = Vector2.ZERO; rs = Vector2.ZERO; turbo = false
 		else:
-			prev["TRIG"] = trig_now
+			prev["TRIG"] = trig_l or trig_r
+			prev["TRIG_DOWN"] = false
 			if _pressed("B", right_hand.is_button_pressed("by_button")):
 				if demo != null:
 					demo.photo()
@@ -584,13 +806,15 @@ func _process(delta: float) -> void:
 			if _pressed("Y", left_hand.is_button_pressed("by_button")):
 				_toggle_head()
 			if _pressed("RS", right_hand.is_button_pressed("primary_click")):
-				_toggle_arcade()
+				_toggle_tank()
 			if _pressed("LS", left_hand.is_button_pressed("primary_click")):
 				if demo != null:
 					demo.event("skip")
 				else:
 					menu3d.open_at(cam, "missions")
 					left_hand.trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
+		prev["TRIG_L"] = trig_l
+		prev["TRIG_R"] = trig_r
 		var lg := left_hand.get_float("grip") > 0.8 and not menu3d.is_open
 		var rg := right_hand.get_float("grip") > 0.8 and not menu3d.is_open
 		if lg and rg:
@@ -599,8 +823,7 @@ func _process(delta: float) -> void:
 				recording = false; rec_effect.set_recording_active(false)
 			if grip_hold > 1.0 and not link.scanning:
 				grip_hold = -100.0
-				link.scan(["carpathron.local"])
-				muse.find([muse.pc] if muse.pc != "" else [])
+				_search_all()
 		else:
 			grip_hold = 0.0
 			_ptt(rg)
@@ -630,12 +853,19 @@ func _process(delta: float) -> void:
 	var mx := 100.0 if turbo else 85.0
 	var l := 0.0
 	var r2 := 0.0
-	if arcade:
-		l = (_dz(rs.y) + _dz(rs.x)) * mx
-		r2 = (_dz(rs.y) - _dz(rs.x)) * mx
-	else:
+	if tank:
 		l = _dz(ls.y) * mx
 		r2 = _dz(rs.y) * mx
+	else:
+		# simple driving: either stick, forward / back drives, sideways turns (gentle turns while driving)
+		var fy := clampf(_dz(ls.y) + _dz(rs.y), -1.0, 1.0)
+		var tx := clampf(_dz(ls.x) + _dz(rs.x), -1.0, 1.0)
+		var tg := 0.75 if absf(fy) < 0.1 else 0.5
+		var lw := fy + tx * tg
+		var rw := fy - tx * tg
+		var big := maxf(1.0, maxf(absf(lw), absf(rw)))
+		l = lw / big * mx
+		r2 = rw / big * mx
 	# head steering: look >15° away from the screen (sticks idle) and the robot turns towards your gaze
 	if head_steer and xr_on and placed and absf(l) < 2 and absf(r2) < 2:
 		var off := wrapf(cam.rotation.y - pivot.rotation.y, -PI, PI)   # + = you look left
@@ -706,7 +936,7 @@ func _test_step() -> Array:
 			muse.voice(w)
 	if t > (20000 if test.has("muse") else 8000):
 		print("AVATAR_TEST ", JSON.stringify({"frames": link.frames, "online": link.online, "name": link.robot_name, "photo": link.last_photo, "tex": screen_mat.albedo_texture != null, "muse": muse.state, "answer": test.get("answer", ""), "voice": test.get("voice", muse.last_answer), "mission": muse.last_answer,
-			"dash": cockpit.dash.text, "felt": test.get("felt", []), "warn": cockpit.warn.text, "state": muse.state_data.keys(), "map": muse.map_data.keys(), "menu": cockpit.items.size(), "news": cockpit.news.text}))
+			"dash": cockpit.dash.text, "felt": test.get("felt", []), "warn": cockpit.warn.text, "state": muse.state_data.keys(), "map": muse.map_data.keys(), "menu": cockpit.items.size(), "news": cockpit.news.text, "relay": test.get("relay", false), "frames_relay": link.frames, "seen": (muse.state_data.get("seen", []) as Array).map(func(o): return o["label"]), "vision_labels": vision.labels.get_child_count()}))
 		get_tree().quit()
 	return [Vector2.ZERO, Vector2.ZERO, false]
 
@@ -792,6 +1022,7 @@ func _cockpit_shot(spec: String) -> void:
 	var mode := parts[2] if parts.size() > 2 else "vr"
 	var j = JSON.parse_string(FileAccess.get_file_as_string(parts[0]))
 	test = {"shot": true}   # no demo, no robot search while the picture is taken
+	welcome_pending = false
 	_stop_demo()
 	link.host = ""; link.online = true; link.robot_name = "Baby Carpathron"
 	var img := Image.load_from_file(parts[0].get_base_dir() + "/cam.jpg") if FileAccess.file_exists(parts[0].get_base_dir() + "/cam.jpg") else null
@@ -805,11 +1036,19 @@ func _cockpit_shot(spec: String) -> void:
 	link.note = "Connected to Baby Carpathron"
 	view_mode = "flat" if mode == "flat" else "vr"
 	_apply_view()
+	var seen := [{"label": "person", "kind": "human", "box": [0.12, 0.1, 0.22, 0.75], "near": false}, {"label": "chair", "kind": "furniture", "box": [0.55, 0.45, 0.3, 0.45], "near": true}]
+	if view_mode == "vr":
+		vision.show_seen(seen, 1, func(u, v): return vr.point(u, v), vr)
+	else:
+		vision.show_seen(seen, 1, func(u, v): return Vector3((u - 0.5) * 3.2, (0.5 - v) * 2.4, 0.03), screen)
 	_refresh_panel()
 	cam.position = Vector3(0, 1.6, 0)
 	(cam as Camera3D).fov = 100
-	if mode in ["menu", "robots", "missions"]:
+	if mode in ["menu", "robots", "missions", "settings", "welcome"]:
 		menu3d.open_at(cam, "main" if mode == "menu" else mode)
+	if mode == "welcome":
+		_start_demo()
+		cam.position = Vector3(0, 1.6, 0)
 	await _wait(0.8)
 	vr.sync(screen_mat.albedo_texture, screen_mat.albedo_color)
 	await RenderingServer.frame_post_draw

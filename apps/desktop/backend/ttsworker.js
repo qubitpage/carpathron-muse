@@ -20,10 +20,18 @@ process.on('message', (m) => {
   try {
     let text = String(m.text || '').slice(0, 600);
     for (const [re, to] of FIX) text = text.replace(re, to);
+    text = text.replace(/https?:\/\/\S+/g, 'a link').replace(/[*_`#>|~\[\]{}]/g, ' ').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]/gu, ' ')
+      .replace(/\s*[·•]\s*/g, ', ').replace(/\s*\n+\s*/g, '. ').replace(/\s{2,}/g, ' ').trim();
+    if (text && !/[.!?…]$/.test(text)) text += '.';
     const t0 = Date.now();
     const tts = engine(m.model);
-    const a = tts.generate({ text, sid: m.sid, speed: fx.speedFor(m.preset) * (m.rate || 1) });
-    const y = m.preset === 'plain' ? a.samples : fx.robotize(a.samples, a.sampleRate, m.preset);
+    // 2.2.5: enableExternalBuffer false — inside the app (Electron) native "external" buffers are not allowed, which
+    // made every installed voice fail ("External buffers are not allowed"). The samples are copied instead.
+    const a = tts.generate({ text, sid: m.sid, speed: fx.speedFor(m.preset) * Math.min(1.1, m.rate || 1), enableExternalBuffer: false });
+    let y = m.preset === 'plain' ? a.samples : fx.robotize(Float32Array.from(a.samples), a.sampleRate, m.preset);
+    // a little silence before and after: speakers (and Bluetooth ones especially) swallow the first syllable otherwise
+    const lead = Math.round(a.sampleRate * 0.22), tail = Math.round(a.sampleRate * 0.15);
+    const z = new Float32Array(lead + y.length + tail); z.set(y, lead); y = z;
     fs.writeFileSync(m.out, fx.wav(y, a.sampleRate));
     process.send({ id: m.id, ok: true, file: m.out, secs: y.length / a.sampleRate, ms: Date.now() - t0 });
   } catch (e) { process.send({ id: m.id, ok: false, error: e.message }); }

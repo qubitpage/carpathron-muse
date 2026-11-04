@@ -55,8 +55,15 @@
     } catch (e) { console.warn('robot voice', e); }
     mouth(false); play.busy = false; playNext();
   }
+  // 2.2.5: the browser voice cuts long utterances (words got lost): speak sentence by sentence, cleaned of symbols
   function browserSay(t) {
     if (!window.speechSynthesis) return;
+    const clean = String(t).replace(/https?:\/\/\S+/g, 'a link').replace(/[*_`#>|~]/g, ' ').replace(/\s*[·•]\s*/g, ', ').replace(/\s+/g, ' ').trim();
+    const parts = clean.split(/(?<=[.!?…])\s+/).filter(Boolean);
+    if (parts.length > 1) { parts.forEach((p) => browserSay1(p)); return; }
+    browserSay1(clean);
+  }
+  function browserSay1(t) {
     const u = new SpeechSynthesisUtterance(t);
     const v = pickVoice(); if (v) { u.voice = v; u.lang = v.lang; }
     u.rate = st.rate; u.pitch = st.pitch;

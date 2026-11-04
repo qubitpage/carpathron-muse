@@ -725,3 +725,7 @@ button.chip { cursor: pointer; }
 .supervisor .sv-fix{margin-top:8px;font-size:13px}
 .rm-key.object { background: #9b6bff; } .rm-key.hazard { background: #ff2d55; border-radius: 50%; }
 .rm-safety { line-height: 1.6; padding: 6px 8px; border-radius: 8px; background: rgba(255,255,255,.04); margin-bottom: 6px; }
+/* 2.2.5: the Meta Quest view (what the headset user sees) */
+.quest-card { grid-column: 1 / -1; }
+.quest-card .cam-preview { aspect-ratio: 16 / 9; object-fit: contain; background: #000; }
+#questVideo:fullscreen { width: 100vw; height: 100vh; object-fit: contain; background: #000; border: 0; border-radius: 0; margin: 0; }

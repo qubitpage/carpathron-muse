@@ -302,17 +302,15 @@ class Robot {
   }
 
   // Live video (MJPEG) from the car's camera, piped through our server so https pages can show it.
+  // 2.2.5: ONE connection to the car camera, shared by every viewer (Muse windows, the Quest headset, the agent).
+  // The ESP32 copes badly with several video clients at once — that was the "signal loss". Frames are cut out of
+  // the car's MJPEG stream and sent to each viewer; the upstream reconnects by itself and closes when nobody watches.
   pipeStream(res) {
     if (!this.ip) { res.writeHead(404); return res.end('no car'); }
-    const [h, p] = this.ip.split(':');
-    const up = http.get({ host: h, port: p ? Number(p) + 1 : 81, path: '/stream', timeout: 5000 }, (r) => {
-      res.writeHead(r.statusCode || 200, { 'Content-Type': r.headers['content-type'] || 'multipart/x-mixed-replace', 'Cache-Control': 'no-store' });
-      r.pipe(res);
-    });
-    up.on('timeout', () => up.destroy(new Error('timeout')));
-    up.on('error', () => { if (!res.headersSent) { res.writeHead(502); res.end('car camera not reachable'); } else res.end(); });
-    res.on('close', () => up.destroy());
+    const hub = this._hub || (this._hub = new StreamHub(() => this.ip));
+    hub.add(res);
   }
+  get lastFrame() { return this._hub ? this._hub.last : null; }
 
   // Looks for Carpathron cars on the local networks of this PC (and the car's own hotspot).
   static async find(lanIps, { extra = [], timeout = 800, concurrency = 48 } = {}) {
@@ -354,6 +352,59 @@ class Robot {
   }
 
   close() { clearInterval(this._tick); clearInterval(this._status); clearInterval(this._probe); try { this.kitSock && this.kitSock.destroy(); } catch {} agent.destroy(); }
+}
+
+// Shares one MJPEG upstream between many viewers (see Robot.pipeStream).
+class StreamHub {
+  constructor(getIp) { this.getIp = getIp; this.clients = new Set(); this.up = null; this.buf = Buffer.alloc(0); this.last = null; this.lastAt = 0; this.timer = null; }
+  add(res) {
+    res.writeHead(200, { 'Content-Type': 'multipart/x-mixed-replace; boundary=frame', 'Cache-Control': 'no-store', Connection: 'close' });
+    this.clients.add(res);
+    if (this.last && Date.now() - this.lastAt < 3000) this._send(res, this.last);   // a picture at once
+    res.on('close', () => { this.clients.delete(res); if (!this.clients.size) this._stop(); });
+    this._start();
+  }
+  _send(res, jpg) {
+    try { res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpg.length}\r\n\r\n`); res.write(jpg); res.write('\r\n'); } catch {}
+  }
+  _start() {
+    if (this.up || !this.clients.size) return;
+    const ip = this.getIp(); if (!ip) return;
+    const [h, p] = ip.split(':');
+    this.buf = Buffer.alloc(0);
+    let lastData = Date.now();
+    const req = http.get({ host: h, port: p ? Number(p) + 1 : 81, path: '/stream', timeout: 6000 }, (r) => {
+      r.on('data', (d) => {
+        lastData = Date.now();
+        this.buf = Buffer.concat([this.buf, d]);
+        for (;;) {
+          const s = this.buf.indexOf(Buffer.from([0xff, 0xd8]));
+          if (s < 0) { if (this.buf.length > 600000) this.buf = Buffer.alloc(0); break; }
+          const e = this.buf.indexOf(Buffer.from([0xff, 0xd9]), s + 2);
+          if (e < 0) { if (s > 0) this.buf = this.buf.subarray(s); break; }
+          const jpg = Buffer.from(this.buf.subarray(s, e + 2));
+          this.buf = this.buf.subarray(e + 2);
+          this.last = jpg; this.lastAt = Date.now();
+          for (const c of this.clients) if (c.writableLength < 400000) this._send(c, jpg);   // a slow viewer skips frames, never stalls the others
+        }
+      });
+      r.on('end', () => this._retry());
+      r.on('error', () => this._retry());
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', () => this._retry());
+    this.up = req;
+    clearInterval(this.watch);
+    this.watch = setInterval(() => { if (Date.now() - lastData > 5000) this._retry(); }, 1000);   // stuck: reconnect
+  }
+  _retry() {
+    if (this.up) { try { this.up.destroy(); } catch {} this.up = null; }
+    clearInterval(this.watch);
+    if (!this.clients.size) return;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this._start(), 800);
+  }
+  _stop() { clearTimeout(this.timer); clearInterval(this.watch); if (this.up) { try { this.up.destroy(); } catch {} this.up = null; } }
 }
 
 module.exports = { Robot, MAX_ACTION_MS };

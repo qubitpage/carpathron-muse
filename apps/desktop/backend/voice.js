@@ -19,6 +19,20 @@ function toWav({ channels, sampleRate }, rate = 24000) {
   const n = channels[0].length;
   const mono = new Float32Array(n);
   for (const ch of channels) for (let i = 0; i < n; i++) mono[i] += ch[i] / channels.length;
+  // 2.2.5: clearer for the transcriber — no DC offset, a quiet microphone (the headset, a PC far away) made louder
+  // (up to 12x, peak 0.9), and a quarter second of silence before and after so the first and last words are not cut
+  let mean = 0; for (let i = 0; i < n; i++) mean += mono[i]; mean = n ? mean / n : 0;
+  let peak = 0; for (let i = 0; i < n; i++) { mono[i] -= mean; peak = Math.max(peak, Math.abs(mono[i])); }
+  const gain = peak > 0.003 ? Math.min(12, 0.9 / peak) : 1;
+  if (gain !== 1) for (let i = 0; i < n; i++) mono[i] *= gain;
+  const pad = Math.round(sampleRate * 0.25);
+  const padded = new Float32Array(n + pad * 2); padded.set(mono, pad);
+  const r = toWavMono(padded, sampleRate, rate);
+  r.seconds = Math.max(0, r.seconds - 0.5);   // the speech itself, without the added silence
+  return r;
+}
+function toWavMono(mono, sampleRate, rate) {
+  const n = mono.length;
   const ratio = sampleRate / rate;
   const outLen = Math.floor(n / ratio);
   const pcm = Buffer.alloc(outLen * 2);

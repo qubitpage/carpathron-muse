@@ -29,7 +29,8 @@ const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
   const n = 24000, w = Buffer.alloc(44 + n * 4);
   w.write('RIFF', 0); w.writeUInt32LE(36 + n * 4, 4); w.write('WAVE', 8); w.write('fmt ', 12); w.writeUInt32LE(16, 16); w.writeUInt16LE(1, 20); w.writeUInt16LE(2, 22); w.writeUInt32LE(48000, 24); w.writeUInt32LE(192000, 28); w.writeUInt16LE(4, 32); w.writeUInt16LE(16, 34); w.write('data', 36); w.writeUInt32LE(n * 4, 40);
   const wav = path.join(os.tmpdir(), 'avatar-e2e.wav'); fs.writeFileSync(wav, w);
-  const out = await new Promise((resolve) => execFile(GODOT, ['--headless', '--path', __dirname, '--', '--test-host=127.0.0.1:18712', '--test-muse=127.0.0.1:18714'], { env: { ...process.env, TEST_WAV: wav }, timeout: 90000, maxBuffer: 1 << 24 }, (_e, so, se) => resolve(String(so) + String(se))));
+  const RENDER = !!process.env.AVATAR_RENDER;   // 1.4: render for real (xvfb) so the headset view goes to Muse too
+  const out = await new Promise((resolve) => execFile(RENDER ? 'xvfb-run' : GODOT, [...(RENDER ? ['-a', GODOT] : ['--headless']), '--path', __dirname, '--', '--test-host=127.0.0.1:18712', '--test-muse=127.0.0.1:18714'], { env: { ...process.env, TEST_WAV: wav }, timeout: 90000, maxBuffer: 1 << 24 }, (_e, so, se) => resolve(String(so) + String(se))));
   const line = (out.match(/AVATAR_TEST (.*)/) || [])[1];
   if (!line) { console.error(out.slice(-3000)); process.exit(1); }
   const r = JSON.parse(line);
@@ -37,7 +38,11 @@ const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
   console.log(JSON.stringify(r, null, 1), '\nlink approvals:', linked, '| car commands:', drives.slice(0, 4).join(' '), '…');
   const cockpitOk = /AHEAD 42 cm/.test(r.dash) && /lean 0.4/.test(r.dash) && r.felt.includes('bump') && /BUMP/.test(r.warn) && r.state.includes('targets') && r.map.includes('pose') && r.menu >= 4 && /explor/i.test(r.news + " " + r.mission);
   console.log('cockpit:', cockpitOk ? 'OK' : 'FAILED', '|', r.dash, '|', r.news);
-  const ok = cockpitOk && r.frames > 5 && r.online && r.muse === 'linked' && /I can see the photo/.test(r.answer) && /Look left/.test(r.voice) && /Looking left/.test(r.voice) && linked === 1 && drives.some((d) => /l=-70&r=70|ws:-70,70/.test(d));
+  const view = await (await fetch('https://localhost:18714/api/avatar/view', { headers: { 'x-mc-token': srv.token } })).json().catch(() => ({}));
+  console.log('relay (video through Muse):', r.relay, '| headset view on the PC:', view.at ? 'received' : 'none', RENDER ? '' : '(headless: not rendered)');
+  const visionOk = Array.isArray(r.seen) && r.seen.includes('person') && r.vision_labels >= 1;
+  console.log('smart vision:', visionOk ? 'OK' : 'FAILED', r.seen, r.vision_labels, 'labels');
+  const ok = visionOk && r.relay && (!RENDER || !!view.at) && cockpitOk && r.frames > 5 && r.online && r.muse === 'linked' && /I can see the photo/.test(r.answer) && /Look left/.test(r.voice) && /Looking left/.test(r.voice) && linked === 1 && drives.some((d) => /l=-70&r=70|ws:-70,70/.test(d));
   console.log(ok ? 'AVATAR E2E: OK' : 'AVATAR E2E: FAILED');
   ws.close(); car.close(); await srv.close(); process.exit(ok ? 0 : 1);
 })().catch((e) => { console.error(e); process.exit(1); });

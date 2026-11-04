@@ -9,6 +9,7 @@ extends Node
 
 signal frame(texture: Texture2D)
 signal changed
+signal felt(kind: String)   # the car felt something (firmware 2.4): "bump", "step", "drop", "blocked", "blind"
 
 var host := ""          # "192.168.1.131" or "192.168.1.131:8080" (then video = port+1)
 var robot_name := ""
@@ -19,6 +20,11 @@ var scanning := false
 var found: Array = []   # [{host, name}]
 var last_photo := ""
 var note := ""
+## the car's sensors from /status (Baby Carpathron firmware 2.x; empty with other robots)
+var sensors: Dictionary = {}
+var _counts := {}
+var _was_blocked := false
+var _was_lost := false
 
 var _tex: ImageTexture
 # video (MJPEG over a raw HTTPClient)
@@ -139,6 +145,22 @@ func _on_status(result: int, code: int, _h: PackedStringArray, body: PackedByteA
 		if typeof(j) == TYPE_DICTIONARY:
 			robot_name = str(j.get("name", "robot"))
 			rssi = int(j.get("rssi", 0))
+			var s = j.get("sensors", null)
+			if typeof(s) == TYPE_DICTIONARY:
+				sensors = s
+				for k in [["bump", "bumps"], ["step", "tiltStops"], ["drop", "cliffStops"]]:
+					var n := int(s.get(k[1], 0))
+					if _counts.has(k[0]) and n > int(_counts[k[0]]):
+						felt.emit(k[0])
+					_counts[k[0]] = n
+				var bl := bool(s.get("blocked", false))
+				if bl and not _was_blocked:
+					felt.emit("blocked")
+				_was_blocked = bl
+				var lost := bool(s.get("linkLost", false))
+				if lost and not _was_lost:
+					felt.emit("blind")
+				_was_lost = lost
 	if was != online:
 		note = ("Connected to " + robot_name) if online else ("Robot not answering at " + host)
 	changed.emit()
@@ -291,5 +313,5 @@ func _process(_dt: float) -> void:
 		_stop_req.cancel_request()
 		_stop_req.request(_ctrl_base() + "/stop")
 	if host != "" and now >= _next_status and _status_req.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
-		_next_status = now + 2000
+		_next_status = now + 400   # 1.2: fast enough for the distance and warning dashboard
 		_status_req.request(_ctrl_base() + "/status")

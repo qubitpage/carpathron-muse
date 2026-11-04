@@ -9,10 +9,14 @@ extends Node3D
 ##   Right grip  = hold and talk to Muse (voice -> Muse Voice Transcribe -> Muse agent: "look left", "scan the room", questions)
 ##   Left grip   = ask Muse "what do you see?" (Muse Spark looks through the robot's camera)
 ##   Both grips (hold 1 s) = search robots + Muse PC again      Menu = next robot found
+##   1.2: left stick click = MISSIONS menu (explore, scan, measure, find <object>, stop): left stick chooses, trigger
+##        runs, B closes; while it is open the sticks do not drive. A dashboard above the screen shows the distance
+##        ahead, lean, side eyes and what the car felt (the controllers buzz); the room map is on the left.
 
 const RobotLink = preload("res://robot_link.gd")
 const MuseLink = preload("res://muse_link.gd")
 const DemoRobot = preload("res://demo_robot.gd")
+const Cockpit = preload("res://cockpit.gd")
 const DEAD := 0.15
 const TURN_MS_360 := 2400.0   # calibrated full turn of the car at TURN_SPEED (same setting as Muse Carpathron)
 const TURN_SPEED := 70.0
@@ -49,6 +53,8 @@ var mic_asked := false
 var world_env: Environment
 var floor_mesh: MeshInstance3D
 var screen_title: Label3D
+var cockpit: Node3D
+var menu_rep := 0.0
 
 func _ready() -> void:
 	cfg.load("user://avatar.cfg")
@@ -59,9 +65,12 @@ func _ready() -> void:
 	add_child(link)
 	link.frame.connect(func(t): if demo == null: screen_mat.albedo_texture = t)
 	link.changed.connect(_refresh_panel)
+	link.changed.connect(func(): cockpit.update_dash(link.sensors, link.online))
+	link.felt.connect(_on_felt)
 	muse = MuseLink.new()
 	add_child(muse)
 	muse.changed.connect(_on_muse)
+	muse.map_changed.connect(func(): cockpit.set_map(muse.map_data))
 	_setup_audio()
 	for a in OS.get_cmdline_user_args() + OS.get_cmdline_args():
 		if str(a).begins_with("--test-host="):
@@ -90,6 +99,9 @@ func _ready() -> void:
 	_refresh_panel()
 	if shots_dir != "":
 		_shots_run()
+	for a2 in OS.get_cmdline_user_args():
+		if str(a2).begins_with("--shot-cockpit="):   # desktop preview: the cockpit with a saved map / state / sensors
+			_cockpit_shot(str(a2).substr(15))
 
 func _build_world() -> void:
 	var xri := XRServer.find_interface("OpenXR")
@@ -183,6 +195,9 @@ func _build_world() -> void:
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info.width = 1400
 	pivot.add_child(info)
+	info.position.y = 1.62
+	cockpit = Cockpit.new()
+	pivot.add_child(cockpit)
 
 func _refresh_panel() -> void:
 	var l = link
@@ -194,7 +209,7 @@ func _refresh_panel() -> void:
 	var found := ""
 	if l.found.size() > 1:
 		found = "\nRobots found: %d — press Menu to switch" % l.found.size()
-	panel.text = "CARPATHRON AVATAR · %s%s\n%s · head steering %s · A/X stop · B photo · Y head steering · trigger turbo · hold both grips: search again" % [who, found, "arcade (right stick)" if arcade else "tank (two sticks)", "ON" if head_steer else "off"]
+	panel.text = "CARPATHRON AVATAR " + str(ProjectSettings.get_setting("application/config/version", "")) + " · %s%s\n%s · head steering %s · A/X stop · B photo · Y head steering · trigger turbo · left stick click: missions · hold both grips: search again" % [who, found, "arcade (right stick)" if arcade else "tank (two sticks)", "ON" if head_steer else "off"]
 	info.text = demo.tour_text() if demo != null else l.note
 	if muse:
 		panel.text += "\n" + muse.status_text() + ("   🎤 listening..." if recording else "")
@@ -239,6 +254,8 @@ func _place_demo() -> void:
 ## Demo: a small camera screen on the left, the status panel on the right, the tour text above the room.
 func _demo_layout(on: bool) -> void:
 	floor_mesh.visible = not on
+	if cockpit:
+		cockpit.set_demo(on)
 	screen_title.visible = on
 	world_env.background_color = Color(0.55, 0.62, 0.7) if on else Color(0.03, 0.04, 0.06)
 	world_env.ambient_light_color = Color(0.75, 0.75, 0.78) if on else Color(0.6, 0.6, 0.6)
@@ -265,7 +282,7 @@ func _demo_layout(on: bool) -> void:
 		panel.pixel_size = 0.0022
 		panel.width = 1500
 		panel.outline_size = 0
-		info.position = Vector3(0, 1.35, -2.15)
+		info.position = Vector3(0, 1.62, -2.15)
 		info.pixel_size = 0.0025
 		info.outline_size = 12
 
@@ -277,7 +294,17 @@ func _stop_demo() -> void:
 	screen_mat.albedo_texture = null
 	_demo_layout(false)
 
+## the car felt something (bump / step / drop / blocked / sensor link lost): warning in front of you + both controllers buzz
+func _on_felt(kind: String) -> void:
+	cockpit.flash(kind)
+	if xr_on:
+		var strong := kind != "blocked"
+		for h in [left_hand, right_hand]:
+			h.trigger_haptic_pulse("haptic", 0.0, 1.0 if strong else 0.5, 0.25 if strong else 0.1, 0.0)
+
 func _on_muse() -> void:
+	if muse.state_data:
+		cockpit.set_state(muse.state_data)
 	# Answers are shown on the panel. (No text-to-speech: on Quest without a speech engine Godot's
 	# DisplayServer.tts_* calls crash the app — store review VRC.Quest.Functional.1.)
 	_refresh_panel()
@@ -373,7 +400,9 @@ func _process(delta: float) -> void:
 		rs = right_hand.get_vector2("primary")
 		stop = left_hand.is_button_pressed("ax_button") or right_hand.is_button_pressed("ax_button")
 		turbo = right_hand.get_float("trigger") > 0.5 or left_hand.get_float("trigger") > 0.5
-		if _pressed("B", right_hand.is_button_pressed("by_button")):
+		if cockpit.menu_open and _pressed("B", right_hand.is_button_pressed("by_button")):
+			cockpit.toggle_menu()
+		elif _pressed("B", right_hand.is_button_pressed("by_button")):
 			if demo != null:
 				demo.photo()
 			else:
@@ -391,8 +420,12 @@ func _process(delta: float) -> void:
 			link.note = "Arcade mode (right stick)" if arcade else "Tank mode (two sticks)"
 			if demo != null: demo.arcade = arcade
 			_refresh_panel()
-		if _pressed("LS", left_hand.is_button_pressed("primary_click")) and demo != null:
-			demo.event("skip")
+		if _pressed("LS", left_hand.is_button_pressed("primary_click")):
+			if demo != null:
+				demo.event("skip")
+			else:
+				cockpit.toggle_menu()
+				left_hand.trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
 		if _pressed("MENU", left_hand.is_button_pressed("menu_button")):
 			if demo != null or link.found.is_empty():
 				_stop_demo()
@@ -432,6 +465,25 @@ func _process(delta: float) -> void:
 		elif dt_ms > 40000:
 			print("DEMO_TEST ", JSON.stringify({"demo": false, "note": link.note, "scanning": link.scanning}))
 			get_tree().quit()
+	# missions menu open: the left stick chooses, the trigger runs, nothing drives (A/X still STOP)
+	if cockpit.menu_open and demo == null:
+		var y := ls.y
+		menu_rep -= delta
+		if absf(y) < 0.4:
+			menu_rep = 0.0
+		elif menu_rep <= 0.0:
+			cockpit.move(-1 if y > 0 else 1)
+			menu_rep = 0.28
+		if xr_on and _pressed("TRIG", right_hand.get_float("trigger") > 0.6):
+			var it: Array = cockpit.selected()
+			if it[0] == "stop":
+				link.stop_now()
+			muse.mission(it[0], it[1])
+			cockpit.toggle_menu()
+			right_hand.trigger_haptic_pulse("haptic", 0.0, 0.6, 0.08, 0.0)
+		ls = Vector2.ZERO; rs = Vector2.ZERO; turbo = false
+	elif xr_on:
+		prev["TRIG"] = right_hand.get_float("trigger") > 0.6
 	if test.has("host"):
 		var r := _test_step()
 		ls = r[0]; rs = r[1]; stop = r[2]
@@ -463,6 +515,8 @@ func _process(delta: float) -> void:
 	if stop:
 		if _pressed("STOP", true):
 			link.stop_now()
+			if muse.state == "linked" and muse.state_data.get("busy", null) != null:
+				muse.mission("stop")
 			if demo != null:
 				demo.drive(0, 0)
 				demo.event("stop")
@@ -482,6 +536,10 @@ func _process(delta: float) -> void:
 func _test_step() -> Array:
 	var t: int = Time.get_ticks_msec() - test["t0"]
 	var fwd := Vector2(0, 1)
+	if not test.has("felt"):
+		test["felt"] = []
+		link.felt.connect(func(k): test["felt"].append(k))
+
 	if t < 3000:
 		return [Vector2.ZERO, Vector2.ZERO, false]
 	if t < 4000:
@@ -494,14 +552,19 @@ func _test_step() -> Array:
 	if test.has("muse") and muse.state == "linked" and test["step"] == 1:
 		test["step"] = 2
 		muse.ask("What do you see?")
+	if test.has("muse") and test["step"] == 3 and not test.has("mission") and muse.last_answer.contains("Look"):
+		test["mission"] = true
+		test["voice"] = muse.last_answer
+		muse.mission("explore")   # 1.2: a mission from the headset, run by Muse on the PC
 	if test.has("muse") and test["step"] == 2 and not muse.busy and muse.last_answer != "" and not muse.last_answer.ends_with("..."):
 		test["step"] = 3
 		test["answer"] = muse.last_answer
 		var w := FileAccess.get_file_as_bytes(OS.get_environment("TEST_WAV"))
 		if w.size() > 0:
 			muse.voice(w)
-	if t > (16000 if test.has("muse") else 8000):
-		print("AVATAR_TEST ", JSON.stringify({"frames": link.frames, "online": link.online, "name": link.robot_name, "photo": link.last_photo, "tex": screen_mat.albedo_texture != null, "muse": muse.state, "answer": test.get("answer", ""), "voice": muse.last_answer}))
+	if t > (20000 if test.has("muse") else 8000):
+		print("AVATAR_TEST ", JSON.stringify({"frames": link.frames, "online": link.online, "name": link.robot_name, "photo": link.last_photo, "tex": screen_mat.albedo_texture != null, "muse": muse.state, "answer": test.get("answer", ""), "voice": test.get("voice", muse.last_answer), "mission": muse.last_answer,
+			"dash": cockpit.dash.text, "felt": test.get("felt", []), "warn": cockpit.warn.text, "state": muse.state_data.keys(), "map": muse.map_data.keys(), "menu": cockpit.items.size(), "news": cockpit.news.text}))
 		get_tree().quit()
 	return [Vector2.ZERO, Vector2.ZERO, false]
 
@@ -580,4 +643,27 @@ func _shots_run() -> void:
 	demo.model.wave(3.0)
 	await _wait(1.2)
 	await _snap("5")                       # tour complete
+	get_tree().quit()
+
+func _cockpit_shot(spec: String) -> void:
+	var parts := spec.split(",")   # json,png[,menu]
+	var j = JSON.parse_string(FileAccess.get_file_as_string(parts[0]))
+	test = {"shot": true}   # no demo, no robot search while the picture is taken
+	_stop_demo()
+	link.host = ""; link.online = true
+	var img := Image.load_from_file(parts[0].get_base_dir() + "/../cam.jpg") if FileAccess.file_exists(parts[0].get_base_dir() + "/../cam.jpg") else null
+	if img:
+		screen_mat.albedo_texture = ImageTexture.create_from_image(img)
+	cockpit.set_map(j["map"]); cockpit.set_state(j["state"]); cockpit.update_dash(j["sensors"], true)
+	if parts.size() > 2:
+		cockpit.toggle_menu(); cockpit.move(4)
+	cockpit.flash("bump")
+	link.sensors = j["sensors"]
+	cockpit.update_dash(j["sensors"], true)
+	cam.position = Vector3(0, 1.6, 1.35)
+	(cam as Camera3D).fov = 92
+	await _wait(0.8)
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(parts[1])
+	print("COCKPIT_SHOT ", parts[1])
 	get_tree().quit()

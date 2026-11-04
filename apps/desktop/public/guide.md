@@ -27,6 +27,8 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.2.4:** for **Carpathron Avatar 1.2** (Meta Quest): the headset shows the room map, what the car is doing and runs
+> missions — explore, scan with photos, measure, **find an object**, stop — through Muse Carpathron on the PC.
 > **2.2.3:** car firmware 2.4.1 — the gyro on the Mega hub gets its zero measured again when the car stands still but its
 > heading keeps turning (it measured it while being carried), Calibration → Gyro zero now re-zeroes the Mega's gyro, and a
 > restart of the Mega no longer looks like a turn.
@@ -482,6 +484,17 @@ outline, the named objects with their position in metres, the photos).
 **Meta Quest** — the robot-eyes view now also shows the distance ahead, the heading and a round **mini-map** (your path in
 green, laser hits as orange dots, 4 m across), and the controllers **buzz** as an obstacle gets close while you drive
 forward (strongly when the car refuses to go on).
+
+**Carpathron Avatar 1.2 on the Meta Quest — the cockpit.** Around the robot's camera screen: a **dashboard** above it
+(distance ahead with a green / yellow / red bar, lean, side eyes, the bumps / steps / drops the car felt), a big
+**warning** in front of you when the car bumps, meets a step or an edge, a drop, is blocked or loses its sensor link (both
+controllers buzz), the **room map** on the left (free floor, walls and furniture, the robot and where it looks, the
+objects the camera named, steps / drops / bumps in red, the planned way) and **missions** on the right: click the
+**left stick**, choose with the left stick, run with the **trigger**, close with **B** — *Explore the room*, *Scan with
+photos*, *Measure all around*, **Find: <every object on the map>** and *Stop*. While the menu is open the sticks don't
+drive; **A / X always stop** the car and the mission. The map and the missions come from Muse Carpathron 2.2.4 on the PC
+(link the headset once); the dashboard reads the car itself. Voice still works: hold the right grip and say "find the
+chair".
 
 ### 3.4.8 Blocks, missions and the Firmware studio
 

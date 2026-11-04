@@ -5,8 +5,11 @@ extends Node
 ##   - ask(question): Muse Spark looks through the robot camera and answers
 ##   - voice(wav): Muse Voice Transcribe -> quick robot command or the Muse agent (memory, tools)
 ##   - look(dir) / scan(): robot head turn + photo, room map
+##   - 1.2: the room map (map_data), what the car is doing (state_data) and missions (mission(): explore, scan,
+##     measure, find <object>, stop) — Muse Carpathron 2.2.4 or newer
 
 signal changed
+signal map_changed
 
 var pc := ""            # "192.168.1.130:8443"
 var token := ""
@@ -21,6 +24,13 @@ var _scanners: Array = []
 var _queue: Array = []
 var _link_id := ""
 var _next_poll := 0
+var state_data: Dictionary = {}   # {pose, busy, news, sensors, targets:[{name, kind}]}
+var map_data: Dictionary = {}     # {res, half, i0, j0, w, h, cells(base64), pose, places, objects, hazards, route}
+var _state_req: HTTPRequest
+var _map_req: HTTPRequest
+var _mission_req: HTTPRequest
+var _next_state := 0
+var _next_map := 0
 var _tls := TLSOptions.client_unsafe()   # the PC app uses its own self-signed certificate on the LAN
 
 func setup(cfg: ConfigFile) -> void:
@@ -30,6 +40,21 @@ func setup(cfg: ConfigFile) -> void:
 	_req = _mk(60.0)
 	_poll = _mk(4.0)
 	_poll.request_completed.connect(_on_poll)
+	_state_req = _mk(3.0)
+	_state_req.request_completed.connect(func(result, code, _h, b):
+		if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+			var j = JSON.parse_string(b.get_string_from_utf8())
+			if typeof(j) == TYPE_DICTIONARY:
+				state_data = j
+				changed.emit())
+	_map_req = _mk(5.0)
+	_map_req.request_completed.connect(func(result, code, _h, b):
+		if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+			var j = JSON.parse_string(b.get_string_from_utf8())
+			if typeof(j) == TYPE_DICTIONARY:
+				map_data = j
+				map_changed.emit())
+	_mission_req = _mk(8.0)
 	for i in 16:
 		var s := _mk(0.8)
 		s.set_meta("host", "")
@@ -175,8 +200,38 @@ func scan_room() -> void:
 	changed.emit()
 	_call("/avatar/scan", {}, "application/json", func(_j): pass)
 
+## a mission for the car, run by Muse on the PC: "explore", "scan", "measure", "find" (with name) or "stop"
+func mission(action: String, name := "") -> void:
+	if state != "linked":
+		last_answer = "Missions need Muse Carpathron on the PC (link the headset first)"
+		changed.emit()
+		return
+	if action != "stop" and _mission_req.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		return
+	if action == "stop":
+		_mission_req.cancel_request()
+	last_answer = "Mission: " + action + ((" " + name) if name != "" else "") + "..."
+	changed.emit()
+	_mission_req.request_completed.connect(func(result, _code, _h, b):
+		var j = JSON.parse_string(b.get_string_from_utf8()) if result == HTTPRequest.RESULT_SUCCESS else null
+		if typeof(j) == TYPE_DICTIONARY:
+			last_answer = str(j.get("text", j.get("error", "")))
+		else:
+			last_answer = "PC not reachable"
+		_next_state = 0
+		changed.emit()
+	, CONNECT_ONE_SHOT)
+	_mission_req.request(_base() + "/avatar/mission", ["x-avatar-token: " + token, "Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify({"action": action, "name": name}))
+
 func _process(_dt: float) -> void:
 	var now := Time.get_ticks_msec()
+	if state == "linked":
+		if now >= _next_state and _state_req.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
+			_next_state = now + 600
+			_state_req.request(_base() + "/avatar/state", ["x-avatar-token: " + token])
+		if now >= _next_map and _map_req.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
+			_next_map = now + 2500
+			_map_req.request(_base() + "/avatar/map", ["x-avatar-token: " + token])
 	if state == "searching":
 		var idle := 0
 		for s in _scanners:

@@ -3,6 +3,7 @@
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const fs = require('fs'), os = require('os'), path = require('path');
 const { execFile } = require('child_process');
+process.env.FAKE_CAR_SENSORS = '1';   // 1.2: the car reports firmware 2.4 sensors (dashboard, bump warning)
 const DESKTOP = process.env.DESKTOP || path.join(__dirname, '..', 'desktop');
 const GODOT = process.env.GODOT || 'godot';
 const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
@@ -28,13 +29,15 @@ const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
   const n = 24000, w = Buffer.alloc(44 + n * 4);
   w.write('RIFF', 0); w.writeUInt32LE(36 + n * 4, 4); w.write('WAVE', 8); w.write('fmt ', 12); w.writeUInt32LE(16, 16); w.writeUInt16LE(1, 20); w.writeUInt16LE(2, 22); w.writeUInt32LE(48000, 24); w.writeUInt32LE(192000, 28); w.writeUInt16LE(4, 32); w.writeUInt16LE(16, 34); w.write('data', 36); w.writeUInt32LE(n * 4, 40);
   const wav = path.join(os.tmpdir(), 'avatar-e2e.wav'); fs.writeFileSync(wav, w);
-  const out = await new Promise((resolve) => execFile(GODOT, ['--headless', '--path', __dirname, '--', '--test-host=127.0.0.1:18712', '--test-muse=127.0.0.1:18714'], { env: { ...process.env, TEST_WAV: wav }, timeout: 60000, maxBuffer: 1 << 24 }, (_e, so, se) => resolve(String(so) + String(se))));
+  const out = await new Promise((resolve) => execFile(GODOT, ['--headless', '--path', __dirname, '--', '--test-host=127.0.0.1:18712', '--test-muse=127.0.0.1:18714'], { env: { ...process.env, TEST_WAV: wav }, timeout: 90000, maxBuffer: 1 << 24 }, (_e, so, se) => resolve(String(so) + String(se))));
   const line = (out.match(/AVATAR_TEST (.*)/) || [])[1];
   if (!line) { console.error(out.slice(-3000)); process.exit(1); }
   const r = JSON.parse(line);
   const drives = car.log.filter((x) => x.startsWith('/drive') || x.startsWith('ws:'));
   console.log(JSON.stringify(r, null, 1), '\nlink approvals:', linked, '| car commands:', drives.slice(0, 4).join(' '), '…');
-  const ok = r.frames > 5 && r.online && r.muse === 'linked' && /I can see the photo/.test(r.answer) && /Look left/.test(r.voice) && /Looking left/.test(r.voice) && linked === 1 && drives.some((d) => /l=-70&r=70|ws:-70,70/.test(d));
+  const cockpitOk = /AHEAD 42 cm/.test(r.dash) && /lean 0.4/.test(r.dash) && r.felt.includes('bump') && /BUMP/.test(r.warn) && r.state.includes('targets') && r.map.includes('pose') && r.menu >= 4 && /explor/i.test(r.news + " " + r.mission);
+  console.log('cockpit:', cockpitOk ? 'OK' : 'FAILED', '|', r.dash, '|', r.news);
+  const ok = cockpitOk && r.frames > 5 && r.online && r.muse === 'linked' && /I can see the photo/.test(r.answer) && /Look left/.test(r.voice) && /Looking left/.test(r.voice) && linked === 1 && drives.some((d) => /l=-70&r=70|ws:-70,70/.test(d));
   console.log(ok ? 'AVATAR E2E: OK' : 'AVATAR E2E: FAILED');
   ws.close(); car.close(); await srv.close(); process.exit(ok ? 0 : 1);
 })().catch((e) => { console.error(e); process.exit(1); });

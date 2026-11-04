@@ -97,7 +97,13 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   let wa = null;
   const logLines = [];
   let tts = null, sayChain = Promise.resolve();
+  // what the room map / photo scan last said (the Quest app shows it: Carpathron Avatar 1.2)
+  const mapNews = { text: '', at: 0, done: null };
   const emit = (event, data) => {
+    if ((event === 'robot:roommap' || event === 'robot:scan') && data) {
+      if (data.text) Object.assign(mapNews, { text: String(data.text), at: Date.now() });
+      if (data.result) Object.assign(mapNews, { text: `${data.result.ok ? '✓' : '⚠'} ${data.result.text}`, at: Date.now(), done: data.result });
+    }
     // the robot speaks with its own neural voice when it is installed: make the sound first (in order), then send
     if (event === 'robot:say' && tts && data && data.text && !data.audio && !data.plain && tts.ready()) {
       // long answers are spoken sentence by sentence: the first one plays while the next is being made
@@ -1204,6 +1210,36 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
             const b = await readJson(req);
             const ph = await mapper.look(b.direction || 'back', { source: 'quest' });
             return send(res, 200, { ok: true, path: ph.path });
+          }
+          // ---- Carpathron Avatar 1.2: the room map, the car's state and missions from the headset
+          if (url.pathname === '/avatar/state' && req.method === 'GET') {
+            const v = roommap.view();
+            return send(res, 200, { pose: robot.pose, busy: v.busy || (mapper.busy ? 'scanning with photos' : null), news: mapNews.text, newsAt: mapNews.at, sensors: (robot.info && robot.info.sensors) || null,
+              targets: [...v.places.map((p) => ({ name: p.name, kind: 'place' })), ...v.objects.map((o) => ({ name: o.name, kind: 'object' }))].filter((t, i, l) => l.findIndex((q) => q.name.toLowerCase() === t.name.toLowerCase()) === i) });
+          }
+          if (url.pathname === '/avatar/map' && req.method === 'GET') {
+            // the known part of the grid only (a crop), as bytes: -100 free … +100 solid, 0 not seen
+            const g = roommap.grid, N = g.v.length, S = Math.round(Math.sqrt(N));
+            let i0 = S, j0 = S, i1 = -1, j1 = -1;
+            for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) if (g.v[j * S + i]) { if (i < i0) i0 = i; if (i > i1) i1 = i; if (j < j0) j0 = j; if (j > j1) j1 = j; }
+            const v = roommap.view();
+            if (i1 < 0) return send(res, 200, { empty: true, res: v.res, pose: robot.pose, places: v.places, objects: v.objects, hazards: v.hazards });
+            i0 = Math.max(0, i0 - 2); j0 = Math.max(0, j0 - 2); i1 = Math.min(S - 1, i1 + 2); j1 = Math.min(S - 1, j1 + 2);
+            const w = i1 - i0 + 1, h = j1 - j0 + 1, crop = Buffer.alloc(w * h);
+            for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) crop[j * w + i] = g.v[(j + j0) * S + i + i0] & 255;
+            return send(res, 200, { res: v.res, half: S / 2, i0, j0, w, h, cells: crop.toString('base64'), pose: robot.pose, places: v.places, objects: v.objects, hazards: v.hazards, route: v.route });
+          }
+          if (url.pathname === '/avatar/mission' && req.method === 'POST') {
+            const b = await readJson(req), a = String(b.action || '');
+            if (a === 'stop') { roommap.stop('Quest'); missions.stop('Quest'); robot.stop('Quest'); return send(res, 200, { ok: true, text: 'Stopped.' }); }
+            if (roommap.busy || mapper.busy) return send(res, 200, { error: `The car is busy: ${roommap.busy || 'scanning'}. Press A or X to stop it first.` });
+            mapper.needCar();
+            const bg = (job, what) => { Object.assign(mapNews, { text: `⏳ ${what}…`, at: Date.now(), done: null }); job.then((r) => emit('robot:roommap', { result: r })).catch((e) => emit('robot:roommap', { result: { ok: false, text: e.message === 'stopped' ? 'Stopped.' : e.message } })); return send(res, 200, { ok: true, text: `${what}…` }); };
+            if (a === 'explore') return bg(roommap.explore(Number(b.rounds) || 6), 'Exploring the room');
+            if (a === 'measure') return bg(roommap.measureHere(), 'Measuring all around');
+            if (a === 'find') { if (!b.name) return send(res, 200, { error: 'What should the car find?' }); return bg(roommap.find(String(b.name)), `Finding the ${b.name}`); }
+            if (a === 'scan') { Object.assign(mapNews, { text: '⏳ Scanning with photos…', at: Date.now(), done: null }); mapper.scan({ source: 'quest' }).then((r) => Object.assign(mapNews, { text: `✓ Scan done: ${String(r.summary || '').slice(0, 140)}`, at: Date.now() })).catch((e) => emit('robot:scan', { text: `Scan failed: ${e.message}`, error: true })); return send(res, 200, { ok: true, text: 'Scanning with photos…' }); }
+            return send(res, 200, { error: 'unknown mission' });
           }
           if (url.pathname === '/avatar/scan' && req.method === 'POST') {
             mapper.scan({ source: 'quest' }).catch((e) => emit('robot:scan', { text: `Scan failed: ${e.message}`, error: true }));

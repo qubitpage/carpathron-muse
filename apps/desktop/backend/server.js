@@ -326,6 +326,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     } catch (e) { logFn(`Companion voice: ${e.message}`); }
     companionSayMsg = msg;
     emit('companion', { say: msg.text, action: 'none', mode: 'real' });
+    if (msg.audio) emit('companion_voice', { say: msg.text, audio: msg.audio });
   };
   const companion = new Companion({ agent, store, tts, robot, mapper, roommap, missions, liveVision, roomVision, roomEyes, log: logFn, emit });
   companion.onSay = companionSay;
@@ -833,6 +834,16 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     if (p === '/api/robot/stream') return robot.pipeStream(res);
     if (p === '/api/avatar/view.mjpg') return questView.add(res);
     if (p === '/api/avatar/view') return send(res, 200, { live: Date.now() - questView.at < 3000, at: questView.at, mode: questView.mode });
+    if (p.startsWith('/api/avatar/speech/') && m === 'GET') {
+      // 2.3.5: Carpathron's voice on this PC too (so a PC screen recording of the Quest view has his voice)
+      const nm = p.slice('/api/avatar/speech/'.length).replace(/[^\w.-]/g, ''), job = speechJobs.get(nm.replace(/\.wav$/, ''));
+      if (job) await Promise.race([job, new Promise((r) => setTimeout(r, 30000))]);
+      const f = tts && tts.file(nm);
+      if (!f) return send(res, 404, { error: 'gone' });
+      const b = fs.readFileSync(f);
+      res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': b.length, 'Cache-Control': 'no-store' });
+      return res.end(b);
+    }
     if (p === '/api/robot/find' && m === 'POST') {
       const b = await readJson(req);
       const { Robot } = require('./robot');
@@ -1378,8 +1389,9 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
               await speechJobs.get(ids[0]);
               if (tts.file(`${ids[0]}.wav`)) { out.audio = ids.map((id) => `/avatar/speech/${id}.wav`); if (out.quick && ids.length === 1) phraseCache.set(pk, ids[0]); }
             }
+            if (out.audio && out.audio.length) emit('companion_voice', { say: out.say, audio: out.audio });
             out.ms = { ...(out.ms || {}), stt: sttMs, total: Date.now() - t0 };
-            logFn(`Companion timing: heard ${sttMs} ms, thought ${out.ms.llm || 0} ms${out.ms.picture ? ' (with picture)' : ''}, first words ready ${out.ms.total} ms`);
+            logFn(`Companion timing: heard ${sttMs} ms, thought ${out.ms.llm || 0} ms${out.ms.picture ? ' (with picture)' : ''}, first words ready ${out.ms.total} ms, voice ${canSpeak ? cv : 'headset (no PC voice ready)'}`);
             return send(res, 200, { heard: text, ...out });
           }
           if (url.pathname.startsWith('/avatar/speech/') && req.method === 'GET') {

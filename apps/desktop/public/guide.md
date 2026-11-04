@@ -27,6 +27,13 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.5:** recording and a steadier headset. *Robots → Control* always shows the **Meta Quest view** card: what you see
+> in the headset, over Wi-Fi, with **his voice on this PC too** — record that card with any screen recorder, no cable.
+> Carpathron Avatar 1.6.3: the robot's camera window **follows your head** (Small / Medium / Large in the menu), the
+> menu no longer jumps around (the laser moves the highlight only when you move it; the stick scrolls the list), *Only
+> the robot's camera (VR)* and *My room + his camera* are at the top of the menu (or hold **Y**), the microphone is open
+> only while you hold the grip when *Talk without buttons* is off (so the Quest's own recorder gets your voice), and
+> he no longer says "I didn't catch that" at every noise.
 > **2.3.4:** Baby Carpathron **searches smartly**. Ask *"search for the dog"* or *"find my keys"*: he turns a bit less
 > than his camera sees (about 45°), **stops**, looks, and goes on only if it's not there — and drives to it as soon as he
 > sees it. No more full-speed spins and full room scans first; only when it isn't anywhere around does he move to

@@ -437,6 +437,9 @@ func _on_reply(j: Dictionary) -> void:
 	mood = str(j.get("mood", "happy"))
 	last_reply = j
 	print("CARPATHRON_TALK ", JSON.stringify({"heard": j.get("heard", ""), "say": j.get("say", ""), "action": j.get("action", ""), "audio": (j.get("audio", []) as Array).size() if typeof(j.get("audio", [])) == TYPE_ARRAY else 0, "error": j.get("error", "")}))
+	if bool(j.get("missed", false)):
+		_say("Hmm? (I didn't get that — say it again)", "curious", 2.5)
+		return
 	if j.has("error"):
 		_say(str(j.get("say", "")), "sorry", 8.0)
 		note.emit(str(j.get("say", "")))

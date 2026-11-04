@@ -93,6 +93,9 @@ var _car_eyes_at := 0
 var _noticed := {}
 var _notice_at := -100000
 var _y_down_at := 0
+var _mic_off_at := 0
+var cam_win := "medium"    # 1.6.3: the robot's camera window in your room: small / medium / large (it follows your head)
+const CAM_WIN := {"small": 0.2, "medium": 0.3, "large": 0.42}
 var car_script: Array = [] # 1.6: timed wheel commands for the real car without the PC: [[l, r, ms], ...]
 var _car_step_until := 0
 var demo_manual := false
@@ -105,6 +108,7 @@ func _ready() -> void:
 	cfg.load("user://avatar.cfg")
 	head_steer = cfg.get_value("ui", "head_steer13", false)
 	hands_free = cfg.get_value("ui", "hands_free", true)
+	cam_win = str(cfg.get_value("ui", "cam_win", "medium"))
 	tank = cfg.get_value("ui", "tank14", false)
 	view_mode = cfg.get_value("ui", "view", "vr")
 	_build_world()
@@ -555,6 +559,8 @@ func _start_room(with_robot := false) -> void:
 func _toggle_robot_view() -> void:
 	if room != null:
 		_stop_room()
+		view_mode = "vr"
+		_apply_view()
 		link.note = "Robot's eyes: only Baby Carpathron's camera (hold Y for your room again)"
 	else:
 		_start_room(true)
@@ -698,9 +704,10 @@ func _room_layout(on: bool) -> void:
 		# with the real car: its camera picture (with the outlined objects) as a small window, low on your right
 		screen.visible = room.real
 		screen_title.visible = false
-		screen.scale = Vector3(0.2, 0.2, 1)
-		screen.position = Vector3(0.55, -0.36, -1.3)
-		screen.rotation_degrees = Vector3(-12, -24, 0)
+		# 1.6.3: the window follows your head (always in view, low on your right); size from the menu
+		screen.top_level = true
+		screen.scale = Vector3(CAM_WIN.get(cam_win, 0.3), CAM_WIN.get(cam_win, 0.3), 1)
+		_cam_win_follow(true)
 		panel.visible = false
 		floor_mesh.visible = false
 		world_env.background_color = Color(0, 0, 0, 0) if room.passthrough else Color(0.16, 0.18, 0.22)
@@ -712,10 +719,32 @@ func _room_layout(on: bool) -> void:
 	else:
 		screen_title.visible = false
 		info.alpha_cut = Label3D.ALPHA_CUT_DISABLED
+		screen.top_level = false
 		screen.scale = Vector3.ONE
 		screen.position = Vector3(0, 0.05, -2.2)
 		screen.rotation_degrees = Vector3.ZERO
 		_apply_view()
+
+## the camera window: in front of you, a little low and to the right, turned to your eyes; it glides after your head
+func _cam_win_follow(snap := false) -> void:
+	if room == null or not room.real or cam == null:
+		return
+	var f := (-cam.global_basis.z).normalized()
+	var right := f.cross(Vector3.UP)
+	if right.length() < 0.05:
+		return
+	right = right.normalized()
+	var down := right.cross(f).normalized() * -1.0
+	var k: float = CAM_WIN.get(cam_win, 0.3)
+	# where you look, a little right and below the centre (so the room and the car stay visible)
+	var pos := cam.global_position + f * 1.25 + right * (0.42 - k * 0.5) + down * (0.2 + k * 0.5)
+	var t := Transform3D(cam.global_basis.orthonormalized(), pos)   # square to your view, like a screen in your visor
+	var sc := screen.scale
+	if snap:
+		screen.global_transform = t
+	else:
+		screen.global_transform = screen.global_transform.interpolate_with(t, 0.08)
+	screen.scale = sc
 
 func _stop_demo() -> void:
 	if demo == null:
@@ -795,6 +824,19 @@ func _mic_ready() -> bool:
 	add_child(mic)
 	mic.play()
 	return true
+
+## 1.6.3: with "Talk without buttons" OFF the microphone is open only while you hold the grip, so the Quest's own
+## screen recorder can record your voice (two apps cannot share the microphone on the headset)
+func _mic_gate(grip_down: bool) -> void:
+	if mic == null:
+		return
+	var want: bool = hands_free or grip_down or recording
+	if want and not mic.playing:
+		mic.play()
+	elif not want and mic.playing and Time.get_ticks_msec() > _mic_off_at:
+		mic.stop()
+	if grip_down:
+		_mic_off_at = Time.get_ticks_msec() + 1500
 
 func _ptt(down: bool) -> void:
 	if down and not recording and muse.state == "linked":
@@ -939,7 +981,7 @@ func _menu_items(p: String) -> Dictionary:
 			its.append({"id": "drive", "arg": "", "icon": "✥", "color": C_ORANGE, "label": "Driving", "sub": "Simple: a stick forward / back + sideways   ·   Tank: one stick per side", "value": "Tank" if tank else "Simple"})
 			its.append({"id": "head", "arg": "", "icon": "◎", "color": C_ORANGE, "label": "Head steering", "sub": "the robot turns where you look", "value": "On" if head_steer else "Off"})
 			its.append({"id": "hints", "arg": "", "icon": "?", "color": C_GREY, "label": "Button labels on the controllers", "sub": "shown when you look at your controllers", "value": "On" if cfg.get_value("ui", "hints", true) else "Off"})
-			its.append({"id": "handsfree", "arg": "", "icon": "🎤", "color": C_ORANGE, "label": "Talk without buttons", "sub": "Carpathron listens when you speak (otherwise hold the right grip)", "value": "On" if hands_free else "Off"})
+			its.append({"id": "handsfree", "arg": "", "icon": "🎤", "color": C_ORANGE, "label": "Talk without buttons", "sub": "On: Carpathron listens when you speak.   Off: hold the right grip — and the Quest screen recorder can record your voice", "value": "On" if hands_free else "Off"})
 			its.append({"id": "vision", "arg": "", "icon": "◈", "color": C_ORANGE, "label": "Smart vision", "sub": "Muse marks people, animals, obstacles and items on the robot's picture", "value": "On" if cfg.get_value("ui", "vision", true) else "Off"})
 			its.append({"id": "share", "arg": "", "icon": "⇪", "color": C_BLUE, "label": "Show my view on the PC", "sub": "Muse Carpathron > Robots > Live shows what you see (to record it)", "value": "On" if spectator.enabled else "Off"})
 			its.append({"id": "recenter", "arg": "", "icon": "⊙", "color": C_GREY, "label": "Bring the screen in front of me"})
@@ -950,6 +992,7 @@ func _menu_items(p: String) -> Dictionary:
 	its.append({"id": "page", "arg": "robots", "icon": "◆", "color": C_GREEN, "label": "Your robots", "sub": "choose a robot on this Wi-Fi", "value": "%d found" % link.found.size()})
 	if room != null and room.real:
 		its.append({"id": "robotvr", "arg": "", "icon": "◐", "color": C_GREEN, "label": "Only the robot's camera (VR)", "sub": "his camera all around you, no room — e.g. to drive him outside   ·   or hold Y"})
+		its.append({"id": "camwin", "arg": "", "icon": "⤢", "color": C_GREEN, "label": "His camera window", "sub": "it follows your head, low on your right", "value": {"small": "Small", "medium": "Medium", "large": "Large"}.get(cam_win, "Medium")})
 	elif room == null and demo == null and link.host != "":
 		its.append({"id": "robotroom", "arg": "", "icon": "◉", "color": C_GREEN, "label": "My room + the robot's camera (mixed reality)", "sub": "your room with his camera window; talk to Baby Carpathron   ·   or hold Y"})
 	its.append({"id": "room", "arg": "", "icon": "◉", "color": C_ORANGE, "label": "Leave my room" if room != null else "Carpathron in my room", "sub": "back to the welcome screen" if room != null else "mixed reality: he stands in your room, sees it and talks with you"})
@@ -1011,11 +1054,19 @@ func _on_menu(action: String, arg: String) -> void:
 				t._on_reply({"say": "Hi! This is my voice on your headset.", "action": "none"})
 		"none":
 			pass
+		"camwin":
+			cam_win = {"small": "medium", "medium": "large", "large": "small"}.get(cam_win, "medium")
+			cfg.set_value("ui", "cam_win", cam_win); cfg.save("user://avatar.cfg")
+			if room != null and room.real:
+				screen.scale = Vector3(CAM_WIN[cam_win], CAM_WIN[cam_win], 1)
+				_cam_win_follow(true)
+			menu3d.refresh()
 		"handsfree":
 			hands_free = not hands_free
 			cfg.set_value("ui", "hands_free", hands_free); cfg.save("user://avatar.cfg")
 			if room != null:
 				room.talk.hands_free = hands_free
+			_mic_gate(false)
 			menu3d.refresh()
 		"robot":
 			demo_manual = false
@@ -1192,6 +1243,8 @@ func _process(delta: float) -> void:
 		key_page.stop()
 	_car_script_step()
 	_car_eyes()
+	if room != null and room.real and screen.top_level:
+		_cam_win_follow()
 	robot_talk.active = room == null
 	if room != null:
 		room.talk.active = true
@@ -1310,6 +1363,7 @@ func _process(delta: float) -> void:
 					robot_talk.ptt(rg)
 			else:
 				_ptt(rg)
+			_mic_gate(rg)
 			if _pressed("RG", rg) and demo != null:
 				demo.event("talk")
 			if _pressed("LG", lg):

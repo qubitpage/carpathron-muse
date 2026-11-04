@@ -100,8 +100,14 @@ func _finish_rec() -> void:
 	if state != "listening":
 		return
 	var secs := _rec.size() / mix_rate
-	if secs < 0.45:
+	# 1.6.3: too short, or nothing louder than the room noise (a door, the car's motors): forget it quietly
+	var pk := 0.0
+	for v in _rec:
+		pk = maxf(pk, absf(v))
+	print("CARPATHRON_TALK heard %.1f s, peak %.3f, noise %.4f, ptt %s" % [secs, pk, noise, str(_ptt)])
+	if secs < 0.45 or (not _ptt and pk < noise * 4.0 + 0.01):
 		_rt_stop()
+		_rec = PackedFloat32Array()
 		set_state("idle")
 		return
 	if _rt_on:
@@ -116,7 +122,7 @@ func _finish_rec() -> void:
 				print("CARPATHRON_RT_ASR fallback (", err, "): sending the recording")
 				send_wav(_to_wav(rec))
 			elif text == "":
-				_on_reply({"heard": "", "say": "Sorry, I didn't catch that.", "action": "none", "mood": "sorry"})
+				_missed()
 			else:
 				send_text(text))
 		return
@@ -135,11 +141,25 @@ func send_wav(wav: PackedByteArray) -> void:
 			if err != "":
 				_on_reply({"heard": "", "say": "I couldn't hear you through Meta (" + err + ").", "action": "none", "mood": "sorry", "error": err})
 			elif text == "":
-				_on_reply({"heard": "", "say": "Sorry, I didn't catch that.", "action": "none", "mood": "sorry"})
+				_missed()
 			else:
 				_local_turn(text))
 		return
 	muse.companion(wav, "", mode_fn.call() if mode_fn.is_valid() else "demo", _on_reply)
+
+## nothing understood: hands-free = just go back to listening (no spoken apology every time a noise is heard);
+## push-to-talk = he says so
+func _missed() -> void:
+	_misses += 1
+	if _ptt or not hands_free or _misses >= 3:
+		_misses = 0
+		_on_reply({"heard": "", "say": "Sorry, I didn't catch that. " + ("Try holding the grip while you talk." if hands_free else "Could you say it again?"), "action": "none", "mood": "sorry"})
+	else:
+		replied.emit({"heard": "", "say": "", "action": "none", "mood": "curious", "missed": true})
+		set_state("idle")
+		_deaf_until = Time.get_ticks_msec() + 300
+
+var _misses := 0
 
 func send_text(text: String) -> void:
 	set_state("thinking")
@@ -158,6 +178,8 @@ func _local_turn(text: String) -> void:
 func _on_reply(j: Dictionary) -> void:
 	if state != "thinking":
 		return   # interrupted meanwhile
+	if str(j.get("heard", "")) != "":
+		_misses = 0
 	replied.emit(j)
 	var au = j.get("audio", [])
 	_queue = (au as Array).duplicate() if typeof(au) == TYPE_ARRAY else []
@@ -330,7 +352,8 @@ func _process(delta: float) -> void:
 	if _pre.size() > keep:
 		_pre = _pre.slice(_pre.size() - keep)
 	if state == "idle":
-		noise = lerpf(noise, minf(rms, 0.05), 0.02)
+		if rms < noise * 2.0 + 0.002:
+			noise = lerpf(noise, minf(rms, 0.02), 0.005 if rms > noise else 0.03)
 		if hands_free and Time.get_ticks_msec() > _deaf_until and rms > noise * 2.5 + 0.005:
 			_voice_ms += ms
 			if _voice_ms > 120.0:

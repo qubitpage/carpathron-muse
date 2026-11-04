@@ -45,7 +45,7 @@ const { chromium } = require(process.env.PW || 'playwright');
   await p.goto(`https://localhost:18992/?t=${srv.token}`); await p.waitForTimeout(800);
   await p.click('#nav button[data-view="robot"]'); await p.waitForTimeout(1500);
   const first = await p.evaluate(() => document.querySelector('.robot-grid').firstElementChild.id);
-  assert.strictEqual(first, 'questCard', 'on the Quest the Quest card comes first');
+  assert.strictEqual(first, 'questCtlCard', 'on the Quest the Quest card comes first');
   assert.ok(await p.isEnabled('#btnRobotEyes'), 'Robot eyes button enabled');
   await p.click('#btnRobotEyes'); await p.waitForTimeout(1500);
   assert.strictEqual(await p.evaluate(() => window.__mode), 'immersive-vr');

@@ -132,13 +132,14 @@
   async function questPoll() {
     try {
       const v = await (await fetch('/api/avatar/view', { credentials: 'same-origin' })).json();
-      const card = $('#questCard'), img = $('#questVideo');
+      const wrap = $('#questWrap'), img = $('#questVideo'), mode = $('#questMode'), wait = $('#questWait');
       if (v.live) {
         clearTimeout(questOffT); questOffT = null;
-        $('#questMode').textContent = v.mode === 'room' ? 'Carpathron in my room · live' : v.mode === 'tour' ? 'virtual tour · live' : v.mode === 'robot' ? 'robot · live' : 'live';
-        if (!questOn) { card.hidden = false; img.src = '/api/avatar/view.mjpg?v=' + Date.now(); questOn = true; }
+        mode.textContent = v.mode === 'room' ? 'Carpathron in my room · live' : v.mode === 'tour' ? 'virtual tour · live' : v.mode === 'robot' ? 'robot · live' : 'live';
+        mode.classList.add('ok');
+        if (!questOn) { wrap.hidden = false; wait.hidden = true; img.src = '/api/avatar/view.mjpg?v=' + Date.now(); questOn = true; }
       } else if (questOn && !questOffT) {
-        questOffT = setTimeout(() => { card.hidden = true; img.removeAttribute('src'); questOn = false; questOffT = null; }, 6000);
+        questOffT = setTimeout(() => { wrap.hidden = true; wait.hidden = false; mode.textContent = 'waiting for the headset'; mode.classList.remove('ok'); img.removeAttribute('src'); questOn = false; questOffT = null; }, 6000);
       }
     } catch (_) {}
   }
@@ -156,6 +157,19 @@
       el.append(c);
     }
     el.scrollTop = el.scrollHeight;
+  }
+  // 2.3.5: his voice on the PC speakers too (on by default while the Quest view is shown), so a PC screen recording
+  // of the headset view has what he says; the headset plays the same files
+  const voiceHere = $('#questVoiceHere');
+  try { if (voiceHere) voiceHere.checked = localStorage.getItem('mc.questVoice') !== '0'; } catch (_) {}
+  if (voiceHere) voiceHere.onchange = () => { try { localStorage.setItem('mc.questVoice', voiceHere.checked ? '1' : '0'); } catch (_) {} };
+  let vq = Promise.resolve();
+  function onCompanionVoice(d) {
+    if (!d || !Array.isArray(d.audio) || !questOn || !voiceHere || !voiceHere.checked) return;
+    for (const u of d.audio) {
+      const src = String(u).replace(/^\/avatar\/speech\//, '/api/avatar/speech/');
+      vq = vq.then(() => new Promise((done) => { const a = new Audio(src); a.onended = done; a.onerror = done; a.play().catch(done); }));
+    }
   }
   $('#btnQuestFull').onclick = () => { const w = $('#questVideo'); (w.requestFullscreen || w.webkitRequestFullscreen || (() => {})).call(w); };
   let ledT;
@@ -248,7 +262,7 @@
   })();
   // On the Quest browser: put the Quest card first, big buttons.
   if (/OculusBrowser|Quest/i.test(navigator.userAgent)) {
-    const qc = $('#questCard'); qc.parentNode.prepend(qc); qc.classList.add('quest-first');
+    const qc = $('#questCtlCard'); qc.parentNode.prepend(qc); qc.classList.add('quest-first');
   }
   let lastSettings = {};
   $('#btnRobotEyes').onclick = async () => {
@@ -374,6 +388,7 @@
 
   window.MCRobot = {
     onCompanion,
+    onCompanionVoice,
     onPhoto: (d) => showPhoto(d.path, d.source),
     show: async (S) => {
       visible = true;

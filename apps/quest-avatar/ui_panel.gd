@@ -33,6 +33,13 @@ var _first: Control = null
 var _focus_key := ""
 var _pending := false
 var fields := {}                # 1.6: text typed into fields (e.g. the Meta API key), by field name
+# 1.6.3: a steady menu. The laser moves the highlight only when YOU move the pointer (not when the list scrolls under a
+# still pointer), the stick wins for a moment after you use it, and a rebuild keeps the list where it was scrolled.
+var _ptr_moved_at := 0
+var _nav_at := 0
+var _scroll := 0
+var _sc: ScrollContainer = null
+var _last_sig := ""
 
 func _ready() -> void:
 	vp = SubViewport.new()
@@ -82,8 +89,11 @@ func close() -> void:
 	vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 func show_page(p: String) -> void:
+	if p != page:
+		_scroll = 0
 	page = p
 	_focus_key = ""
+	_last_sig = ""
 	refresh()
 
 func back() -> void:
@@ -112,11 +122,19 @@ func _rebuild() -> void:
 	var fo := vp.gui_get_focus_owner()
 	if fo and fo.has_meta("key"):
 		_focus_key = str(fo.get_meta("key"))
+	var d0: Dictionary = provider.call(page)
+	var sig := JSON.stringify(d0)
+	if sig == _last_sig and root.get_child_count() > 0:
+		return      # nothing changed: leave the menu alone
+	_last_sig = sig
+	if _sc != null and is_instance_valid(_sc):
+		_scroll = _sc.scroll_vertical
+	_sc = null
 	for c in root.get_children():
 		root.remove_child(c)
 		c.queue_free()
 	_first = null
-	var d: Dictionary = provider.call(page)
+	var d: Dictionary = d0
 	var bg := Panel.new()
 	bg.size = Vector2(PX, PY)
 	bg.add_theme_stylebox_override("panel", _box(C_BG, 40, 2, Color(1, 1, 1, 0.07)))
@@ -202,7 +220,7 @@ func _button(key: String, id: String, arg: String, h: int, accent := C_ACCENT) -
 	b.add_theme_stylebox_override("hover", _box(C_CARD_HI, 24, 3, Color(accent.r, accent.g, accent.b, 0.6)))
 	b.add_theme_stylebox_override("focus", _box(Color(0, 0, 0, 0), 24, 4, accent))
 	b.add_theme_stylebox_override("pressed", _box(Color(accent.r, accent.g, accent.b, 0.35), 24, 4, accent))
-	b.mouse_entered.connect(func(): b.grab_focus())
+	b.mouse_entered.connect(func(): _hover(b))
 	b.focus_entered.connect(func(): b.add_theme_stylebox_override("normal", _box(C_CARD_HI, 24, 2, Color(1, 1, 1, 0.05))))
 	b.focus_exited.connect(func(): b.add_theme_stylebox_override("normal", _box(C_CARD, 24, 2, Color(1, 1, 1, 0.05))))
 	b.pressed.connect(func(): chosen.emit(id, arg))
@@ -289,7 +307,7 @@ func _field(it: Dictionary) -> Control:
 	le.text_submitted.connect(func(t):
 		fields[name] = t
 		chosen.emit("field", name))
-	le.mouse_entered.connect(func(): le.grab_focus())
+	le.mouse_entered.connect(func(): _hover(le))
 	box.add_child(le)
 	if _first == null:
 		_first = le
@@ -309,6 +327,9 @@ func _list(items: Array, area: Rect2) -> void:
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	sc.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	root.add_child(sc)
+	_sc = sc
+	var keep := _scroll
+	sc.ready.connect(func(): sc.set_deferred("scroll_vertical", keep))
 	var vb := VBoxContainer.new()
 	vb.custom_minimum_size = Vector2(area.size.x, 0)
 	vb.add_theme_constant_override("separation", 14)
@@ -430,6 +451,8 @@ func pointer(from: Vector3, dir: Vector3) -> Variant:
 	if absf(loc.x) > w / 2 or absf(loc.y) > h / 2:
 		return null
 	var px := Vector2((loc.x / w + 0.5) * PX, (0.5 - loc.y / h) * PY)
+	if px.distance_to(_last_px) > 2.5:
+		_ptr_moved_at = Time.get_ticks_msec()
 	if px.distance_to(_last_px) > 0.5:
 		_last_px = px
 		var ev := InputEventMouseMotion.new()
@@ -446,8 +469,14 @@ func click(down: bool) -> void:
 	ev.global_position = _last_px
 	vp.push_input(ev)
 
+func _hover(c: Control) -> void:
+	var now := Time.get_ticks_msec()
+	if now - _ptr_moved_at < 120 and now - _nav_at > 450:
+		c.grab_focus()
+
 ## stick / keys: "ui_up", "ui_down", "ui_left", "ui_right", "ui_accept"
 func nav(action: String) -> void:
+	_nav_at = Time.get_ticks_msec()
 	for down in [true, false]:
 		var ev := InputEventAction.new()
 		ev.action = action

@@ -122,6 +122,7 @@
       case 'robot:status': case 'robot:motors': case 'robot:scan': case 'robot:map': window.MCRobot && window.MCRobot.onEvent(ev, d); if (ev === 'robot:map' && window.MCroommap) window.MCroommap.onMap(d); break;
       case 'robot:firmware': window.MCfirmware && window.MCfirmware(d.text); break;
       case 'companion': window.MCRobot && window.MCRobot.onCompanion && window.MCRobot.onCompanion(d); break;
+      case 'companion_voice': window.MCRobot && window.MCRobot.onCompanionVoice && window.MCRobot.onCompanionVoice(d); break;
       case 'robot:say': window.MCvoice && window.MCvoice.say(d.text, d.by, d.audio, d.more); break;
       case 'voice:download': window.MCvoice && window.MCvoice.onDownload && window.MCvoice.onDownload(d); break;
       case 'robot:roommap': window.MCroommap && window.MCroommap.onEvent(d); break;

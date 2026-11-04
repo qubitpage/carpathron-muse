@@ -205,7 +205,7 @@
           h('button', { class: 'btn tiny', disabled: v.ready ? null : '', title: 'Hear this voice', onclick: async (e) => { e.preventDefault(); const b = e.currentTarget; b.textContent = '…'; const r = await api('/api/robot/voice/sample', { body: { voice: v.id } }).catch((er) => ({ error: er.message })); b.textContent = '▶'; if (r.error) toast(r.error, true); else { play.queue.push(r.audio); playNext(); } } }, '▶'));
         (comp ? clist : list).append(row);
       }
-      voiceBox.append(list, h('h4', {}, '🥽 Carpathron companion voice (Meta Quest, natural, no robot effect)'), clist);
+      voiceBox.append(list, h('h4', {}, '🥽 Carpathron\'s voice in the Meta Quest headset (natural, no robot effect)'), h('p', { class: 'small muted' }, 'This is the voice you hear in the headset when you talk to Carpathron (in your room, or with Baby Carpathron). The list above is the robot voice on this PC. It applies from the next answer; the headset must be linked to Muse (otherwise it speaks with its own speech engine).'), clist);
       if (s.hd) voiceBox.append(h('p', { class: 'small muted' }, '✓ Kokoro HD installed: all Kokoro voices use the full-quality model.'));
       if (!ready.length) voiceBox.append(h('p', { class: 'small muted' }, 'Until a voice is downloaded, the robot uses the backup voice below.'));
     };

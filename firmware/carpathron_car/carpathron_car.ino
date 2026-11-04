@@ -45,7 +45,7 @@
   - Then set up Wi-Fi from the phone (see above). Muse Carpathron > Robot > "Find my car" finds its IP.
 */
 
-#define FW_VERSION "2.4.1"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
+#define FW_VERSION "2.4.2"   // Muse Carpathron compares this with its bundled firmware ("Update car firmware")
 #include "esp_arduino_version.h"
 #include "esp_camera.h"
 #include "esp_http_server.h"
@@ -272,7 +272,8 @@ void setLed(int v) { PWM_WRITE(LED_PIN, CH_LED, min(v, CFG(S_LEDMAX))); }
 static inline bool distOk() { return tofOk || (megaSonar && millis() - megaLast < 1000); }
 static inline bool gyroOk() { return imuOk || (megaImu && millis() - megaLast < 1000); }
 // 2.4: the Mega is the only distance sensor and its lines stopped (frozen, loose wire): never drive forward blind
-static inline bool megaLinkLost() { return megaOk && !tofOk && !irOk && megaLines > 0 && millis() - megaLast > 400; }
+// 2.4.2: 700 ms (was 400): while the camera streams video the Wi-Fi task can delay reading for a moment
+static inline bool megaLinkLost() { return megaOk && !tofOk && !irOk && megaLines > 0 && millis() - megaLast > 700; }
 
 void drive(int l, int r) {
   l = constrain(l, -100, 100);
@@ -382,7 +383,7 @@ bool initSensors() {
     Serial.flush(); delay(20); Serial.end();
     pinMode(3, INPUT); int edges = 0, last = digitalRead(3); unsigned long t0 = millis();
     while (millis() - t0 < 300) { int v = digitalRead(3); if (v != last) { edges++; last = v; } }
-    Serial.begin(115200);
+    { Serial.setRxBufferSize(1024); Serial.begin(115200); }
     if (edges > 20) { megaOk = true; Serial.println("[mega] something is sending on RXD: treating it as the Mega sensor hub."); return true; }
   }
   Serial.printf("Looking for sensors on GPIO %d / %d (VL53L0X distance, MPU-6050 gyro)...%s\n", I2C_SDA, I2C_SCL, serialPins() ? " the Serial Monitor pauses for a moment." : "");
@@ -392,7 +393,7 @@ bool initSensors() {
   Wire.setTimeOut(20);
   bool tofHere = i2cPresent(0x29), imuHere = i2cPresent(MPU_ADDR);
   if (!tofHere && !imuHere) {
-    Wire.end(); if (serialPins()) Serial.begin(115200);
+    Wire.end(); if (serialPins()) { Serial.setRxBufferSize(1024); Serial.begin(115200); }
     if (megaListen(3000)) return true;
     Serial.println("No sensors found: Serial Monitor stays on (a Mega sensor hub is still picked up when it starts sending).");
     return false;
@@ -908,7 +909,7 @@ static esp_err_t pin_handler(httpd_req_t* req) {
     pinMode(g, OUTPUT);
     for (int i = 0; i < 12; i++) { digitalWrite(g, i % 2 ? LOW : HIGH); delay(100); }
     pinMode(g, INPUT);
-    if (g == 1 || g == 3) Serial.begin(115200);
+    if (g == 1 || g == 3) { Serial.setRxBufferSize(1024); Serial.begin(115200); }
   } else { pinMode(g, INPUT_PULLUP); delay(2); }
   int level = digitalRead(g);
   char b[96]; snprintf(b, sizeof(b), "{\"ok\":true,\"gpio\":%d,\"mode\":\"%s\",\"level\":%d}", g, mode, level);
@@ -1366,7 +1367,7 @@ void handleSerial() {
 // ---------------------------------------------------------------- main
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);  // motors can dip the battery; don't reset on brownout
-  Serial.begin(115200);
+  { Serial.setRxBufferSize(1024); Serial.begin(115200); }
   Serial.println("\nBaby Carpathron starting… firmware " FW_VERSION);
   Serial.printf("Reset reason: %d (1=power on, 3=software, 4/5/6=crash/watchdog, 9=low voltage/brownout)\n", (int)esp_reset_reason());
   loadSettings();
@@ -1387,7 +1388,7 @@ void loop() {
   if (megaOk && !sensorTaskOn) { xTaskCreatePinnedToCore(sensorTask, "sensors", 4096, NULL, 3, NULL, 0); sensorTaskOn = true; }
   for (int g = 0; g < 40; g++) if (pinReleaseAt[g] && (long)(millis() - pinReleaseAt[g]) > 0) {
     pinMode(g, INPUT); pinReleaseAt[g] = 0;
-    if ((g == 1 || g == 3) && !wireOn && !irOk && !megaOk) Serial.begin(115200);  // give RX/TX back to the USB serial monitor
+    if ((g == 1 || g == 3) && !wireOn && !irOk && !megaOk) { Serial.setRxBufferSize(1024); Serial.begin(115200); }  // give RX/TX back to the USB serial monitor
   }
   if ((curL || curR) && millis() - lastDrive > FAILSAFE_MS) {
     drive(0, 0);

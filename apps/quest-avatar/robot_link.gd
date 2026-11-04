@@ -25,6 +25,7 @@ var sensors: Dictionary = {}
 var _counts := {}
 var _was_blocked := false
 var _was_lost := false
+var _lost_since := 0   # 1.3: a short gap in the Mega lines is normal while video streams; warn only after 2 s
 
 var _tex: ImageTexture
 # video (MJPEG over a raw HTTPClient)
@@ -158,9 +159,16 @@ func _on_status(result: int, code: int, _h: PackedStringArray, body: PackedByteA
 					felt.emit("blocked")
 				_was_blocked = bl
 				var lost := bool(s.get("linkLost", false))
-				if lost and not _was_lost:
+				var now := Time.get_ticks_msec()
+				if not lost:
+					_lost_since = 0
+				elif _lost_since == 0:
+					_lost_since = now
+				var long_lost := lost and now - _lost_since >= 2000
+				sensors["linkLost"] = long_lost
+				if long_lost and not _was_lost:
 					felt.emit("blind")
-				_was_lost = lost
+				_was_lost = long_lost
 	if was != online:
 		note = ("Connected to " + robot_name) if online else ("Robot not answering at " + host)
 	changed.emit()
@@ -190,7 +198,13 @@ func _on_scan(result: int, code: int, _h: PackedStringArray, body: PackedByteArr
 	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
 		var j = JSON.parse_string(body.get_string_from_utf8())
 		if typeof(j) == TYPE_DICTIONARY and j.has("name"):
-			found.append({"host": h, "name": str(j["name"])})
+			# 1.3: the same robot answers as carpathron.local and as its IP: list it once, by its IP
+			var ip := str(j.get("ip", ""))
+			var key := ip if ip != "" and not h.contains(":") else h
+			for f in found:
+				if f["key"] == key:
+					return
+			found.append({"host": key, "name": str(j["name"]), "key": key, "fw": str(j.get("fw", ""))})
 			changed.emit()
 
 func _scan_poll() -> void:

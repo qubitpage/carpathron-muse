@@ -4,10 +4,10 @@ extends Node3D
 ##   warning in front of you     : BUMP / STEP / DROP / BLOCKED / SENSOR LINK LOST for 2 s (+ the controllers buzz)
 ##   mini-map on the left        : the room map Muse Carpathron learned (free floor, walls and furniture), the robot,
 ##                                 objects the camera named, places, steps / drops / bumps, the planned way
-##   missions on the right       : click the left stick — explore, scan with photos, measure, find <object>, stop
+##   help card on the right      : 1.3 — missions, robots, training room and exit are in the MENU (Menu button)
 ## Everything here comes from the car's /status (sensors) and Muse Carpathron on the PC (map + missions).
 
-const MAP_SIZE := 1.15          # metres: the longer side of the mini-map in the headset
+const MAP_SIZE := 1.0           # metres: the longer side of the mini-map in the headset
 const ITEMS_BASE := [
 	["explore", "", "Explore the room by itself"],
 	["scan", "", "Scan with photos (names the objects)"],
@@ -35,6 +35,8 @@ var _bytes := PackedByteArray()
 var _base: Image = null          # the room without the robot (rebuilt when a new map arrives)
 var _tex: ImageTexture = null
 var _demo := false
+var _vr := false
+var dash_root: Node3D   # dashboard + distance bar + warning: shrunk towards you in the VR view
 
 func _ready() -> void:
 	dash = _label(Vector3(-1.6, 1.38, -2.15), 0.0024, 40, Color(0.9, 0.93, 0.97))
@@ -51,6 +53,10 @@ func _ready() -> void:
 	warn.outline_size = 28
 	warn.outline_modulate = Color(0.08, 0.02, 0.02)
 	warn.visible = false
+	dash_root = Node3D.new()
+	add_child(dash_root)
+	for n in [dash, bar_bg, bar, warn]:
+		n.reparent(dash_root, false)
 	# mini-map (left)
 	map_quad = MeshInstance3D.new()
 	var q := QuadMesh.new(); q.size = Vector2(MAP_SIZE, MAP_SIZE)
@@ -60,25 +66,26 @@ func _ready() -> void:
 	map_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	map_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	map_quad.material_override = map_mat
-	map_quad.position = Vector3(-2.15, 0.15, -1.7)
-	map_quad.rotation_degrees = Vector3(0, 34, 0)
+	map_quad.position = Vector3(-1.55, -0.05, -1.35)   # 1.3: closer and turned to you, readable
+	map_quad.rotation_degrees = Vector3(0, 48, 0)
 	map_quad.layers = 2
 	add_child(map_quad)
 	map_labels = Node3D.new()
 	map_quad.add_child(map_labels)
-	map_title = _label(Vector3(0, MAP_SIZE / 2 + 0.07, 0.01), 0.0016, 40, Color(1.0, 0.7, 0.28))
+	map_title = _label(Vector3(0, MAP_SIZE / 2 + 0.07, 0.01), 0.0021, 44, Color(1.0, 0.7, 0.28))
 	map_title.text = "ROOM MAP"
 	remove_child(map_title); map_quad.add_child(map_title)
-	news = _label(Vector3(0, -MAP_SIZE / 2 - 0.12, 0.01), 0.0015, 34, Color(0.85, 0.88, 0.92))
-	news.width = 760
+	news = _label(Vector3(0, -MAP_SIZE / 2 - 0.16, 0.01), 0.002, 38, Color(0.88, 0.9, 0.94))
+	news.width = 560
+	news.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	news.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	remove_child(news); map_quad.add_child(news)
 	# missions (right)
-	menu = _label(Vector3(2.0, 0.15, -1.75), 0.0016, 40, Color(0.92, 0.93, 0.95))
-	menu.rotation_degrees = Vector3(0, -34, 0)
+	menu = _label(Vector3(1.55, -0.05, -1.35), 0.0021, 40, Color(0.92, 0.93, 0.95))   # 1.3: the help card
+	menu.rotation_degrees = Vector3(0, -48, 0)
 	menu.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	menu.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	menu.width = 900
+	menu.width = 600
 	menu.outline_size = 12
 	menu.outline_modulate = Color(0.04, 0.05, 0.07, 0.95)
 	_build_items({})
@@ -107,6 +114,21 @@ func _quad(size: Vector2, col: Color) -> MeshInstance3D:
 	m.material_override = mat
 	m.layers = 2
 	return m
+
+## 1.3 VR view: the picture wraps around you (2 m away), so the dashboard comes closer (same look, 62 %)
+## and the map / help cards step aside, just outside the picture
+func set_vr(on: bool) -> void:
+	_vr = on
+	dash_root.scale = Vector3.ONE * (0.62 if on else 1.0)
+	# the room map (left) and the help card (right) sit just outside the VR picture: turn your head to read them
+	var ang := deg_to_rad(64.0 if on else 48.0)
+	var d := 1.45 if on else 1.9
+	map_quad.position = Vector3(-sin(ang) * d, -0.05, -cos(ang) * d)
+	map_quad.rotation.y = ang
+	menu.position = Vector3(sin(ang) * d, -0.05, -cos(ang) * d)
+	menu.rotation.y = -ang
+	map_quad.visible = not _demo
+	menu.visible = not _demo
 
 ## the demo robot has no sensors / map: hide the cockpit
 func set_demo(on: bool) -> void:
@@ -255,7 +277,7 @@ func _rebuild_base() -> void:
 	var sy := MAP_SIZE if h >= w else MAP_SIZE * h / w
 	(map_quad.mesh as QuadMesh).size = Vector2(sx, sy)
 	map_title.position.y = sy / 2 + 0.07
-	news.position.y = -sy / 2 - 0.12
+	news.position.y = -sy / 2 - 0.06
 	# names of the objects and places (the first 12)
 	var n := 0
 	for o in _map.get("objects", []) + _map.get("places", []):
@@ -265,8 +287,8 @@ func _rebuild_base() -> void:
 		var px := _cell_px(float(o["x"]), float(o["y"]))
 		var l := Label3D.new()
 		l.text = str(o["name"])
-		l.pixel_size = 0.0015
-		l.font_size = 32
+		l.pixel_size = 0.0019
+		l.font_size = 34
 		l.no_depth_test = true
 		l.render_priority = 2
 		l.outline_size = 12
@@ -330,10 +352,12 @@ func move(d: int) -> void:
 func selected() -> Array:
 	return items[sel] if sel < items.size() else ["stop", "", ""]
 
+const HELP := "CONTROLS\nMenu (left): missions, robots,\n   training room, exit\nSticks: drive  ·  trigger: turbo\nA / X: STOP  ·  B: photo\nLeft stick click: missions\nRight grip: talk to Muse\nLeft grip: what do you see?"
+
 func _draw_menu() -> void:
 	if not menu_open:
-		menu.text = "MISSIONS\nclick the LEFT STICK to open"
-		menu.modulate = Color(0.7, 0.74, 0.8)
+		menu.text = HELP
+		menu.modulate = Color(0.85, 0.88, 0.93)
 		return
 	menu.modulate = Color(0.95, 0.96, 0.98)
 	var lines := ["MISSIONS", "left stick: choose · trigger: run · B: close · A/X: STOP", ""]

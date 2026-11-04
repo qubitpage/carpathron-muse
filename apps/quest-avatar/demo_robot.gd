@@ -25,7 +25,7 @@ const STEPS := [
 	"Click the RIGHT stick: ARCADE mode.\nThen drive with the right stick alone: up = forward, sideways = turn.",
 	"Now drive me through the cones to the orange crate.\nFollow the orange marker! (Click the right stick again for tank mode.)",
 	"Voice: hold the RIGHT grip and speak, e.g. \"look left\", \"scan the room\".\nLEFT grip asks \"what do you see?\". Squeeze a grip to try it.\n(Voice needs the Carpathron PC app on your Wi-Fi.)",
-	"Tour complete! A real Carpathron robot drives exactly the same way.\nMenu = search for your robot   ·   Left stick click = replay the tour",
+	"Tour complete! A real Carpathron robot drives exactly the same way.\nMenu = choose your real robot or leave the training room   ·   Left stick click = replay the tour",
 ]
 const LAST := 10
 

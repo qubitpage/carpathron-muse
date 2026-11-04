@@ -30,6 +30,8 @@ const QUICK = [
   [/^(wave|say hi|say hello|wave at me)$/, () => ({ say: 'Hi there!', action: 'wave', mood: 'happy' })],
   [/^(spin|turn around|spin around|do a spin)$/, () => ({ say: 'Wheee!', action: 'spin', mood: 'excited' })],
   [/^(?:scan|look around|scan around|look at)(?: all| the| all the| my)*(?: room| place| house)?$/, () => ({ say: 'Okay, let me have a good look around!', action: 'scan', mood: 'curious' })],
+  // "search for dogs", "find the dog", "look for my keys": the car looks around step by step and goes to it
+  [/^(?:search(?: for)?|look for|find|go find|can you find|where is|where are|where's)(?: the| a| an| my| some| any)? ([a-z][a-z ]{1,24})$/, (m) => { const w = m[1].replace(/(s|x|ch|sh)es$/, '$1').replace(/([^su])s$/, '$1'); return { say: `Okay, let me look for the ${w}!`, action: 'goto', target: w, mood: 'curious' }; }],
   [/^(?:go|walk|move|run|come) (?:over )?there$/, () => ({ say: 'Okay, over there!', action: 'goto', target: 'there', mood: 'happy' })],
   [/^(?:go|walk|drive|move|run) (?:to|over to|near) (?:the |that |this |my )?([a-z][a-z ]{1,24})$/, (m) => ({ say: `On my way to the ${m[1]}!`, action: 'goto', target: m[1], mood: 'happy' })],
 ];
@@ -141,7 +143,7 @@ class Companion {
         'Talk like a warm, witty, curious human friend, not an assistant: 1-3 short spoken sentences, natural and casual (contractions, a little humour, real reactions), no lists, no markdown, no emoji. Never say you are an AI model. Use the room: notice and mention what you see when it fits. Remember the conversation and refer back to it. Now and then ask the user a short question back, so it feels like a real conversation. Reply in the user\'s language.',
         'When the user gives you a task, do it with ONE action. Reply with JSON only:',
         '{"say":"what you say aloud","action":"none|come|follow|stay|goto|forward|back|left|right|spin|dance|wave|look|outline|stop|explore|scan|photo","target":"an object (for goto / outline)","amount":metres or degrees,"mood":"happy|curious|thinking|excited|calm|sorry|proud"}',
-        'Actions: none = just talk; come = come to the user; follow = follow the user; stay = stay where you are; goto = go to an object (target); forward/back = move amount metres; left/right = turn amount degrees; spin = turn around; dance; wave; look = tell what you see; outline = point out an object precisely (target); stop; explore = drive around and map the room; scan = photo scan of the room; photo = take a picture.',
+        'Actions: none = just talk; come = come to the user; follow = follow the user; stay = stay where you are; goto = go to, look for, search for or find something (target, e.g. dog; never spin or scan to look for something); forward/back = move amount metres; left/right = turn amount degrees; spin = turn around; dance; wave; look = tell what you see; outline = point out an object precisely (target); stop; explore = drive around and map the room; scan = photo scan of the room; photo = take a picture.',
       ].filter(Boolean).join('\n');
       const user = pic ? [{ type: 'text', text: String(text).slice(0, 600) }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${pic.jpg.toString('base64')}` } }] : String(text).slice(0, 600);
       // fast thinking, and the first sentence goes to the voice while the rest is still being written

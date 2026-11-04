@@ -244,6 +244,25 @@ class RoomMap {
     return this.task(`finding the ${name}`, async () => {
       let it = match();
       const tried = [];
+      // 2.3.4: not on the map → look for it with the camera RIGHT HERE, one step at a time (turn ~45°, stop, look),
+      // and go to it as soon as it is in the picture. No full photo scans and laser spins first. Only when it is not
+      // anywhere around, drive to an unknown part of the room and look again.
+      if (!it && vision && this.mapper.goto && this.mapper.vision) {
+        for (let n = 0; n < rounds; n++) {
+          if (this.stopFlag) return { ok: false, text: 'Stopped.' };
+          this.say(n ? `Looking for the ${name} here…` : `Looking around for the ${name}, a bit at a time…`);
+          const ctl = new AbortController(); const iv = setInterval(() => { if (this.stopFlag) ctl.abort(); }, 200);
+          const g = await this.mapper.goto(name, { stopAt: 0.35, maxHops: 6, source: 'map', onStatus: (t) => this.say(t), signal: ctl.signal }).catch((e) => ({ found: false, text: e.message })).finally(() => clearInterval(iv));
+          if (this.stopFlag) return { ok: false, text: 'Stopped.' };
+          if (g && g.found) return { ok: !!g.arrived, text: g.arrived ? `Found the ${name}: it is right in front of the car.` : `Found the ${name}${g.distance_m != null ? ` (about ${Math.round(g.distance_m * 100)} cm ahead)` : ''}.`, log: g.log };
+          const p = this.robot.pose, f = this.grid.frontier(p.x, p.y, tried);
+          if (!f) break;
+          tried.push(f);
+          this.say(`No ${name} around here — going to look in another part of the room (${f.d.toFixed(1)} m away)…`);
+          await this.driveTo(f.x, f.y, 'the unknown part', 2).catch((e) => this.say(e.message));
+        }
+        return { ok: false, text: `I looked all around but couldn't find the ${name}.` };
+      }
       for (let n = 0; !it && n < rounds; n++) {
         if (this.stopFlag) return { ok: false, text: 'Stopped.' };
         if (!this.mapper.scan) break;

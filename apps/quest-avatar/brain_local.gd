@@ -188,6 +188,12 @@ static func quick(text: String) -> Dictionary:
 	for a in table:
 		if t in table[a]:
 			return {"say": says[a][0], "mood": says[a][1], "action": "goto" if a == "there" else a, "target": "there" if a == "there" else "", "amount": 0, "quick": true}
+	# "search for dogs", "find the dog": the car looks around step by step and goes to it
+	var sx := RegEx.create_from_string("^(?:search(?: for)?|look for|find|go find|can you find|where is|where are|where's)(?: the| a| an| my| some| any)? ([a-z][a-z ]{1,24})$")
+	var sm := sx.search(t)
+	if sm:
+		var w := RegEx.create_from_string("([^su])s$").sub(RegEx.create_from_string("(s|x|ch|sh)es$").sub(sm.get_string(1), "$1"), "$1")
+		return {"say": "Okay, let me look for the %s!" % w, "mood": "curious", "action": "goto", "target": w, "amount": 0, "quick": true}
 	var rx := RegEx.create_from_string("^(?:go|walk|drive|move|run) (?:to|over to|near) (?:the |that |this |my )?([a-z][a-z ]{1,24})$")
 	var m := rx.search(t)
 	if m:
@@ -230,7 +236,7 @@ func turn(text: String, ctx: Dictionary, done: Callable) -> void:
 		"Talk like a warm, witty, curious human friend, not an assistant: 1-3 short spoken sentences, natural and casual (contractions, a little humour, real reactions), no lists, no markdown, no emoji. Never say you are an AI model. Use the room: notice and mention what you see when it fits. Remember the conversation and refer back to it. Now and then ask the user a short question back, so it feels like a real conversation. Reply in the user's language.",
 		"When the user gives you a task, do it with ONE action. Reply with JSON only:",
 		"{\"say\":\"what you say aloud\",\"action\":\"none|come|follow|stay|goto|forward|back|left|right|spin|dance|wave|look|outline|stop|explore|scan|photo\",\"target\":\"an object (for goto / outline)\",\"amount\":metres or degrees,\"mood\":\"happy|curious|thinking|excited|calm|sorry|proud\"}",
-		"Actions: none = just talk; come = come to the user; follow = follow the user; stay = stay where you are; goto = go to an object (target); forward/back = move amount metres; left/right = turn amount degrees; spin = turn around; dance; wave; look = tell what you see; outline = point out an object (target); stop.",
+		"Actions: none = just talk; come = come to the user; follow = follow the user; stay = stay where you are; goto = go to, look for, search for or find something (target, e.g. dog; never spin or scan to look for something); forward/back = move amount metres; left/right = turn amount degrees; spin = turn around; dance; wave; look = tell what you see; outline = point out an object (target); stop.",
 	]
 	var sys := "\n".join(PackedStringArray(lines.filter(func(x): return str(x) != "")))
 	var user: Variant = text.substr(0, 600)

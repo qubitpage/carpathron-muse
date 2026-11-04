@@ -27,6 +27,10 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.4:** Baby Carpathron **searches smartly**. Ask *"search for the dog"* or *"find my keys"*: he turns a bit less
+> than his camera sees (about 45°), **stops**, looks, and goes on only if it's not there — and drives to it as soon as he
+> sees it. No more full-speed spins and full room scans first; only when it isn't anywhere around does he move to
+> another part of the room and look again. Needs Carpathron Avatar 1.6.2 on the headset.
 > **2.3.3:** Carpathron answers much sooner. Your words now go to Meta's realtime transcriber **while you talk**
 > (through this PC, which adds your key), so the text is ready a moment after you stop instead of 2–3 s later. If the
 > model is slow to start answering, the same question is asked again in parallel and the first answer wins. His voice

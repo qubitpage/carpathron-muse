@@ -69,10 +69,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const d = calls.find((c) => c.startsWith('drive')); const [x, y] = d.split(' ')[1].split(',').map(Number);
     assert.ok(Math.abs(Math.hypot(0.9 - x, 0.2 - y) - 0.4) < 0.03, `stops ~40 cm before: ${d}`);
     assert.ok(calls.some((c) => /^camera chair 0.35/.test(c)) && !calls.includes('scan'), calls.join(' | '));
-    // not on the map: scans first, explores, gives up with the list of what it knows
+    // 2.3.4: not on the map: the camera looks around step by step right away (no full photo scan / laser spins first)
     calls.length = 0; rm.objects = []; rm.grid = new Grid();
+    const r3 = await rm.find('dog', { rounds: 2 });
+    assert.ok(r3.ok && /Found the dog/.test(r3.text) && calls[0] === 'camera dog 0.35' && !calls.includes('scan'), JSON.stringify(r3) + calls.join('|'));
+    // nowhere around: gives up without spinning through photo scans
+    calls.length = 0;
+    mapper.goto = async (t, o) => { calls.push(`camera ${t} ${o.stopAt}`); return { found: false }; };
     const r2 = await rm.find('shoe', { rounds: 2 });
-    assert.ok(!r2.ok && /Could not find the shoe/.test(r2.text) && calls.filter((c) => c === 'scan').length >= 1, JSON.stringify(r2) + calls.join('|'));
+    assert.ok(!r2.ok && /couldn't find the shoe/.test(r2.text) && !calls.includes('scan') && calls.filter((c) => c.startsWith('camera shoe')).length >= 1, JSON.stringify(r2) + calls.join('|'));
     rm.close();
   });
   await step('2.2.2: map driving never goes forward blind and stops after a bump', async () => {

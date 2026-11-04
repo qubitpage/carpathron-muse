@@ -76,20 +76,23 @@ class Mapper {
   }
 
   // Spin on the spot. + = right (clockwise seen from above), - = left.
-  async turn(deg, source = 'ai') {
+  // look = a search step: a little slower, and a longer pause so the next photo is sharp (not a blurred spin)
+  async turn(deg, source = 'ai', { look = false } = {}) {
     deg = Math.max(-360, Math.min(360, Number(deg) || 0));
     if (!deg) return { turned: 0 };
+    const settle = look ? 450 : 250;
     // with the gyro on the car: exact turn done by the car itself
     if (this.robot.gyroTurn) {
-      const g = await this.robot.gyroTurn(deg, this.cfg().turnSpeed).catch(() => null);
-      if (g) { if (g.result === 'cancelled') throw new Error('Turn interrupted (STOP or manual control)'); await sleep(250); return { turned: deg, gyro: true, result: g.result }; }
+      const sp = look ? Math.min(this.cfg().turnSpeed, 58) : this.cfg().turnSpeed;
+      const g = await this.robot.gyroTurn(deg, sp).catch(() => null);
+      if (g) { if (g.result === 'cancelled') throw new Error('Turn interrupted (STOP or manual control)'); await sleep(settle); return { turned: deg, gyro: true, result: g.result }; }
     }
     const { turnMs360, turnSpeed } = this.cfg();
     const ms = Math.round((Math.abs(deg) / 360) * turnMs360);
     const s = deg > 0 ? [turnSpeed, -turnSpeed] : [-turnSpeed, turnSpeed];
     const r = await this.robot.runPlan([{ type: 'drive', left: s[0], right: s[1], ms }, { type: 'stop' }], source);
     if (!r.completed) throw new Error(`Turn interrupted: ${r.reason || 'stopped'}`);
-    await sleep(350); // let the car settle so the photo is sharp
+    await sleep(look ? 450 : 350); // let the car settle so the photo is sharp
     return { turned: deg, ms };
   }
 
@@ -343,9 +346,14 @@ class Mapper {
     };
     const cm = (v) => (v == null || !Number.isFinite(v) ? '?' : `${Math.round(v * 100)} cm`);
     let heading = 0; // degrees turned from the start, + = right
-    const turn = async (d) => { d = Math.round(d); if (Math.abs(d) < 4) return; await this.turn(d, source); heading += d; };
+    const turn = async (d, look = false) => { d = Math.round(d); if (Math.abs(d) < 4) return; await this.turn(d, source, { look }); heading += d; };
+    // search steps a bit smaller than what the camera sees (60° wide), so each view overlaps the last one and
+    // nothing at the edge of the picture is missed: 45° = 8 looks for a full circle
+    const fov = geometry.cfgOf(this.getSettings().robot).hfovDeg || 60;
+    const step = 360 / Math.ceil(360 / Math.max(30, fov - 15));
     try {
-      // 1) search: ahead, then the heading from the last room map, then around in 60° steps
+      // 1) search: ahead, then the heading from the last room map, then around: turn one step, STOP, look, … — it
+      // stops turning as soon as the target is in the picture (never spins blindly)
       let ph = await snap(), seen = await where(ph);
       say(`Ahead: ${seen.visible ? `found ${target} (${seen.what})` : `no ${target}`}`);
       if (!seen.visible) {
@@ -358,8 +366,8 @@ class Mapper {
           await turn(d); ph = await snap(); seen = await where(ph);
         }
       }
-      for (let i = 0; !seen.visible && i < 5 && !stop(); i++) {
-        await turn(60); ph = await snap(); seen = await where(ph);
+      for (let i = 0; !seen.visible && i < Math.round(360 / step) - 1 && !stop(); i++) {
+        await turn(step, true); ph = await snap(); seen = await where(ph);
         say(`Looked at ${((heading % 360) + 360) % 360}°: ${seen.visible ? `found ${target}` : 'not here'}`);
       }
       if (!seen.visible) {

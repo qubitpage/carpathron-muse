@@ -104,7 +104,18 @@ func _finish_rec() -> void:
 	var pk := 0.0
 	for v in _rec:
 		pk = maxf(pk, absf(v))
-	print("CARPATHRON_TALK heard %.1f s, peak %.3f, noise %.4f, ptt %s" % [secs, pk, noise, str(_ptt)])
+	var mean := 0.0
+	for v in _rec:
+		mean += v
+	mean /= maxf(1.0, _rec.size())
+	print("CARPATHRON_TALK heard %.1f s, peak %.3f, dc %.4f, noise %.4f, ptt %s" % [secs, pk, mean, noise, str(_ptt)])
+	if secs >= 0.45:
+		DirAccess.make_dir_recursive_absolute("user://heard")
+		_heard_n = (_heard_n + 1) % 6
+		var f := FileAccess.open("user://heard/h%d.wav" % _heard_n, FileAccess.WRITE)
+		if f:
+			f.store_buffer(_to_wav(_rec))
+			f.close()
 	if secs < 0.45:
 		_rt_stop()
 		_rec = PackedFloat32Array()
@@ -158,6 +169,8 @@ func _missed() -> void:
 		_deaf_until = Time.get_ticks_msec() + 300
 
 var _misses := 0
+var _dc := 0.0
+var _heard_n := 0
 
 func send_text(text: String) -> void:
 	set_state("thinking")
@@ -322,10 +335,15 @@ func _process(delta: float) -> void:
 	var e := 0.0
 	var mono := PackedFloat32Array()
 	mono.resize(buf.size())
+	var sum := 0.0
 	for i in buf.size():
 		var m := (buf[i].x + buf[i].y) * 0.5
 		mono[i] = m
-		e += m * m
+		sum += m
+	_dc = lerpf(_dc, sum / maxi(1, buf.size()), 0.05)
+	for i in buf.size():
+		var d := mono[i] - _dc
+		e += d * d
 	var rms := sqrt(e / maxi(1, buf.size()))
 	peak = maxf(peak * 0.995, rms)
 	var ms := buf.size() / mix_rate * 1000.0
@@ -379,9 +397,15 @@ func test_utterance(secs: float) -> void:
 func _to_wav(x: PackedFloat32Array) -> PackedByteArray:
 	var ratio := mix_rate / RATE_OUT
 	var n := int(x.size() / ratio)
+	# 1.6.7: the headset microphone can carry a constant offset (a "DC" level): it was counted as loud room noise
+	# (noise 0.035 in the log) and sent along — remove it first
+	var mean := 0.0
+	for v in x:
+		mean += v
+	mean /= maxf(1.0, x.size())
 	var pk := 0.0
 	for v in x:
-		pk = maxf(pk, absf(v))
+		pk = maxf(pk, absf(v - mean))
 	var g := clampf(0.9 / maxf(pk, 0.0001), 1.0, 8.0)   # quiet microphones are raised (like Muse does)
 	var b := PackedByteArray()
 	b.resize(44 + n * 2)
@@ -395,6 +419,6 @@ func _to_wav(x: PackedFloat32Array) -> PackedByteArray:
 		var s := 0.0
 		for j in range(a, z):
 			s += x[j]
-		s /= maxi(1, z - a)
+		s = s / maxi(1, z - a) - mean
 		b.encode_s16(44 + i * 2, int(clampf(s * g, -1.0, 1.0) * 32767.0))
 	return b

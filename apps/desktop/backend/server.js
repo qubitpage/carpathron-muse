@@ -1382,6 +1382,13 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
               const raw = await readBody(req, 12 * 1024 * 1024);
               const s = store.settings;
               text = await voice.transcribe(raw, { apiKey: s.apiKey, apiBase: s.apiBase, mime: 'audio/wav' });
+              // 2.3.9: keep the last 10 things the headset sent (and what was understood) to check the microphone
+              try {
+                const hd = path.join(s.workspace, 'recordings', 'heard'); fs.mkdirSync(hd, { recursive: true });
+                const nm = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+                fs.writeFileSync(path.join(hd, `${nm}.wav`), raw); fs.writeFileSync(path.join(hd, `${nm}.txt`), String(text || '(nothing understood)'));
+                const all = fs.readdirSync(hd).sort(); for (const f of all.slice(0, Math.max(0, all.length - 20))) fs.unlinkSync(path.join(hd, f));
+              } catch {}
               // 2.3.8: nothing understood = silent (the headset decides whether to say so): a spoken "Sorry, I didn't
               // catch that" was heard again by the headset microphone and made an endless loop
               if (!text) { logFn('Companion: the transcription was empty (no words in the recording)'); return send(res, 200, { heard: '', say: '', action: 'none', mood: 'curious', missed: true }); }

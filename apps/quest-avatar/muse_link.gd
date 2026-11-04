@@ -33,6 +33,11 @@ var _view_req: HTTPRequest
 var _next_state := 0
 var _next_map := 0
 var want_vision := false   # 1.4: ask Muse to look at the live picture (people, animals, obstacles, items)
+var vision_src := "car"    # 1.5: "car" = the robot's camera, "room" = the headset camera (mixed reality)
+var _eyes_req: HTTPRequest
+var _comp_req: HTTPRequest
+var _audio_req: HTTPRequest
+var companion_busy := false
 var _tls := TLSOptions.client_unsafe()   # the PC app uses its own self-signed certificate on the LAN
 
 func setup(cfg: ConfigFile) -> void:
@@ -58,6 +63,9 @@ func setup(cfg: ConfigFile) -> void:
 				map_changed.emit())
 	_mission_req = _mk(8.0)
 	_view_req = _mk(2.0)
+	_eyes_req = _mk(3.0)
+	_comp_req = _mk(90.0)
+	_audio_req = _mk(40.0)
 	for i in 16:
 		var s := _mk(0.8)
 		s.set_meta("host", "")
@@ -235,6 +243,52 @@ func post_view(jpg: PackedByteArray, mode: String) -> void:
 		return
 	_view_req.request_raw(_base() + "/avatar/view?mode=" + mode.uri_encode(), ["x-avatar-token: " + token, "Content-Type: image/jpeg"], HTTPClient.METHOD_POST, jpg)
 
+## 1.5: the headset camera picture (mixed reality) — Muse names the room's objects; id = which head pose it was
+func post_eyes(jpg: PackedByteArray, id: int) -> bool:
+	if state != "linked" or jpg.is_empty() or _eyes_req.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		return false
+	_eyes_req.request_raw(_base() + "/avatar/eyes?id=%d" % id, ["x-avatar-token: " + token, "Content-Type: image/jpeg"], HTTPClient.METHOD_POST, jpg)
+	return true
+
+## 1.5: talk to Carpathron the companion: wav (push-to-talk) or text; done(reply) with
+## {heard, say, action, target, amount, mood, audio:[urls], boxes, mode, doing}
+func companion(wav: PackedByteArray, text: String, mode: String, done: Callable) -> void:
+	if state != "linked":
+		done.call({"say": "Open Muse Carpathron on the PC and link the headset, then we can talk.", "action": "none", "error": "not linked"})
+		return
+	if companion_busy:
+		_comp_req.cancel_request()
+	companion_busy = true
+	_comp_req.request_completed.connect(func(result, code, _hh, b):
+		companion_busy = false
+		var j = JSON.parse_string(b.get_string_from_utf8()) if result == HTTPRequest.RESULT_SUCCESS else null
+		if code == 401:
+			state = "not found"; token = ""; find([pc]); changed.emit()
+		done.call(j if typeof(j) == TYPE_DICTIONARY else {"say": "I can't reach the PC right now.", "action": "none", "error": "PC not reachable"})
+	, CONNECT_ONE_SHOT)
+	var path := "/avatar/companion?mode=" + mode
+	if wav.size() > 0:
+		_comp_req.request_raw(_base() + path, ["x-avatar-token: " + token, "Content-Type: audio/wav"], HTTPClient.METHOD_POST, wav)
+	else:
+		_comp_req.request(_base() + path, ["x-avatar-token: " + token, "Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify({"text": text}))
+
+func cancel_companion() -> void:
+	if companion_busy:
+		_comp_req.cancel_request()
+		companion_busy = false
+
+## a spoken sentence (WAV bytes) from Muse; done(bytes) — empty when it failed
+func fetch_audio(path: String, done: Callable) -> void:
+	if state != "linked":
+		done.call(PackedByteArray()); return
+	_audio_req.cancel_request()
+	for c in _audio_req.request_completed.get_connections():
+		_audio_req.request_completed.disconnect(c["callable"])
+	_audio_req.request_completed.connect(func(result, code, _hh, b):
+		done.call(b if result == HTTPRequest.RESULT_SUCCESS and code == 200 else PackedByteArray())
+	, CONNECT_ONE_SHOT)
+	_audio_req.request(_base() + path, ["x-avatar-token: " + token])
+
 ## where the car video comes through Muse (one shared camera connection on the PC = a steadier picture)
 func relay() -> Dictionary:
 	if state != "linked" or pc == "":
@@ -247,7 +301,7 @@ func _process(_dt: float) -> void:
 	if state == "linked":
 		if now >= _next_state and _state_req.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
 			_next_state = now + 600
-			_state_req.request(_base() + "/avatar/state" + ("?vision=1" if want_vision else ""), ["x-avatar-token: " + token])
+			_state_req.request(_base() + "/avatar/state" + (("?vision=" + ("room" if vision_src == "room" else "1")) if want_vision else ""), ["x-avatar-token: " + token])
 		if now >= _next_map and _map_req.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
 			_next_map = now + 2500
 			_map_req.request(_base() + "/avatar/map", ["x-avatar-token: " + token])

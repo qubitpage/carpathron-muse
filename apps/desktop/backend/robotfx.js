@@ -11,6 +11,8 @@ const PRESETS = {
   wall: { label: 'Little workbot (WALL-E style)', semis: 5, comb: [2.4, 0.45, 0.35], ring: [55, 0.16], hp: 180, lp: 7500, crush: 0.15 },
   tiny: { label: 'Tiny helper (higher)', semis: 7, comb: [2.0, 0.3, 0.2], ring: [0, 0], hp: 200, lp: 9500, crush: 0 },
   clear: { label: 'Clear robot (light effect)', semis: 2, comb: [4.0, 0.22, 0.15], ring: [0, 0], hp: 100, lp: 10000, crush: 0 },
+  // 2.3: the companion talks like a person: the natural neural voice, only cleaned and levelled
+  human: { label: 'Natural (human)', semis: 0, comb: [0, 0, 0], ring: [0, 0], hp: 70, lp: 0, crush: 0 },
 };
 
 // Linear-interpolation resampler: factor > 1 = shorter + higher (pitch and formants up together).

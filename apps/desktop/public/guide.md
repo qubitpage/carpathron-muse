@@ -27,6 +27,13 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.0:** **Carpathron, the companion (Meta Quest 3 mixed reality)**: in Carpathron Avatar 1.5 choose *Carpathron in my
+> room* — he stands on your real floor, sees your room through the headset camera, knows the objects in it (Muse names
+> them, SAM 3.1 outlines them) and talks with you like a friend in a natural voice. Give him tasks by voice ("come here",
+> "follow me", "go to the chair", "dance"); with the real car connected, the car does them. *Robots > Live* shows the
+> mixed-reality view (the room picture with Carpathron in it) and the conversation. **Smart vision with outlines**: the
+> objects the car camera sees get their real contour (SAM 3.1) and a small name tag instead of a box. **Natural voices**:
+> *Robots > Voice* has natural companion voices (Nicole, Sarah, Isabella, Adam, George) and the optional *Kokoro HD* model.
 > **2.2.5:** **Robot voices fixed**: the installed voices failed in the app with "External buffers are not allowed" — they work
 > now, every word is spoken (a short silence before each sentence so speakers don't swallow the start; long answers go
 > sentence by sentence), and what you say is made louder and cleaner before it is transcribed. **Meta Quest view**:

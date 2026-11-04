@@ -284,25 +284,12 @@ func _list(items: Array, area: Rect2) -> void:
 func _welcome(d: Dictionary) -> void:
 	var top := 204
 	var h := PY - top - 104
-	# left: virtual tour (one big button)
-	var tour := _button("tour", "tour", "", h, C_BLUE)
-	tour.position = Vector2(56, top)
-	tour.size = Vector2(600, h)
-	root.add_child(tour)
-	var ic := _icon("▶", C_BLUE, 120)
-	ic.position = Vector2(40, 40)
-	tour.add_child(ic)
-	var t1 := _label("Virtual tour", 44, C_TEXT)
-	t1.position = Vector2(40, 190)
-	tour.add_child(t1)
-	var t2 := _label(str(d.get("tour_text", "")), 30, C_SUB)
-	t2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tour.add_child(t2)
-	t2.position = Vector2(40, 262)
-	t2.size = Vector2(520, 260)
-	var cta := _chip("Start the tour   ▶", C_BLUE)
-	cta.position = Vector2(40, h - 96)
-	tour.add_child(cta)
+	# left: two cards — 1.5: "Carpathron in my room" (mixed reality companion) on top, the virtual tour below
+	var ch := (h - 22) / 2
+	var room := _card("room", Vector2(56, top), Vector2(600, ch), "◉", C_ACCENT, "Carpathron in my room",
+		str(d.get("room_text", "")), "Meet him   ▶")
+	var tour := _card("tour", Vector2(56, top + ch + 22), Vector2(600, ch), "▶", C_BLUE, "Virtual tour",
+		str(d.get("tour_text", "")), "Start the tour   ▶")
 	# right: your robots
 	var card := Panel.new()
 	card.position = Vector2(684, top)
@@ -329,8 +316,30 @@ func _welcome(d: Dictionary) -> void:
 	al.position = Vector2(24, 18)
 	again.add_child(al)
 	vb.add_child(again)
-	if _first == tour and not d.get("robots", []).is_empty() and bool(d.get("robot_first", false)):
+	if _first == room and not d.get("robots", []).is_empty() and bool(d.get("robot_first", false)):
 		_first = vb.get_child(0)
+
+## a big card button on the welcome screen: icon, title, two lines, call to action
+func _card(id: String, pos: Vector2, sz: Vector2, icon: String, col: Color, title: String, text: String, cta_text: String) -> Button:
+	var c := _button(id, id, "", sz.y, col)
+	c.position = pos
+	c.size = sz
+	root.add_child(c)
+	var ic := _icon(icon, col, 84)
+	ic.position = Vector2(32, 30)
+	c.add_child(ic)
+	var t1 := _label(title, 40, C_TEXT)
+	t1.position = Vector2(140, 34)
+	c.add_child(t1)
+	var t2 := _label(text, 26, C_SUB)
+	t2.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	t2.position = Vector2(140, 90)
+	t2.size = Vector2(sz.x - 170, sz.y - 170)
+	c.add_child(t2)
+	var cta := _chip(cta_text, col)
+	cta.position = Vector2(140, sz.y - 78)
+	c.add_child(cta)
+	return c
 
 func _robot_row(it: Dictionary, w: float) -> Button:
 	var col: Color = it.get("color", C_GREEN)

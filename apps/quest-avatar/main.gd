@@ -22,6 +22,8 @@ const ControllerModel = preload("res://controller_model.gd")
 const Spectator = preload("res://spectator.gd")
 const Vision = preload("res://vision.gd")
 const VrView = preload("res://vr_view.gd")
+const RoomMode = preload("res://room_mode.gd")
+const Talk = preload("res://talk.gd")
 const DEAD := 0.15
 const TURN_MS_360 := 2400.0   # calibrated full turn of the car at TURN_SPEED (same setting as Muse Carpathron)
 const TURN_SPEED := 70.0
@@ -71,15 +73,24 @@ var laser_hand := "right"
 var welcome_pending := false
 var rescan_at := 0
 var spectator: Node
-var vision: Node3D
+var vision: Node
 var overlay_quad: MeshInstance3D
 var vr: VrView
 var view_mode := "vr"      # 1.3: "vr" = the picture all around you, "flat" = the cinema screen
-var demo_manual := false   # training room opened from the menu: stays even when a real robot is online
+var room: RoomMode = null  # 1.5: Carpathron in my room (mixed reality companion)
+var capture: AudioEffectCapture
+var robot_talk: Talk       # 1.5: talking with Carpathron while you drive the real car (answers in the headset)
+var hands_free := true
+var demo_manual := false
+var room_test := {}
+var room_on_start := false
+var room_note := ""        # the only text under your view in "my room" (no robot search messages there)
+var _room_log_at := 0        # automated test of "Carpathron in my room" (desktop): --room-test --test-muse=IP:PORT   # training room opened from the menu: stays even when a real robot is online
 
 func _ready() -> void:
 	cfg.load("user://avatar.cfg")
 	head_steer = cfg.get_value("ui", "head_steer13", false)
+	hands_free = cfg.get_value("ui", "hands_free", true)
 	tank = cfg.get_value("ui", "tank14", false)
 	view_mode = cfg.get_value("ui", "view", "vr")
 	_build_world()
@@ -97,8 +108,9 @@ func _ready() -> void:
 	spectator = Spectator.new()
 	spectator.src = cam
 	spectator.muse = muse
-	spectator.mode_fn = func(): return "tour" if demo != null else ("robot" if link.host != "" else "")
+	spectator.mode_fn = func(): return "room" if room != null else ("tour" if demo != null else ("robot" if link.host != "" else ""))
 	spectator.enabled = cfg.get_value("ui", "share_view", true)
+	spectator.bg_fn = func(): return room.view_img if room != null else null
 	add_child(spectator)
 	vision = Vision.new()
 	add_child(vision)
@@ -115,6 +127,9 @@ func _ready() -> void:
 	overlay_quad.layers = 2
 	screen.add_child(overlay_quad)
 	_setup_audio()
+	for a in OS.get_cmdline_user_args():
+		if str(a) == "--room-test":
+			room_test = {"t0": Time.get_ticks_msec(), "states": []}
 	for a in OS.get_cmdline_user_args() + OS.get_cmdline_args():
 		if str(a).begins_with("--test-host="):
 			test = {"host": str(a).split("=")[1], "t0": Time.get_ticks_msec(), "step": 0}
@@ -127,8 +142,15 @@ func _ready() -> void:
 			demo_test = Time.get_ticks_msec()
 		if str(a).begins_with("--test-muse="):
 			cfg.set_value("muse", "pc", ""); cfg.set_value("muse", "token", "")
-			test["muse"] = str(a).split("=")[1]
-	if test:
+			if room_test:
+				room_test["muse"] = str(a).split("=")[1]
+			else:
+				test["muse"] = str(a).split("=")[1]
+	if room_test:
+		muse.setup(cfg)
+		muse.find([room_test["muse"]])
+		_room_test_run()
+	elif test:
 		link.connect_to(test["host"])
 		muse.setup(cfg)
 		if test.has("muse"):
@@ -138,6 +160,10 @@ func _ready() -> void:
 		var saved: String = cfg.get_value("robot", "host", "")
 		_start_demo()             # the virtual room behind the welcome screen
 		welcome_pending = true    # 1.4: the welcome screen opens as soon as the headset knows where you look
+		for a in OS.get_cmdline_args() + OS.get_cmdline_user_args():
+			if str(a) == "--room":   # 1.5: start straight in "Carpathron in my room" (adb: --esa command_line_params --room)
+				welcome_pending = false
+				room_on_start = true
 		link.scan(["carpathron.local"] + ([saved] if saved != "" else []))
 	_apply_view()
 	_refresh_panel()
@@ -304,6 +330,33 @@ func _laser(hand: String, aim: XRController3D, on: bool) -> bool:
 	(beam.material_override as StandardMaterial3D).albedo_color.a = 0.8 if hand == laser_hand else 0.25
 	return hit != null
 
+## in your room: hold the trigger a little = a beam to the floor, pull it = Carpathron walks there
+func _floor_pointer() -> void:
+	var aim := aim_r if laser_hand == "right" else aim_l
+	var hand := right_hand if laser_hand == "right" else left_hand
+	var beam: MeshInstance3D = beams[laser_hand][0]
+	var dot: MeshInstance3D = beams[laser_hand][1]
+	var tv := hand.get_float("trigger")
+	var from := aim.global_position
+	var dir := -aim.global_basis.z.normalized()
+	if tv < 0.1 or dir.y > -0.05 or room.real:
+		beam.visible = false; dot.visible = false
+		prev["TAP"] = false
+		return
+	var t := -from.y / dir.y
+	if t > 8.0:
+		beam.visible = false; dot.visible = false
+		return
+	var hit := from + dir * t
+	beam.visible = true
+	beam.scale = Vector3(1, t, 1)
+	beam.position = Vector3(0, 0, -t / 2)
+	dot.visible = true
+	dot.global_position = hit
+	if _pressed("TAP", tv > 0.6):
+		room.tap_floor(hit)
+		hand.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.06, 0.0)
+
 func _refresh_panel() -> void:
 	var l = link
 	var who := "no robot yet"
@@ -315,10 +368,12 @@ func _refresh_panel() -> void:
 	if l.found.size() > 1:
 		found = " · %d robots found" % l.found.size()
 	panel.text = "CARPATHRON AVATAR " + str(ProjectSettings.get_setting("application/config/version", "")) + " · %s%s\nMENU button (left controller): missions · robots · training room · exit     %s · head steering %s" % [who, found, "tank (two sticks)" if tank else "simple driving", "ON" if head_steer else "off"]
-	info.text = demo.tour_text() if demo != null else l.note
+	info.text = demo.tour_text() if demo != null else (room_note if room != null else l.note)
 	if muse:
 		panel.text += "\n" + muse.status_text() + ("   🎤 listening..." if recording else "")
-		if muse.last_answer != "":
+		if room != null:
+			pass
+		elif muse.last_answer != "":
 			if demo != null:
 				panel.text += "\nMuse: " + muse.last_answer
 			else:
@@ -392,7 +447,7 @@ func _demo_layout(on: bool) -> void:
 
 ## VR view (picture all around you, dark, nothing else) or the flat cinema screen. The training room keeps its own layout.
 func _apply_view() -> void:
-	if vr == null:
+	if vr == null or room != null:
 		return
 	var on := view_mode == "vr" and demo == null
 	vr.visible = on
@@ -404,6 +459,66 @@ func _apply_view() -> void:
 		info.pixel_size = 0.0016 if on else 0.0025
 	world_env.background_color = Color(0.0, 0.0, 0.0) if on else (Color(0.55, 0.62, 0.7) if demo != null else Color(0.03, 0.04, 0.06))
 	cockpit.set_vr(on)
+
+## 1.5: Carpathron in my room — passthrough, the 3D Carpathron on your real floor, talking, tasks
+func _start_room(with_robot := false) -> void:
+	if room != null:
+		return
+	if not with_robot:
+		link.stop_now()   # a connected car stays connected but still: the sticks walk the 3D Carpathron
+	demo_manual = false
+	_stop_demo()
+	room = RoomMode.new()
+	add_child(room)
+	room.real = with_robot
+	for a in OS.get_cmdline_user_args():
+		if str(a).begins_with("--room-image="):
+			room.room_image = str(a).substr(13)
+	room.note.connect(func(t):
+		if t != "":
+			room_note = t
+			_refresh_panel())
+	_mic_ready()
+	room.begin(muse, cam, capture, hands_free)
+	room_note = ("Baby Carpathron: talk to him, he answers here and drives for real" if room.real else "") + ("" if room.passthrough or not xr_on else "  (passthrough is not available on this headset)")
+	_room_layout(true)
+	_refresh_panel()
+
+func _stop_room() -> void:
+	if room == null:
+		return
+	room.end()
+	room.queue_free()
+	room = null
+	muse.vision_src = "car"
+	_room_layout(false)
+	_refresh_panel()
+
+func _room_layout(on: bool) -> void:
+	cockpit.visible = not on
+	if on:
+		vr.visible = false
+		# with the real car: its camera picture (with the outlined objects) as a small window, low on your right
+		screen.visible = room.real
+		screen_title.visible = false
+		screen.scale = Vector3(0.2, 0.2, 1)
+		screen.position = Vector3(0.55, -0.36, -1.3)
+		screen.rotation_degrees = Vector3(-12, -24, 0)
+		panel.visible = false
+		floor_mesh.visible = false
+		world_env.background_color = Color(0, 0, 0, 0) if room.passthrough else Color(0.16, 0.18, 0.22)
+		world_env.ambient_light_color = Color(0.72, 0.72, 0.75)
+		info.position = Vector3(0, -0.62, -1.7)
+		info.pixel_size = 0.0013
+		info.outline_size = 0          # outlined text turns black over passthrough: plain, solid text here
+		info.alpha_cut = Label3D.ALPHA_CUT_DISCARD
+	else:
+		screen_title.visible = false
+		info.alpha_cut = Label3D.ALPHA_CUT_DISABLED
+		screen.scale = Vector3.ONE
+		screen.position = Vector3(0, 0.05, -2.2)
+		screen.rotation_degrees = Vector3.ZERO
+		_apply_view()
 
 func _stop_demo() -> void:
 	if demo == null:
@@ -438,10 +553,30 @@ func _setup_audio() -> void:
 	rec_effect = AudioEffectRecord.new()
 	rec_effect.format = AudioStreamWAV.FORMAT_16_BITS
 	AudioServer.add_bus_effect(idx, rec_effect)
+	# 1.5: the companion listens through a capture (push-to-talk and hands-free)
+	capture = AudioEffectCapture.new()
+	capture.buffer_length = 0.5
+	AudioServer.add_bus_effect(idx, capture)
+	robot_talk = Talk.new()
+	add_child(robot_talk)
+	robot_talk.muse = muse
+	robot_talk.capture = capture
+	robot_talk.player = AudioStreamPlayer.new()
+	add_child(robot_talk.player)
+	robot_talk.mode_fn = func(): return "real"
+	robot_talk.state_changed.connect(func(st):
+		if room == null and demo == null:
+			link.note = {"listening": "🎤 listening...", "thinking": "Carpathron is thinking...", "speaking": ""}.get(st, link.note)
+			_refresh_panel())
+	robot_talk.replied.connect(func(j):
+		muse.last_answer = "You: %s\nCarpathron: %s%s" % [str(j.get("heard", "")), str(j.get("say", "")), ("\nThe car: " + str(j["doing"])) if str(j.get("doing", "")) != "" else ""]
+		_refresh_panel())
 	if OS.get_name() == "Android":
 		get_tree().on_request_permissions_result.connect(func(perm: String, granted: bool):
 			if perm.ends_with("RECORD_AUDIO") and granted:
-				_mic_ready())
+				_mic_ready()
+			if room != null:
+				room.on_permission(perm, granted))
 
 ## True when the microphone runs. On Android the permission is asked the first time push-to-talk is used.
 func _mic_ready() -> bool:
@@ -549,7 +684,7 @@ func _menu_items(p: String) -> Dictionary:
 			else:
 				rt = "None found yet: switch the robot on, same Wi-Fi as the headset"
 			return {"layout": "welcome", "title": "Carpathron Avatar", "subtitle": "Be the robot: see through its camera, drive it, give it missions   ·   version " + _ver(),
-				"chips": _chips(), "tour_text": "Learn every control with the 3D Carpathron robot in a virtual room: driving, turbo, stop, photos, head steering. No robot needed.",
+				"chips": _chips(), "room_text": "Mixed reality: Carpathron stands in YOUR room, sees it, knows the objects in it and talks with you like a friend. Give him tasks by voice.", "tour_text": "Learn every control with the 3D Carpathron robot in a virtual room: driving, turbo, stop, photos, head steering. No robot needed.",
 				"robots": _robot_rows(), "robots_text": rt, "robot_first": n > 0,
 				"hint": "Point with the controller and pull the trigger   ·   or a stick + trigger   ·   Menu button: the full menu"}
 		"missions":
@@ -575,6 +710,7 @@ func _menu_items(p: String) -> Dictionary:
 			its.append({"id": "drive", "arg": "", "icon": "✥", "color": C_ORANGE, "label": "Driving", "sub": "Simple: a stick forward / back + sideways   ·   Tank: one stick per side", "value": "Tank" if tank else "Simple"})
 			its.append({"id": "head", "arg": "", "icon": "◎", "color": C_ORANGE, "label": "Head steering", "sub": "the robot turns where you look", "value": "On" if head_steer else "Off"})
 			its.append({"id": "hints", "arg": "", "icon": "?", "color": C_GREY, "label": "Button labels on the controllers", "sub": "shown when you look at your controllers", "value": "On" if cfg.get_value("ui", "hints", true) else "Off"})
+			its.append({"id": "handsfree", "arg": "", "icon": "🎤", "color": C_ORANGE, "label": "Talk without buttons", "sub": "Carpathron listens when you speak (otherwise hold the right grip)", "value": "On" if hands_free else "Off"})
 			its.append({"id": "vision", "arg": "", "icon": "◈", "color": C_ORANGE, "label": "Smart vision", "sub": "Muse marks people, animals, obstacles and items on the robot's picture", "value": "On" if cfg.get_value("ui", "vision", true) else "Off"})
 			its.append({"id": "share", "arg": "", "icon": "⇪", "color": C_BLUE, "label": "Show my view on the PC", "sub": "Muse Carpathron > Robots > Live shows what you see (to record it)", "value": "On" if spectator.enabled else "Off"})
 			its.append({"id": "recenter", "arg": "", "icon": "⊙", "color": C_GREY, "label": "Bring the screen in front of me"})
@@ -583,6 +719,11 @@ func _menu_items(p: String) -> Dictionary:
 	if demo == null:
 		its.append({"id": "page", "arg": "missions", "icon": "✦", "color": C_ORANGE, "label": "Missions", "sub": "explore, scan, measure, find an object"})
 	its.append({"id": "page", "arg": "robots", "icon": "◆", "color": C_GREEN, "label": "Your robots", "sub": "choose a robot on this Wi-Fi", "value": "%d found" % link.found.size()})
+	if room != null and room.real:
+		its.append({"id": "robotvr", "arg": "", "icon": "◐", "color": C_GREEN, "label": "Robot's eyes (VR view)", "sub": "see only through Baby Carpathron's camera, all around you"})
+	elif room == null and demo == null and link.host != "":
+		its.append({"id": "robotroom", "arg": "", "icon": "◉", "color": C_GREEN, "label": "See my room (mixed reality)", "sub": "your room + the robot's camera window; talk to Baby Carpathron"})
+	its.append({"id": "room", "arg": "", "icon": "◉", "color": C_ORANGE, "label": "Leave my room" if room != null else "Carpathron in my room", "sub": "back to the welcome screen" if room != null else "mixed reality: he stands in your room, sees it and talks with you"})
 	its.append({"id": "demo", "arg": "", "icon": "▶", "color": C_BLUE, "label": "Leave the virtual tour" if demo != null else "Virtual tour", "sub": "back to the robots" if demo != null else "the 3D robot in a virtual room: learn and test"})
 	its.append({"id": "page", "arg": "settings", "icon": "⚙", "color": C_GREY, "label": "Settings", "sub": "view, driving, head steering, controller labels"})
 	its.append({"id": "close", "arg": "", "icon": "✕", "color": C_GREY, "label": "Close the menu"})
@@ -599,13 +740,40 @@ func _on_menu(action: String, arg: String) -> void:
 	match action:
 		"page":
 			menu3d.show_page(arg)
+		"room":
+			if room != null:
+				_stop_room()
+				menu3d.open_at(cam, "welcome")
+			else:
+				_start_room()
+				menu3d.close()
+		"robotroom":
+			_start_room(true)
+			menu3d.close()
+		"handsfree":
+			hands_free = not hands_free
+			cfg.set_value("ui", "hands_free", hands_free); cfg.save("user://avatar.cfg")
+			if room != null:
+				room.talk.hands_free = hands_free
+			menu3d.refresh()
 		"robot":
 			demo_manual = false
 			_stop_demo()
 			_pick(int(arg))
+			# 1.5: your real room + the robot's camera window; talk to him, the car does it
+			if room != null:
+				room.real = true
+				_room_layout(true)
+			else:
+				_start_room(true)
 			menu3d.close()
+		"robotvr":
+			_stop_room()
+			menu3d.close()
+			_refresh_panel()
 		"tour":
 			link.stop_now()
+			_stop_room()
 			demo_manual = true
 			if demo == null:
 				_start_demo()
@@ -629,6 +797,7 @@ func _on_menu(action: String, arg: String) -> void:
 			_search_all()
 			menu3d.refresh()
 		"demo":
+			_stop_room()
 			if demo != null:
 				demo_manual = false
 				_stop_demo()
@@ -670,17 +839,22 @@ func _on_menu(action: String, arg: String) -> void:
 func _vision_update() -> void:
 	if test.has("shot"):
 		return
+	if room != null and not room.real:   # the room's objects are markers in the room (room_mode.gd)
+		muse.want_vision = true
+		muse.vision_src = "room"
+		vision.clear()
+		return
+	muse.vision_src = "car"
 	var on: bool = cfg.get_value("ui", "vision", true) and demo == null and link.online and muse.state == "linked"
+	if room != null:
+		room.car_anchor = screen.global_position + screen.global_basis.y.normalized() * -0.36
 	muse.want_vision = on
 	var st: Dictionary = muse.state_data
-	var fresh: bool = on and st.has("seen") and int(st.get("seenAgoMs", -1)) >= 0 and int(st.get("seenAgoMs", -1)) < 7000
+	var fresh: bool = on and st.has("seen") and str(st.get("seenSrc", "car")) == "car" and int(st.get("seenAgoMs", -1)) >= 0 and int(st.get("seenAgoMs", -1)) < 7000
 	if not fresh:
 		vision.clear()
 		return
-	if view_mode == "vr":
-		vision.show_seen(st["seen"], int(st.get("seenAt", 0)), func(u, v): return vr.point(u, v), vr)
-	else:
-		vision.show_seen(st["seen"], int(st.get("seenAt", 0)), func(u, v): return Vector3((u - 0.5) * 3.2, (0.5 - v) * 2.4, 0.03), screen)
+	vision.show_seen(st["seen"], int(st.get("seenAt", 0)))
 
 ## look for robots on the Wi-Fi again and ask Muse on the PC
 func _search_all() -> void:
@@ -706,7 +880,7 @@ func _background(_dt: float) -> void:
 		if link.add_found(str(car["ip"]), str(car.get("name", "Baby Carpathron")), true):
 			menu3d.refresh()
 	var now := Time.get_ticks_msec()
-	if not link.scanning and not link.online and now > rescan_at:
+	if not link.scanning and not link.online and now > rescan_at and (room == null or room.real):
 		rescan_at = now + 30000
 		if rescan_at > 30000 + 5000:
 			_search_all()
@@ -736,6 +910,13 @@ func _process(delta: float) -> void:
 		pivot.rotation.y = cam.rotation.y
 		placed = true
 		_place_demo()
+	if room_on_start and (placed or not xr_on):
+		room_on_start = false
+		_start_room()
+	# 1.5: room status in the Android log every 5 s (adb logcat -s godot)
+	if room != null and Time.get_ticks_msec() > _room_log_at:
+		_room_log_at = Time.get_ticks_msec() + 5000
+		print("CARPATHRON_ROOM ", JSON.stringify({"passthrough": room.passthrough, "camera": room.cam_status, "frames_sent": room.frame_id, "anchors": room.anchors.keys(), "muse": muse.state, "talk": room.talk.state, "hands_free": room.talk.hands_free, "mic": mic != null, "noise": snappedf(room.talk.noise, 0.0001), "cam_luma": snappedf(room.cam_luma, 0.01), "pc_view": spectator.enabled}))
 	if welcome_pending and (placed or not xr_on):
 		welcome_pending = false
 		menu3d.open_at(cam, "welcome")
@@ -771,6 +952,8 @@ func _process(delta: float) -> void:
 		if trig_r and not prev.get("TRIG_R", false): laser_hand = "right"
 		var pointing := _laser("left", aim_l, menu3d.is_open)
 		pointing = _laser("right", aim_r, menu3d.is_open) or pointing
+		if room != null and not menu3d.is_open:
+			_floor_pointer()
 		if menu3d.is_open:
 			# menu open: point + trigger, or stick + trigger; B / Y back; nothing drives (A / X still STOP)
 			if _pressed("B", right_hand.is_button_pressed("by_button")) or _pressed("Y", left_hand.is_button_pressed("by_button")):
@@ -832,13 +1015,27 @@ func _process(delta: float) -> void:
 				_search_all()
 		else:
 			grip_hold = 0.0
-			_ptt(rg)
+			# 1.5: the right grip talks to Carpathron (in your room, or while driving the real car: he answers in the
+			# headset and the car does the tasks); squeezing it while he speaks interrupts him
+			if room != null:
+				if not rg or _mic_ready():
+					room.talk.ptt(rg)
+			elif demo == null and link.host != "" and not test.has("host"):
+				if not rg or _mic_ready():
+					robot_talk.ptt(rg)
+			else:
+				_ptt(rg)
 			if _pressed("RG", rg) and demo != null:
 				demo.event("talk")
 			if _pressed("LG", lg):
-				if demo != null:
-					demo.event("look")
-				muse.ask("What do you see? Anything in the way?")
+				if room != null:
+					room.talk.send_text("What do you see in my room right now?")
+				elif demo == null and link.host != "" and not test.has("host"):
+					robot_talk.send_text("What do you see? Anything in the way?")
+				else:
+					if demo != null:
+						demo.event("look")
+					muse.ask("What do you see? Anything in the way?")
 	if demo_test > 0:
 		var dt_ms := Time.get_ticks_msec() - demo_test
 		if demo != null and dt_ms < 40000:
@@ -896,6 +1093,9 @@ func _process(delta: float) -> void:
 			if demo != null:
 				demo.drive(0, 0)
 				demo.event("stop")
+			if room != null:
+				room.do_action("stop", "", 0.0)
+				room.talk.interrupt()
 			link.note = "STOP"; _refresh_panel()
 			if xr_on:
 				right_hand.trigger_haptic_pulse("haptic", 0.0, 0.7, 0.1, 0.0)
@@ -904,8 +1104,14 @@ func _process(delta: float) -> void:
 	if demo != null:
 		if shots_dir == "" and not film:
 			demo.drive(int(round(l)), int(round(r2)))
+	elif room != null and not room.real:
+		room.manual((l + r2) / 200.0, (r2 - l) / 200.0)
 	else:
 		link.drive(int(round(l)), int(round(r2)))
+	robot_talk.capture = capture if room == null and demo == null and link.host != "" else null
+	if room != null and room.real:
+		screen_mat.albedo_color = Color(1, 1, 1) if link.online else Color(0.45, 0.45, 0.45)
+	robot_talk.hands_free = hands_free and link.online
 	screen_mat.albedo_color = Color(1, 1, 1) if link.online or test or demo != null else Color(0.45, 0.45, 0.45)
 	if vr.visible:
 		vr.sync(screen_mat.albedo_texture, screen_mat.albedo_color)
@@ -942,12 +1148,87 @@ func _test_step() -> Array:
 			muse.voice(w)
 	if t > (20000 if test.has("muse") else 8000):
 		print("AVATAR_TEST ", JSON.stringify({"frames": link.frames, "online": link.online, "name": link.robot_name, "photo": link.last_photo, "tex": screen_mat.albedo_texture != null, "muse": muse.state, "answer": test.get("answer", ""), "voice": test.get("voice", muse.last_answer), "mission": muse.last_answer,
-			"dash": cockpit.dash.text, "felt": test.get("felt", []), "warn": cockpit.warn.text, "state": muse.state_data.keys(), "map": muse.map_data.keys(), "menu": cockpit.items.size(), "news": cockpit.news.text, "relay": test.get("relay", false), "frames_relay": link.frames, "seen": (muse.state_data.get("seen", []) as Array).map(func(o): return o["label"]), "vision_labels": vision.labels.get_child_count()}))
+			"dash": cockpit.dash.text, "felt": test.get("felt", []), "warn": cockpit.warn.text, "state": muse.state_data.keys(), "map": muse.map_data.keys(), "menu": cockpit.items.size(), "news": cockpit.news.text, "relay": test.get("relay", false), "frames_relay": link.frames, "seen": (muse.state_data.get("seen", []) as Array).map(func(o): return o["label"]), "vision_labels": vision.root.get_child_count()}))
 		get_tree().quit()
 	return [Vector2.ZERO, Vector2.ZERO, false]
 
 
 # ---------------------------------------------------------------- store screenshots (desktop render of the demo tour)
+## "Carpathron in my room" end to end (no headset): link to Muse, the room picture -> objects recognised -> markers,
+## talk ("look at the chair" -> he walks to it), a quick command (dance), the PC view, a screenshot
+func _room_test_run() -> void:
+	var r := {}
+	for i in 200:
+		await get_tree().create_timer(0.1).timeout
+		if muse.state == "linked":
+			break
+	r["linked"] = muse.state == "linked"
+	cam.rotation_degrees.x = -32.0    # in the headset you look down at him
+	_start_room()
+	room.talk.state_changed.connect(func(st): room_test["states"].append(st))
+	for i in 250:
+		await get_tree().create_timer(0.1).timeout
+		if room.anchors.has("chair"):
+			break
+	r["anchors"] = room.anchors.keys()
+	var chair = room.find_anchor("chair")
+	var d0 := -1.0
+	if chair != null:
+		d0 = room._floor(room.body.global_position).distance_to(room._floor(chair["pos"]))
+	room.talk.send_text("could you take a look at the chair for me")
+	for i in 300:
+		await get_tree().create_timer(0.1).timeout
+		if room.behaviour == "idle" and room.bubble.text.contains("chair") and room.talk.state != "thinking":
+			break
+	r["say"] = room.bubble.text
+	r["mood"] = room.mood
+	if chair != null:
+		r["chair_before"] = d0
+		r["chair_after"] = room._floor(room.body.global_position).distance_to(room._floor(chair["pos"]))
+	room.talk.send_text("dance")
+	for i in 100:
+		await get_tree().create_timer(0.1).timeout
+		if room.dance_t > 0.0:
+			break
+	r["danced"] = room.dance_t > 0.0
+	r["quick_say"] = room.bubble.text
+	await get_tree().create_timer(1.5).timeout
+	r["view_bg"] = room.view_tex != null
+	# with the real car (--test-car=IP:PORT): pick it -> mixed reality with its camera window; talk -> it drives
+	for a in OS.get_cmdline_user_args():
+		if str(a).begins_with("--test-car="):
+			link.found = [{"host": str(a).substr(11), "name": "Baby Carpathron", "key": "car"}]
+			_on_menu("robot", "0")
+			for i in 100:
+				await get_tree().create_timer(0.1).timeout
+				if link.online and link.frames > 3:
+					break
+			r["real"] = room.real
+			r["car_online"] = link.online
+			r["car_window"] = screen.visible and not room.model.visible
+			room.talk.send_text("drive forward a bit")
+			for i in 200:
+				await get_tree().create_timer(0.1).timeout
+				if room.talk.state != "thinking" and room.bubble.text.contains("forward"):
+					break
+			r["real_say"] = room.bubble.text
+			await get_tree().create_timer(2.0).timeout
+	r["states"] = room_test["states"]
+	r["camera"] = room.cam_status
+	r["frames_sent"] = room.frame_id
+	var shot := ""
+	for a in OS.get_cmdline_user_args():
+		if str(a).begins_with("--room-shot="):
+			shot = str(a).substr(12)
+	if shot != "":
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(shot)
+		var sv: Image = spectator.vp.get_texture().get_image()
+		if sv:
+			sv.save_png(shot.replace(".png", "-pc.png"))
+	print("ROOM_TEST ", JSON.stringify(r))
+	get_tree().quit()
+
 func _wait(sec: float) -> void:
 	await get_tree().create_timer(sec).timeout
 
@@ -1120,11 +1401,8 @@ func _cockpit_shot(spec: String) -> void:
 	link.note = "Connected to Baby Carpathron"
 	view_mode = "flat" if mode == "flat" else "vr"
 	_apply_view()
-	var seen := [{"label": "person", "kind": "human", "box": [0.12, 0.1, 0.22, 0.75], "near": false}, {"label": "chair", "kind": "furniture", "box": [0.55, 0.45, 0.3, 0.45], "near": true}]
-	if view_mode == "vr":
-		vision.show_seen(seen, 1, func(u, v): return vr.point(u, v), vr)
-	else:
-		vision.show_seen(seen, 1, func(u, v): return Vector3((u - 0.5) * 3.2, (0.5 - v) * 2.4, 0.03), screen)
+	var seen: Array = j.get("seen", [{"label": "person", "kind": "human", "box": [0.12, 0.1, 0.22, 0.75], "near": false}, {"label": "chair", "kind": "furniture", "box": [0.55, 0.45, 0.3, 0.45], "near": true}])
+	vision.show_seen(seen, 1)
 	_refresh_panel()
 	cam.position = Vector3(0, 1.6, 0)
 	(cam as Camera3D).fov = 100 if mode in ["vr", "flat"] else 66

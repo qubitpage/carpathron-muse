@@ -9,6 +9,8 @@ const crypto = require('crypto');
 
 const MODELS = {
   kokoro: { id: 'kokoro', kind: 'kokoro', name: 'kokoro-int8-en-v0_19', file: 'model.int8.onnx', mb: 103, label: 'Kokoro (most natural, 100 MB)', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-en-v0_19.tar.bz2' },
+  // 2.3: the same Kokoro voices in full precision: clearer, more natural (the voices above use it once it is installed)
+  kokorohd: { id: 'kokorohd', kind: 'kokoro', name: 'kokoro-en-v0_19', file: 'model.onnx', mb: 320, label: 'Kokoro HD (best quality, 320 MB)', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2' },
   kitten: { id: 'kitten', kind: 'kitten', name: 'kitten-nano-en-v0_1-fp16', file: 'model.fp16.onnx', mb: 27, label: 'KittenTTS (light and fast, 27 MB)', url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_1-fp16.tar.bz2' },
 };
 const VOICES = {
@@ -16,6 +18,12 @@ const VOICES = {
   michael: { label: 'Michael — WALL-E style workbot', model: 'kokoro', sid: 6, preset: 'wall' },
   emma: { label: 'Emma — British cute robot', model: 'kokoro', sid: 7, preset: 'baby' },
   sky: { label: 'Sky — clear robot', model: 'kokoro', sid: 4, preset: 'clear' },
+  // 2.3: natural, human voices for Carpathron the companion (Quest mixed reality) — no robot effect
+  nicole: { label: 'Nicole — warm, natural (companion)', model: 'kokoro', sid: 2, preset: 'human', human: true },
+  sarah: { label: 'Sarah — friendly, natural (companion)', model: 'kokoro', sid: 3, preset: 'human', human: true },
+  isabella: { label: 'Isabella — British, natural (companion)', model: 'kokoro', sid: 8, preset: 'human', human: true },
+  adam: { label: 'Adam — calm, natural (companion)', model: 'kokoro', sid: 5, preset: 'human', human: true },
+  george: { label: 'George — British, natural (companion)', model: 'kokoro', sid: 9, preset: 'human', human: true },
   kitten: { label: 'Kitten — light and fast workbot', model: 'kitten', sid: 0, preset: 'wall' },
   kittenf: { label: 'Kitten — light and fast, female', model: 'kitten', sid: 3, preset: 'clear' },
 };
@@ -35,13 +43,17 @@ class Tts {
     return c.find((d) => fs.existsSync(path.join(d, 'sherpa-onnx-node', 'package.json'))) || null;
   }
   modelDir(id) { return path.join(this.dir, MODELS[id].name); }
-  installed(id) { const m = MODELS[id]; return fs.existsSync(path.join(this.modelDir(id), m.file)) && fs.existsSync(path.join(this.modelDir(id), 'tokens.txt')); }
+  installed(id) { const m = MODELS[id]; if (!m) return false; return fs.existsSync(path.join(this.modelDir(id), m.file)) && fs.existsSync(path.join(this.modelDir(id), 'tokens.txt')); }
   voiceId() { const v = (this.getSettings().robot || {}).voice; return VOICES[v] ? v : 'bella'; }
+  // 2.3: the companion's own voice (natural by default); falls back to the robot voice
+  companionVoiceId() { const v = (this.getSettings().robot || {}).companionVoice; return VOICES[v] ? v : 'nicole'; }
+  // a Kokoro voice uses the HD model once it is installed
+  modelFor(v) { return v.model === 'kokoro' && this.installed('kokorohd') ? 'kokorohd' : v.model; }
   status() {
-    return { engine: !!this.engineDir(), voice: this.voiceId(), voices: Object.entries(VOICES).map(([id, v]) => ({ id, ...v, ready: this.installed(v.model) })),
+    return { engine: !!this.engineDir(), voice: this.voiceId(), companionVoice: this.companionVoiceId(), hd: this.installed('kokorohd'), voices: Object.entries(VOICES).map(([id, v]) => ({ id, ...v, ready: this.installed(v.model) })),
       models: Object.fromEntries(Object.entries(MODELS).map(([id, m]) => [id, { label: m.label, mb: m.mb, installed: this.installed(id), downloading: this.downloads[id] || null }])) };
   }
-  ready(voiceId = this.voiceId()) { const v = VOICES[voiceId]; return !!(v && this.engineDir() && this.installed(v.model)); }
+  ready(voiceId = this.voiceId()) { const v = VOICES[voiceId]; return !!(v && this.engineDir() && this.installed(this.modelFor(v))); }
 
   // ---- download a voice model (once)
   async download(id, onProgress = () => {}) {
@@ -99,16 +111,16 @@ class Tts {
     w.on('exit', (code) => { for (const p of this.pending.values()) p.reject(new Error(`speech worker stopped (${code}) ${err.slice(-300)}`)); this.pending.clear(); this.worker = null; });
     return (this.worker = w);
   }
-  async speak(text, { voice = this.voiceId(), rate = 1 } = {}) {
-    const v = VOICES[voice] || VOICES.bella, m = MODELS[v.model];
-    if (!this.installed(v.model)) throw new Error('voice not downloaded');
-    const id = crypto.randomBytes(6).toString('hex'), out = path.join(this.outDir, `${id}.wav`);
+  async speak(text, { voice = this.voiceId(), rate = 1, id: wantId = null } = {}) {
+    const v = VOICES[voice] || VOICES.bella, mid = this.modelFor(v), m = MODELS[mid];
+    if (!this.installed(mid)) throw new Error('voice not downloaded');
+    const id = /^[a-f0-9]{12}$/.test(wantId || '') ? wantId : crypto.randomBytes(6).toString('hex'), out = path.join(this.outDir, `${id}.wav`);
     this.cleanup();
     const w = this.ensureWorker();
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => { this.pending.delete(id); reject(new Error('speech took too long')); }, 60000);
       this.pending.set(id, { resolve: (r) => resolve({ ...r, id, url: `/api/robot/voice/audio/${id}.wav` }), reject, t });
-      w.send({ id, text, sid: v.sid, preset: v.preset, rate, out, model: { id: m.id, kind: m.kind, file: m.file, dir: this.modelDir(v.model) } });
+      w.send({ id, text, sid: v.sid, preset: v.preset, rate, out, model: { id: m.id, kind: m.kind, file: m.file, dir: this.modelDir(mid) } });
     });
   }
   file(name) { return /^[a-f0-9]{12}\.wav$/.test(name) && fs.existsSync(path.join(this.outDir, name)) ? path.join(this.outDir, name) : null; }

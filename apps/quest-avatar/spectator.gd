@@ -16,6 +16,9 @@ var _next := 0
 var _pending := false
 var _xf := Transform3D()
 var _has := false
+var bg_fn: Callable         # 1.5 mixed reality: -> the headset camera picture (Texture2D) behind the 3D, or null
+var _clear_env: Environment
+const BG_HFOV := 76.0      # the headset camera picture (same as room_mode.gd)
 
 func _ready() -> void:
 	vp = SubViewport.new()
@@ -27,6 +30,14 @@ func _ready() -> void:
 	eye.fov = 78.0
 	eye.cull_mask = 0xFFFFF
 	vp.add_child(eye)
+	# 1.5: passthrough is not in the rendered picture: in "my room" the 3D is rendered with a transparent background
+	# and laid over the headset camera picture here, in 2D (nothing is added to the 3D world, so the headset never
+	# sees it)
+	_clear_env = Environment.new()
+	_clear_env.background_mode = Environment.BG_COLOR
+	_clear_env.background_color = Color(0, 0, 0, 0)
+	_clear_env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	_clear_env.ambient_light_color = Color(0.72, 0.72, 0.75)
 
 func _process(_dt: float) -> void:
 	if not enabled or src == null or muse == null or muse.state != "linked" or _pending:
@@ -42,6 +53,15 @@ func _process(_dt: float) -> void:
 	else:
 		_xf = t; _has = true
 	eye.global_transform = _xf
+	var bg: Image = bg_fn.call() if bg_fn.is_valid() else null
+	vp.transparent_bg = bg != null
+	eye.environment = _clear_env if bg != null else null
+	if bg != null:
+		# same field of view as the headset camera, so the 3D Carpathron stands where he is in your room
+		var th := tan(deg_to_rad(BG_HFOV / 2.0))
+		eye.fov = rad_to_deg(2.0 * atan(th * vp.size.y / vp.size.x))
+	else:
+		eye.fov = 78.0
 	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_pending = true
 	await RenderingServer.frame_post_draw
@@ -49,4 +69,15 @@ func _process(_dt: float) -> void:
 	var img := vp.get_texture().get_image()
 	if img == null or img.is_empty():
 		return
+	if bg != null:
+		# the room picture (cropped to 16:9, same width as the 3D view) under the 3D with its transparency
+		var out := bg.duplicate() as Image
+		out.convert(Image.FORMAT_RGBA8)
+		var w := vp.size.x
+		var h := int(round(out.get_height() * float(w) / out.get_width()))
+		out.resize(w, h, Image.INTERPOLATE_BILINEAR)
+		out = out.get_region(Rect2i(0, (h - vp.size.y) / 2, w, vp.size.y))
+		img.convert(Image.FORMAT_RGBA8)
+		out.blend_rect(img, Rect2i(0, 0, vp.size.x, vp.size.y), Vector2i.ZERO)
+		img = out
 	muse.post_view(img.save_jpg_to_buffer(0.72), mode_fn.call() if mode_fn.is_valid() else "")

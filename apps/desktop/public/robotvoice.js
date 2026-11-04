@@ -194,15 +194,19 @@
         const btn = h('button', { class: 'btn' + (id === need.model ? ' primary' : ''), disabled: m.downloading ? '' : null, onclick: async () => { btn.disabled = true; btn.textContent = 'Downloading…'; const r = await api('/api/robot/voice/download', { body: { model: id } }).catch((e) => ({ error: e.message })); if (r.error) { toast(r.error, true); btn.disabled = false; } } }, m.downloading ? 'Downloading…' : `⬇ Download ${m.label}`);
         voiceBox.append(h('div', { class: 'row small', 'data-model': id }, btn, bar));
       }
+      // 2.3: two lists — the robot's voice (with the small-robot effect) and the companion's natural voice (Quest)
       const list = h('div', { class: 'voice-list' });
+      const clist = h('div', { class: 'voice-list' });
       for (const v of s.voices) {
+        const comp = !!v.human, cur = comp ? s.companionVoice : s.voice;
         const row = h('label', { class: 'voice-opt' + (v.ready ? '' : ' off') },
-          h('input', { type: 'radio', name: 'robotVoice', value: v.id, checked: v.id === s.voice ? '' : null, disabled: v.ready ? null : '', onchange: async () => { const r = await api('/api/robot/voice/choose', { body: { voice: v.id } }).catch((e) => ({ error: e.message })); if (r.error) toast(r.error, true); else toast(`Robot voice: ${v.label}`); } }),
+          h('input', { type: 'radio', name: comp ? 'companionVoice' : 'robotVoice', value: v.id, checked: v.id === cur ? '' : null, disabled: v.ready ? null : '', onchange: async () => { const r = await api('/api/robot/voice/choose', { body: { voice: v.id, for: comp ? 'companion' : 'robot' } }).catch((e) => ({ error: e.message })); if (r.error) toast(r.error, true); else toast(`${comp ? 'Companion' : 'Robot'} voice: ${v.label}`); } }),
           h('span', { class: 'grow' }, v.label, v.ready ? '' : h('span', { class: 'muted' }, ' — download first')),
           h('button', { class: 'btn tiny', disabled: v.ready ? null : '', title: 'Hear this voice', onclick: async (e) => { e.preventDefault(); const b = e.currentTarget; b.textContent = '…'; const r = await api('/api/robot/voice/sample', { body: { voice: v.id } }).catch((er) => ({ error: er.message })); b.textContent = '▶'; if (r.error) toast(r.error, true); else { play.queue.push(r.audio); playNext(); } } }, '▶'));
-        list.append(row);
+        (comp ? clist : list).append(row);
       }
-      voiceBox.append(list);
+      voiceBox.append(list, h('h4', {}, '🥽 Carpathron companion voice (Meta Quest, natural, no robot effect)'), clist);
+      if (s.hd) voiceBox.append(h('p', { class: 'small muted' }, '✓ Kokoro HD installed: all Kokoro voices use the full-quality model.'));
       if (!ready.length) voiceBox.append(h('p', { class: 'small muted' }, 'Until a voice is downloaded, the robot uses the backup voice below.'));
     };
     fillVoiceBox();

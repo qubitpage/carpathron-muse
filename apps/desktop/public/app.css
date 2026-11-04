@@ -728,4 +728,8 @@ button.chip { cursor: pointer; }
 /* 2.2.5: the Meta Quest view (what the headset user sees) */
 .quest-card { grid-column: 1 / -1; }
 .quest-card .cam-preview { aspect-ratio: 16 / 9; object-fit: contain; background: #000; }
+.companion-feed { display: flex; flex-direction: column; gap: 6px; max-height: 190px; overflow-y: auto; margin: 10px 0 4px; }
+.companion-feed .cf-you, .companion-feed .cf-bot { padding: 7px 12px; border-radius: 14px; font-size: 13.5px; line-height: 1.35; max-width: 80%; }
+.companion-feed .cf-you { align-self: flex-end; background: var(--accent-soft, rgba(80, 140, 255, .18)); }
+.companion-feed .cf-bot { align-self: flex-start; background: rgba(255, 140, 40, .14); border: 1px solid rgba(255, 140, 40, .3); }
 #questVideo:fullscreen { width: 100vw; height: 100vh; object-fit: contain; background: #000; border: 0; border-radius: 0; margin: 0; }

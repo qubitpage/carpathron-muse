@@ -11,8 +11,21 @@ KS=${KS:-/home/claude/keys/carpathron-release.keystore}; KS_PASS=${KS_PASS:-$(ca
 # the keystore password is never stored in export_presets.cfg: Godot reads it from these variables
 export GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$KS" GODOT_ANDROID_KEYSTORE_RELEASE_USER="$KS_ALIAS" GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD="$KS_PASS"
 mkdir -p build && rm -rf build/dec build/*.apk build/*.idsig
+# 1.5: the Godot OpenXR Vendors plugin (Meta passthrough = mixed reality) is a GDExtension; Godot only exports it with a
+# Gradle build, so it is hidden during the export and added to the APK afterwards (library + extension list).
+VX=addons/godotopenxrvendors
+mv $VX/plugin.gdextension $VX/plugin.gdextension.off
+trap 'mv -f $VX/plugin.gdextension.off $VX/plugin.gdextension 2>/dev/null || true' EXIT
 "$GODOT" --headless --path . --export-${EXPORT:-release} "Quest" build/CarpathronAvatar-unsigned.apk > build/export.log 2>&1 || { tail -20 build/export.log; exit 1; }
+mv -f $VX/plugin.gdextension.off $VX/plugin.gdextension
 java -jar "$APKTOOL" d -f -s -o build/dec build/CarpathronAvatar-unsigned.apk > /dev/null
+mkdir -p build/dec/assets/.godot build/dec/assets/$VX
+cp $VX/plugin.gdextension build/dec/assets/$VX/
+printf 'res://%s/plugin.gdextension\n' $VX > build/dec/assets/.godot/extension_list.cfg
+cp $VX/.bin/android/template_release/arm64/libgodotopenxrvendors.so build/dec/lib/arm64-v8a/
+rm -rf build/dec/assets/$VX/.bin
+# 1.5: the headset camera helper (Godot plugin "CarpathronRoomCam", smali -> classes2.dex)
+mkdir -p build/dec/smali_classes2 && cp -r android/smali/. build/dec/smali_classes2/
 python3 tools_quest_patch.py build/dec
 unzip -o -q -j "$LOADER_AAR" jni/arm64-v8a/libopenxr_loader.so -d build/dec/lib/arm64-v8a
 java -jar "$APKTOOL" b -o build/unaligned.apk build/dec > build/apktool.log 2>&1 || { tail -20 build/apktool.log; exit 1; }

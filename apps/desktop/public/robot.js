@@ -135,7 +135,7 @@
       const card = $('#questCard'), img = $('#questVideo');
       if (v.live) {
         clearTimeout(questOffT); questOffT = null;
-        $('#questMode').textContent = v.mode === 'tour' ? 'virtual tour · live' : v.mode === 'robot' ? 'robot · live' : 'live';
+        $('#questMode').textContent = v.mode === 'room' ? 'Carpathron in my room · live' : v.mode === 'tour' ? 'virtual tour · live' : v.mode === 'robot' ? 'robot · live' : 'live';
         if (!questOn) { card.hidden = false; img.src = '/api/avatar/view.mjpg?v=' + Date.now(); questOn = true; }
       } else if (questOn && !questOffT) {
         questOffT = setTimeout(() => { card.hidden = true; img.removeAttribute('src'); questOn = false; questOffT = null; }, 6000);
@@ -143,6 +143,20 @@
     } catch (_) {}
   }
   setInterval(questPoll, 2000); questPoll();
+  // 2.3: what you say to Carpathron in the headset and what he answers (shown under the Quest view)
+  const feed = [];
+  function onCompanion(d) {
+    const el = $('#companionFeed'); if (!el || !d) return;
+    feed.push(d); if (feed.length > 4) feed.shift();
+    el.hidden = false; el.innerHTML = '';
+    for (const x of feed) {
+      if (x.heard) { const y = document.createElement('div'); y.className = 'cf-you'; y.textContent = x.heard; el.append(y); }
+      const c = document.createElement('div'); c.className = 'cf-bot';
+      c.textContent = x.say + (x.action && x.action !== 'none' ? `  ·  ${x.action}${x.target ? ' ' + x.target : ''}${x.mode === 'real' ? ' (the car)' : ''}` : '');
+      el.append(c);
+    }
+    el.scrollTop = el.scrollHeight;
+  }
   $('#btnQuestFull').onclick = () => { const w = $('#questVideo'); (w.requestFullscreen || w.webkitRequestFullscreen || (() => {})).call(w); };
   let ledT;
   $('#carLed').oninput = (e) => { clearTimeout(ledT); ledT = setTimeout(() => window.MCapi('/api/robot/led', { body: { v: Number(e.target.value) } }).catch(() => {}), 120); };
@@ -359,6 +373,7 @@
   }
 
   window.MCRobot = {
+    onCompanion,
     onPhoto: (d) => showPhoto(d.path, d.source),
     show: async (S) => {
       visible = true;

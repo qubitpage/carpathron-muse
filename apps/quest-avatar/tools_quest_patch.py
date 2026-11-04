@@ -42,6 +42,16 @@ m = m.replace('<category android:name="android.intent.category.LAUNCHER"/>', '''
 m = re.sub(r'(<activity [^>]*android:name="com\.godot\.game\.GodotApp"[^>]*>)', r'\1\n            <meta-data android:name="com.oculus.vr.focusaware" android:value="true"/>', m, count=1)
 m = m.replace('<meta-data android:name="org.godotengine.editor.version"', '''<meta-data android:name="com.oculus.supportedDevices" android:value="quest2|questpro|quest3|quest3s"/>
         <meta-data android:name="org.godotengine.editor.version"''', 1)
+# 1.5 mixed reality: Meta passthrough (the robot in your real room) and the headset camera (Muse recognises the
+# objects in your room). Camera optional so the app still installs everywhere.
+m = m.replace('<uses-feature android:glEsVersion', '''<uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="horizonos.permission.HEADSET_CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+    <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false"/>
+    <uses-feature android:glEsVersion''', 1)
+m = m.replace('<meta-data android:name="org.godotengine.editor.version"', '''<meta-data android:name="org.godotengine.plugin.v2.CarpathronRoomCam" android:value="com.carpathron.avatar.RoomCam"/>
+        <meta-data android:name="org.godotengine.editor.version"''', 1)
 open(p, 'w').write(m)
 # apktool decode quirk in Godot's template: a mipmap alias decoded as the literal "false"
 import glob, os

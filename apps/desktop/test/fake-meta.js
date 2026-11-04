@@ -8,6 +8,17 @@ function plan(body) {
   if (/Plan web research/.test(sys)) return { text: '{"queries":["carpathron robots price","carpathron news"]}' };
   if (/careful research analyst/.test(sys)) return { text: '# Report\n\nRobots are useful [1].\n\n## Sources\n[1] Carpathron — https://example.com/a' };
   if (/eyes of a small robot car; the camera is about 10 cm/.test(sys)) return { text: '{"objects":[{"label":"person","kind":"human","box":[0.3,0.15,0.22,0.7],"near":false},{"label":"cat","kind":"animal","box":[0.65,0.6,0.2,0.25],"near":true}]}' };
+  if (/eyes of Carpathron, a friendly robot companion/.test(sys)) return { text: '{"objects":[{"label":"person","kind":"human","box":[0.4,0.1,0.2,0.8],"dist":1.8,"near":false},{"label":"chair","kind":"furniture","box":[0.1,0.45,0.25,0.5],"dist":1.4,"near":false},{"label":"plant","kind":"item","box":[0.75,0.3,0.15,0.4],"dist":2.5,"near":false}]}' };
+  if (/You are Carpathron, a small friendly robot and the user's companion/.test(sys)) {
+    const u = Array.isArray(last.content) ? String(last.content[0].text || '') : String(last.content);
+    const pic = Array.isArray(last.content) ? 'picture' : 'no picture';
+    const room = /Objects you recognised in the room: ([^\n]*)/.exec(sys);
+    if (/chair/i.test(u)) return { text: JSON.stringify({ say: `Off to the chair! (${pic})`, action: 'goto', target: 'chair' }) };
+    if (/dance/i.test(u)) return { text: JSON.stringify({ say: 'Watch my moves!', action: 'dance' }) };
+    if (/plant/i.test(u)) return { text: JSON.stringify({ say: 'That green one, there.', action: 'outline', target: 'plant' }) };
+    if (/forward/i.test(u)) return { text: JSON.stringify({ say: 'Rolling forward.', action: 'forward', amount: 0.3 }) };
+    return { text: JSON.stringify({ say: `Hi! I see ${room ? room[1].split(';').length : 0} things here. You said: ${u.slice(0, 40)}. Earlier turns: ${msgs.length - 2}.`, action: 'none' }) };
+  }
   if (/long-term memory about the user\. From the exchange/.test(sys)) return { text: '{"facts":["User is building a robot named Baby Carpathron"]}' };
   if (last.role === 'user' && Array.isArray(last.content) && /robot car's camera/.test(last.content[0].text || '')) {
     const heads = last.content.filter((c) => /^Heading/.test(c.text || '')).map((c) => Number(c.text.match(/\d+/)[0]));
@@ -151,6 +162,17 @@ const server = http.createServer((req, res) => {
       if (j.model === 'sam-3.1') {
         const what = (j.input?.[0]?.content || []).find((c) => c.type === 'input_text')?.text || '';
         if (/unicorn|what is this/i.test(what)) return res.end(JSON.stringify({ output_text: '<0f>0' }));
+        // object prompt (boxes from smart vision): one record per box, slightly tighter, with a real one-bit mask
+        if (/^<0f>\d+<\|box;/.test(what)) {
+          const { ellipseMask } = require('./samenc');
+          const recs = [...what.matchAll(/(\d+)<\|box;x1=(\d+);y1=(\d+);x2=(\d+);y2=(\d+);w=(\d+);h=(\d+)\|>/g)].map(([, id, x1, y1, x2, y2, w, h]) => {
+            [x1, y1, x2, y2] = [x1, y1, x2, y2].map(Number); const dx = Math.round((x2 - x1) * 0.05), dy = Math.round((y2 - y1) * 0.05);
+            const b = { x1: x1 + dx, y1: y1 + dy, x2: x2 - dx, y2: y2 - dy };
+            const mw = Math.max(4, Math.min(80, b.x2 - b.x1 + 1)), mh = Math.max(4, Math.min(80, b.y2 - b.y1 + 1));
+            return `${id}<|box;x1=${b.x1};y1=${b.y1};x2=${b.x2};y2=${b.y2};w=${w};h=${h};c=0.91|><|mask;x=0;y=0;c=0.91;data=${ellipseMask(mw, mh)}|>`;
+          });
+          return res.end(JSON.stringify({ output_text: '<0f>' + recs.join(',') }));
+        }
         return res.end(JSON.stringify({ output_text: '<0f>1<|box;x1=10;y1=20;x2=110;y2=220;w=640;h=480;c=0.93|>,<|mask;x=0;y=0;c=0.93;data=2,2,~abc|>' }));
       }
       return res.end(JSON.stringify({ output: [

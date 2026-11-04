@@ -27,6 +27,9 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.2:** Carpathron Avatar 1.6 also works **on its own, without this PC**: in the headset open *Settings > Meta AI*
+> and add your Meta API key (type it, paste it from your phone on the same Wi-Fi, or press *Copy the key from Muse*
+> once while linked). The headset then listens, thinks, sees your room and drives the Wi-Fi car by itself.
 > **2.3.1:** the companion thinks much faster (quick reasoning, the room picture only for "what do you see" questions,
 > the first sentence is spoken while the rest is still being written) and remembers everything the headset saw in the
 > room. The room is looked at every 1.5 s. With the real Baby Carpathron, the Quest headset sees the car and the goal and

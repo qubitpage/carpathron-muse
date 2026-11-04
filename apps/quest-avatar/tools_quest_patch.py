@@ -49,6 +49,8 @@ m = m.replace('<uses-feature android:glEsVersion', '''<uses-permission android:n
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
     <uses-feature android:name="com.oculus.feature.PASSTHROUGH" android:required="false"/>
+    <uses-feature android:name="oculus.software.overlay_keyboard" android:required="false"/>
+    <queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>
     <uses-feature android:glEsVersion''', 1)
 m = m.replace('<meta-data android:name="org.godotengine.editor.version"', '''<meta-data android:name="org.godotengine.plugin.v2.CarpathronRoomCam" android:value="com.carpathron.avatar.RoomCam"/>
         <meta-data android:name="org.godotengine.editor.version"''', 1)

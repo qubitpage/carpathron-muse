@@ -1298,6 +1298,13 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
             return send(res, 200, { heard, command: cmd, replies });
           }
           // ---- 2.3: Carpathron the companion (mixed reality on Quest 3): the headset camera, talking, tasks
+          // 2.3.2: the linked headset copies the Meta API key so it can also work on its own (standalone)
+          if (url.pathname === '/avatar/apikey' && req.method === 'GET') {
+            const s = store.settings;
+            if (!s.apiKey) return send(res, 200, { error: 'No Meta API key in Muse Carpathron (Settings)' });
+            logFn(`The headset ${who.name || 'Quest'} copied the Meta API key (to use Meta's models on its own)`);
+            return send(res, 200, { key: s.apiKey, model: s.model });
+          }
           if (url.pathname === '/avatar/eyes' && req.method === 'POST') {
             const jpg = await readBody(req, 2 * 1024 * 1024);
             if (jpg.length > 200 && jpg[0] === 0xff && jpg[1] === 0xd8) Object.assign(roomEyes, { last: jpg, at: Date.now(), id: Number(url.searchParams.get('id')) || 0 });

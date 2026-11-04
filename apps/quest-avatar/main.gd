@@ -24,6 +24,8 @@ const Vision = preload("res://vision.gd")
 const VrView = preload("res://vr_view.gd")
 const RoomMode = preload("res://room_mode.gd")
 const Talk = preload("res://talk.gd")
+const BrainLocal = preload("res://brain_local.gd")
+const KeyPage = preload("res://key_page.gd")
 const DEAD := 0.15
 const TURN_MS_360 := 2400.0   # calibrated full turn of the car at TURN_SPEED (same setting as Muse Carpathron)
 const TURN_SPEED := 70.0
@@ -81,6 +83,12 @@ var room: RoomMode = null  # 1.5: Carpathron in my room (mixed reality companion
 var capture: AudioEffectCapture
 var robot_talk: Talk       # 1.5: talking with Carpathron while you drive the real car (answers in the headset)
 var hands_free := true
+var brain: Node            # 1.6: the companion's brain on the headset (Meta API key, no PC needed)
+var key_page: Node         # 1.6: put the key in from a phone / PC on this Wi-Fi
+var brain_mode := "auto"   # auto | pc | headset
+var speech: Object = null  # the headset's speech engine (Android plugin)
+var car_script: Array = [] # 1.6: timed wheel commands for the real car without the PC: [[l, r, ms], ...]
+var _car_step_until := 0
 var demo_manual := false
 var room_test := {}
 var room_on_start := false
@@ -126,6 +134,23 @@ func _ready() -> void:
 	overlay_quad.position = Vector3(0, 0, 0.01)
 	overlay_quad.layers = 2
 	screen.add_child(overlay_quad)
+	brain = BrainLocal.new()
+	brain.key = str(cfg.get_value("meta", "key", ""))
+	add_child(brain)
+	brain_mode = str(cfg.get_value("meta", "brain", "auto"))
+	for a in OS.get_cmdline_user_args():   # tests: a local fake Meta API, no PC
+		if str(a).begins_with("--meta-base="):
+			brain.base = str(a).substr(12)
+		if str(a).begins_with("--meta-key="):
+			brain.key = str(a).substr(11)
+		if str(a) == "--standalone":
+			brain_mode = "headset"
+	key_page = KeyPage.new()
+	add_child(key_page)
+	key_page.got_key.connect(_set_key)
+	if Engine.has_singleton("CarpathronRoomCam"):
+		speech = Engine.get_singleton("CarpathronRoomCam")
+		speech.ttsStart()
 	_setup_audio()
 	for a in OS.get_cmdline_user_args():
 		if str(a) == "--room-test":
@@ -146,7 +171,10 @@ func _ready() -> void:
 				room_test["muse"] = str(a).split("=")[1]
 			else:
 				test["muse"] = str(a).split("=")[1]
-	if room_test:
+	if room_test and OS.get_cmdline_user_args().has("--standalone"):
+		muse.setup(cfg)
+		_standalone_test_run()
+	elif room_test:
 		muse.setup(cfg)
 		muse.find([room_test["muse"]])
 		_room_test_run()
@@ -357,6 +385,35 @@ func _floor_pointer() -> void:
 		room.tap_floor(hit)
 		hand.trigger_haptic_pulse("haptic", 0.0, 0.4, 0.06, 0.0)
 
+## an action for the real car when the headset is the brain (with the PC, Muse drives the car itself)
+func _car_action(a: String, amount: float) -> void:
+	var m := clampf(absf(amount) if amount != 0.0 else 0.5, 0.1, 2.0)
+	var deg := clampf(absf(amount) if amount != 0.0 else 90.0, 10.0, 360.0)
+	var sp := room.car_speed if room != null else 0.30
+	var turn := func(d: float, left: bool) -> Array: return [-70 if left else 70, 70 if left else -70, d / 360.0 * TURN_MS_360]
+	match a:
+		"stop", "stay": car_script = []; link.stop_now()
+		"forward": car_script = [[60, 60, m / sp * 1000.0]]
+		"back": car_script = [[-60, -60, m / sp * 1000.0]]
+		"left": car_script = [turn.call(deg, true)]
+		"right": car_script = [turn.call(deg, false)]
+		"spin": car_script = [turn.call(360.0, true)]
+		"dance": car_script = [[70, -70, 400], [-70, 70, 400], [70, -70, 400], [-70, 70, 400], [60, 60, 300], [-60, -60, 300]]
+		"wave": car_script = [[55, -55, 220], [-55, 55, 220], [55, -55, 220], [-55, 55, 220]]
+		_: return
+	_car_step_until = 0
+
+## the real car's short moves (standalone brain): one step after the other
+func _car_script_step() -> void:
+	if car_script.is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	if _car_step_until == 0:
+		_car_step_until = now + int(car_script[0][2])
+	elif now >= _car_step_until:
+		car_script.pop_front()
+		_car_step_until = 0 if car_script.is_empty() else now + int(car_script[0][2])
+
 func _refresh_panel() -> void:
 	var l = link
 	var who := "no robot yet"
@@ -479,10 +536,41 @@ func _start_room(with_robot := false) -> void:
 			room_note = t
 			_refresh_panel())
 	_mic_ready()
+	_wire_talk(room.talk, func(text): return room.local_ctx(text))
+	room.brain = brain
+	room.brain_fn = _brain_now
+	room.car_action.connect(_car_action)
 	room.begin(muse, cam, capture, hands_free)
 	room_note = ("Baby Carpathron: talk to him, he answers here and drives for real" if room.real else "") + ("" if room.passthrough or not xr_on else "  (passthrough is not available on this headset)")
 	_room_layout(true)
 	_refresh_panel()
+
+## where the companion thinks: Muse on the PC, or Meta's models straight from the headset (standalone)
+func _brain_now() -> String:
+	if brain_mode == "pc":
+		return "pc"
+	if brain_mode == "headset":
+		return "headset"
+	if muse.state == "linked" and muse.has_companion():
+		return "pc"
+	return "headset" if brain.has_key() else "pc"
+
+func _wire_talk(t: Node, ctx: Callable) -> void:
+	t.local = brain
+	t.brain_fn = _brain_now
+	t.ctx_fn = ctx
+	t.speech = speech
+
+static func _visual(text: String) -> bool:
+	return RegEx.create_from_string("(?i)\\b(see|look|looking|what'?s (this|that|here|there)|what is (this|that)|colou?r|wearing|holding|show me|how many|read|describe|around|in front|which one|recogni[sz]e|room)\\b").search(text) != null
+
+func _set_key(k: String) -> void:
+	brain.key = k.strip_edges()
+	cfg.set_value("meta", "key", brain.key); cfg.save("user://avatar.cfg")
+	menu3d.fields.erase("apikey")
+	link.note = "Meta API key saved in the headset"
+	_refresh_panel()
+	menu3d.refresh()
 
 func _stop_room() -> void:
 	if room == null:
@@ -564,11 +652,20 @@ func _setup_audio() -> void:
 	robot_talk.player = AudioStreamPlayer.new()
 	add_child(robot_talk.player)
 	robot_talk.mode_fn = func(): return "real"
+	_wire_talk(robot_talk, func(text):
+		var c := {"real": true, "objects": []}
+		if _visual(text) and screen_mat.albedo_texture != null:
+			var im: Image = screen_mat.albedo_texture.get_image()
+			if im:
+				c["jpg"] = im.save_jpg_to_buffer(0.75)
+		return c)
 	robot_talk.state_changed.connect(func(st):
 		if room == null and demo == null:
 			link.note = {"listening": "🎤 listening...", "thinking": "Carpathron is thinking...", "speaking": ""}.get(st, link.note)
 			_refresh_panel())
 	robot_talk.replied.connect(func(j):
+		if bool(j.get("local", false)):
+			_car_action(str(j.get("action", "none")), float(j.get("amount", 0)))
 		muse.last_answer = "You: %s\nCarpathron: %s%s" % [str(j.get("heard", "")), str(j.get("say", "")), ("\nThe car: " + str(j["doing"])) if str(j.get("doing", "")) != "" else ""]
 		_refresh_panel())
 	if OS.get_name() == "Android":
@@ -702,7 +799,36 @@ func _menu_items(p: String) -> Dictionary:
 			its.append({"id": "search", "arg": "x", "icon": "⟳", "color": C_BLUE, "label": "Search again", "sub": ("searching...  %d%%" % int(link.scan_progress() * 100)) if link.scanning else "looks on this Wi-Fi and asks Muse on the PC"})
 			its.append({"id": "page", "arg": "main", "icon": "‹", "color": C_GREY, "label": "Back"})
 			return {"title": "Your robots", "subtitle": "%d found" % link.found.size(), "chips": _chips(), "items": its, "parent": "main"}
+		"meta":
+			if not key_page.running:
+				key_page.start()
+			var bn := _brain_now()
+			var kv: String = ("set  ✓  ····" + brain.key.right(4)) if brain.has_key() else "not set"
+			its.append({"id": "brainmode", "arg": "", "icon": "◎", "color": C_ORANGE, "label": "Carpathron's brain", "sub": "Auto: Muse on the PC when it is linked, otherwise this headset with your key   ·   now: " + ("Muse on the PC" if bn == "pc" else "this headset (standalone)"), "value": {"auto": "Auto", "pc": "Muse PC", "headset": "This headset"}.get(brain_mode, "Auto")})
+			its.append({"section": "Meta API key (for the headset on its own)"})
+			its.append({"id": "page", "arg": "key", "icon": "⌨", "color": C_BLUE, "label": "Type or paste the key here", "sub": "the Quest keyboard opens", "value": kv})
+			if key_page.running and key_page.url() != "":
+				its.append({"id": "none", "arg": "", "icon": "📱", "color": C_BLUE, "label": "Or from your phone / PC: " + key_page.url(), "sub": "open it on the same Wi-Fi, code  " + key_page.code + "  — paste the key there", "value": ""})
+			if muse.state == "linked":
+				its.append({"id": "keyfrommuse", "arg": "", "icon": "⇩", "color": C_GREEN, "label": "Copy the key from Muse Carpathron (this PC)", "sub": "the key saved in Muse on " + muse.pc.split(":")[0] + " (needs Muse 2.3.2)"})
+			if brain.has_key():
+				its.append({"id": "keytest", "arg": "", "icon": "✓", "color": C_GREEN, "label": "Test the key", "sub": brain.last_error if brain.last_error != "" else "a tiny call to Meta's models"})
+				its.append({"id": "keyclear", "arg": "", "icon": "✕", "color": C_RED, "label": "Remove the key from this headset"})
+			its.append({"section": "His voice on the headset"})
+			var ts := str(speech.ttsStatus()) if speech else "not on this device"
+			var eng := str(speech.ttsEngine()) if speech else ""
+			its.append({"id": "voicetest", "arg": "", "icon": "♪", "color": C_PURPLE, "label": "Speech engine: " + (("ready  ·  " + eng) if ts == "ready" else ts), "sub": "Without the PC he speaks with the speech engine installed on the Quest. For a natural voice install the free sherpa-onnx Kokoro TTS engine (k2-fsa)." if ts != "ready" else "pull the trigger to hear him", "value": "Test" if ts == "ready" else ""})
+			its.append({"id": "page", "arg": "settings", "icon": "‹", "color": C_GREY, "label": "Back"})
+			return {"title": "Meta AI", "subtitle": "Use Meta's models straight from the headset — no PC needed", "chips": _chips(), "items": its, "parent": "settings"}
+		"key":
+			its.append({"field": "apikey", "label": "Meta API key (from Meta's developer site)", "secret": true, "placeholder": "Point here, pull the trigger, type or paste the key"})
+			its.append({"id": "keysave", "arg": "", "icon": "✓", "color": C_GREEN, "label": "Save the key"})
+			if key_page.running and key_page.url() != "":
+				its.append({"id": "none", "arg": "", "icon": "📱", "color": C_BLUE, "label": "Easier: on your phone open " + key_page.url(), "sub": "code  " + key_page.code})
+			its.append({"id": "page", "arg": "meta", "icon": "‹", "color": C_GREY, "label": "Back"})
+			return {"title": "Meta API key", "subtitle": "Stored only in this headset", "chips": _chips(), "items": its, "parent": "meta"}
 		"settings":
+			its.append({"id": "page", "arg": "meta", "icon": "✦", "color": C_ORANGE, "label": "Meta AI (use without the PC)", "sub": "API key, where Carpathron thinks, his voice on the headset", "value": "ready" if brain.has_key() else "no key"})
 			if demo == null:
 				its.append({"id": "view", "arg": "", "icon": "◐", "color": C_BLUE, "label": "View", "sub": "VR: the camera picture all around you   ·   Flat: a cinema screen", "value": "VR" if view_mode == "vr" else "Flat screen"})
 				if view_mode == "vr":
@@ -750,6 +876,38 @@ func _on_menu(action: String, arg: String) -> void:
 		"robotroom":
 			_start_room(true)
 			menu3d.close()
+		"brainmode":
+			brain_mode = {"auto": "pc", "pc": "headset", "headset": "auto"}.get(brain_mode, "auto")
+			cfg.set_value("meta", "brain", brain_mode); cfg.save("user://avatar.cfg")
+			menu3d.refresh()
+		"keysave", "field":
+			var k := str(menu3d.fields.get("apikey", "")).strip_edges()
+			if k.length() > 10:
+				_set_key(k)
+				menu3d.show_page("meta")
+		"keyclear":
+			_set_key("")
+		"keytest":
+			brain.last_error = "testing..."
+			menu3d.refresh()
+			brain.test_key(func(ok, msg):
+				brain.last_error = ("✓ " if ok else "✕ ") + msg
+				menu3d.refresh())
+		"keyfrommuse":
+			muse.get_key(func(k: String, err: String):
+				if k != "":
+					_set_key(k)
+				else:
+					link.note = "Muse: " + err
+					_refresh_panel()
+				menu3d.refresh())
+		"voicetest":
+			if speech and str(speech.ttsStatus()) == "ready":
+				var t: Node = room.talk if room != null else robot_talk
+				t.state = "thinking"
+				t._on_reply({"say": "Hi! This is my voice on your headset.", "action": "none"})
+		"none":
+			pass
 		"handsfree":
 			hands_free = not hands_free
 			cfg.set_value("ui", "hands_free", hands_free); cfg.save("user://avatar.cfg")
@@ -921,6 +1079,9 @@ func _process(delta: float) -> void:
 		welcome_pending = false
 		menu3d.open_at(cam, "welcome")
 	_background(delta)
+	if key_page.running and not (menu3d.is_open and menu3d.page in ["meta", "key"]):
+		key_page.stop()
+	_car_script_step()
 	info.visible = not menu3d.is_open   # the tour / robot text never shows through an open menu
 	var ls := Vector2.ZERO
 	var rs := Vector2.ZERO
@@ -1107,6 +1268,8 @@ func _process(delta: float) -> void:
 			demo.drive(int(round(l)), int(round(r2)))
 	elif room != null and not room.real:
 		room.manual((l + r2) / 200.0, (r2 - l) / 200.0)
+	elif not car_script.is_empty() and absf(l) < 5 and absf(r2) < 5:
+		link.drive(int(car_script[0][0]), int(car_script[0][1]))
 	elif room != null and room.nav_active():
 		if absf(l) > 5 or absf(r2) > 5:
 			room.nav_stop("you took the sticks")
@@ -1250,6 +1413,63 @@ func _room_test_run() -> void:
 		if sv:
 			sv.save_png(shot.replace(".png", "-pc.png"))
 	print("ROOM_TEST ", JSON.stringify(r))
+	get_tree().quit()
+
+## standalone (no PC): the headset brain looks at the room, talks, hears a WAV, and drives the real car
+func _standalone_test_run() -> void:
+	var r := {"brain": _brain_now()}
+	cam.rotation_degrees.x = -32.0
+	_start_room()
+	room.talk.state_changed.connect(func(st): room_test["states"].append(st))
+	for i in 250:
+		await get_tree().create_timer(0.1).timeout
+		if room.anchors.has("chair"):
+			break
+	r["anchors"] = room.anchors.keys()
+	var chair = room.find_anchor("chair")
+	var d0: float = room._floor(room.body.global_position).distance_to(room._floor(chair["pos"])) if chair != null else -1.0
+	room.talk.send_text("could you take a look at the chair for me")
+	for i in 300:
+		await get_tree().create_timer(0.1).timeout
+		if room.behaviour == "idle" and room.bubble.text.contains("chair") and room.talk.state != "thinking":
+			break
+	r["say"] = room.bubble.text
+	if chair != null:
+		r["chair_before"] = d0
+		r["chair_after"] = room._floor(room.body.global_position).distance_to(room._floor(chair["pos"]))
+	# a spoken sentence (WAV) -> Meta transcription -> the answer
+	var n := 24000
+	var w := PackedByteArray(); w.resize(44 + n * 2)
+	w.encode_u32(0, 0x46464952); w.encode_u32(4, 36 + n * 2); w.encode_u32(8, 0x45564157); w.encode_u32(12, 0x20746d66)
+	w.encode_u32(16, 16); w.encode_u16(20, 1); w.encode_u16(22, 1); w.encode_u32(24, 16000); w.encode_u32(28, 32000); w.encode_u16(32, 2); w.encode_u16(34, 16)
+	w.encode_u32(36, 0x61746164); w.encode_u32(40, n * 2)
+	var heard := {}
+	room.talk.replied.connect(func(j): heard["j"] = j, CONNECT_ONE_SHOT)
+	room.talk.send_wav(w)
+	for i in 200:
+		await get_tree().create_timer(0.1).timeout
+		if heard.has("j"):
+			break
+	r["heard"] = str(heard.get("j", {}).get("heard", ""))
+	r["voice_say"] = str(heard.get("j", {}).get("say", ""))
+	for a in OS.get_cmdline_user_args():
+		if str(a).begins_with("--test-car="):
+			link.found = [{"host": str(a).substr(11), "name": "Baby Carpathron", "key": "car"}]
+			_on_menu("robot", "0")
+			for i in 100:
+				await get_tree().create_timer(0.1).timeout
+				if link.online:
+					break
+			r["car_online"] = link.online
+			room.talk.send_text("drive forward a bit")
+			for i in 200:
+				await get_tree().create_timer(0.1).timeout
+				if not car_script.is_empty():
+					break
+			r["car_script"] = car_script.size()
+			await get_tree().create_timer(2.0).timeout
+	r["states"] = room_test["states"]
+	print("STANDALONE_TEST ", JSON.stringify(r))
 	get_tree().quit()
 
 func _wait(sec: float) -> void:
@@ -1429,7 +1649,7 @@ func _cockpit_shot(spec: String) -> void:
 	_refresh_panel()
 	cam.position = Vector3(0, 1.6, 0)
 	(cam as Camera3D).fov = 100 if mode in ["vr", "flat"] else 66
-	if mode in ["menu", "robots", "missions", "settings", "welcome"]:
+	if mode in ["menu", "robots", "missions", "settings", "welcome", "meta", "key"]:
 		menu3d.open_at(cam, "main" if mode == "menu" else mode)
 	if mode == "welcome":
 		_start_demo()

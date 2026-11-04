@@ -18,10 +18,19 @@
 .field public rd:Landroid/media/ImageReader;
 .field public ses:Landroid/hardware/camera2/CameraCaptureSession;
 
+# ---- 1.6: text to speech with the speech engine installed on the headset (Android TextToSpeech)
+.field public static volatile tts:Landroid/speech/tts/TextToSpeech;
+.field public static volatile ttsStatus:Ljava/lang/String;
+.field public static ttsDone:Ljava/util/concurrent/ConcurrentHashMap;
+
 .method static constructor <clinit>()V
     .locals 1
     const-string v0, "off"
     sput-object v0, Lcom/carpathron/avatar/RoomCam;->status:Ljava/lang/String;
+    sput-object v0, Lcom/carpathron/avatar/RoomCam;->ttsStatus:Ljava/lang/String;
+    new-instance v0, Ljava/util/concurrent/ConcurrentHashMap;
+    invoke-direct {v0}, Ljava/util/concurrent/ConcurrentHashMap;-><init>()V
+    sput-object v0, Lcom/carpathron/avatar/RoomCam;->ttsDone:Ljava/util/concurrent/ConcurrentHashMap;
     const/4 v0, 0x0
     new-array v0, v0, [B
     sput-object v0, Lcom/carpathron/avatar/RoomCam;->last:[B
@@ -266,6 +275,128 @@
     move-exception v0
     invoke-virtual {v0}, Ljava/lang/Object;->toString()Ljava/lang/String;
     move-result-object v0
+    return-object v0
+.end method
+
+
+# start the speech engine (once); status: "starting" -> "ready" / "no engine ..."
+.method public ttsStart()Ljava/lang/String;
+    .locals 4
+    .annotation runtime Lorg/godotengine/godot/plugin/UsedByGodot;
+    .end annotation
+    sget-object v0, Lcom/carpathron/avatar/RoomCam;->tts:Landroid/speech/tts/TextToSpeech;
+    if-eqz v0, :cond_new
+    sget-object v0, Lcom/carpathron/avatar/RoomCam;->ttsStatus:Ljava/lang/String;
+    return-object v0
+    :cond_new
+    :try_start_0
+    const-string v0, "starting"
+    sput-object v0, Lcom/carpathron/avatar/RoomCam;->ttsStatus:Ljava/lang/String;
+    invoke-virtual {p0}, Lorg/godotengine/godot/plugin/GodotPlugin;->getActivity()Landroid/app/Activity;
+    move-result-object v1
+    new-instance v2, Lcom/carpathron/avatar/RoomCam$TtsInit;
+    invoke-direct {v2}, Lcom/carpathron/avatar/RoomCam$TtsInit;-><init>()V
+    new-instance v0, Landroid/speech/tts/TextToSpeech;
+    invoke-direct {v0, v1, v2}, Landroid/speech/tts/TextToSpeech;-><init>(Landroid/content/Context;Landroid/speech/tts/TextToSpeech$OnInitListener;)V
+    sput-object v0, Lcom/carpathron/avatar/RoomCam;->tts:Landroid/speech/tts/TextToSpeech;
+    new-instance v3, Lcom/carpathron/avatar/RoomCam$TtsProg;
+    invoke-direct {v3}, Lcom/carpathron/avatar/RoomCam$TtsProg;-><init>()V
+    invoke-virtual {v0, v3}, Landroid/speech/tts/TextToSpeech;->setOnUtteranceProgressListener(Landroid/speech/tts/UtteranceProgressListener;)I
+    :try_end_0
+    .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :catch_0
+    sget-object v0, Lcom/carpathron/avatar/RoomCam;->ttsStatus:Ljava/lang/String;
+    return-object v0
+    :catch_0
+    move-exception v0
+    invoke-virtual {v0}, Ljava/lang/Object;->toString()Ljava/lang/String;
+    move-result-object v0
+    sput-object v0, Lcom/carpathron/avatar/RoomCam;->ttsStatus:Ljava/lang/String;
+    return-object v0
+.end method
+
+.method public ttsStatus()Ljava/lang/String;
+    .locals 1
+    .annotation runtime Lorg/godotengine/godot/plugin/UsedByGodot;
+    .end annotation
+    sget-object v0, Lcom/carpathron/avatar/RoomCam;->ttsStatus:Ljava/lang/String;
+    return-object v0
+.end method
+
+# the default speech engine's package name ("" = none)
+.method public ttsEngine()Ljava/lang/String;
+    .locals 1
+    .annotation runtime Lorg/godotengine/godot/plugin/UsedByGodot;
+    .end annotation
+    :try_start_0
+    sget-object v0, Lcom/carpathron/avatar/RoomCam;->tts:Landroid/speech/tts/TextToSpeech;
+    if-eqz v0, :cond_none
+    invoke-virtual {v0}, Landroid/speech/tts/TextToSpeech;->getDefaultEngine()Ljava/lang/String;
+    move-result-object v0
+    if-eqz v0, :cond_none
+    :try_end_0
+    .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :catch_0
+    return-object v0
+    :catch_0
+    :cond_none
+    const-string v0, ""
+    return-object v0
+.end method
+
+# make a WAV file of the sentence (cache folder); returns the file path or "" when it could not start
+.method public ttsSay(Ljava/lang/String;Ljava/lang/String;F)Ljava/lang/String;
+    .locals 6
+    .annotation runtime Lorg/godotengine/godot/plugin/UsedByGodot;
+    .end annotation
+    :try_start_0
+    sget-object v0, Lcom/carpathron/avatar/RoomCam;->tts:Landroid/speech/tts/TextToSpeech;
+    if-eqz v0, :cond_fail
+    invoke-virtual {v0, p3}, Landroid/speech/tts/TextToSpeech;->setSpeechRate(F)I
+    invoke-virtual {p0}, Lorg/godotengine/godot/plugin/GodotPlugin;->getActivity()Landroid/app/Activity;
+    move-result-object v1
+    invoke-virtual {v1}, Landroid/app/Activity;->getCacheDir()Ljava/io/File;
+    move-result-object v1
+    new-instance v2, Ljava/lang/StringBuilder;
+    invoke-direct {v2}, Ljava/lang/StringBuilder;-><init>()V
+    invoke-virtual {v2, p2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    const-string v3, ".wav"
+    invoke-virtual {v2, v3}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+    invoke-virtual {v2}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
+    move-result-object v2
+    new-instance v3, Ljava/io/File;
+    invoke-direct {v3, v1, v2}, Ljava/io/File;-><init>(Ljava/io/File;Ljava/lang/String;)V
+    new-instance v4, Landroid/os/Bundle;
+    invoke-direct {v4}, Landroid/os/Bundle;-><init>()V
+    invoke-virtual {v0, p1, v4, v3, p2}, Landroid/speech/tts/TextToSpeech;->synthesizeToFile(Ljava/lang/CharSequence;Landroid/os/Bundle;Ljava/io/File;Ljava/lang/String;)I
+    move-result v5
+    if-nez v5, :cond_fail
+    invoke-virtual {v3}, Ljava/io/File;->getAbsolutePath()Ljava/lang/String;
+    move-result-object v0
+    :try_end_0
+    .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :catch_0
+    return-object v0
+    :catch_0
+    move-exception v0
+    invoke-virtual {v0}, Ljava/lang/Object;->toString()Ljava/lang/String;
+    move-result-object v0
+    sput-object v0, Lcom/carpathron/avatar/RoomCam;->ttsStatus:Ljava/lang/String;
+    :cond_fail
+    const-string v0, ""
+    return-object v0
+.end method
+
+# "" while it is being made, "done" or "error"
+.method public ttsState(Ljava/lang/String;)Ljava/lang/String;
+    .locals 1
+    .annotation runtime Lorg/godotengine/godot/plugin/UsedByGodot;
+    .end annotation
+    sget-object v0, Lcom/carpathron/avatar/RoomCam;->ttsDone:Ljava/util/concurrent/ConcurrentHashMap;
+    invoke-virtual {v0, p1}, Ljava/util/concurrent/ConcurrentHashMap;->get(Ljava/lang/Object;)Ljava/lang/Object;
+    move-result-object v0
+    if-nez v0, :cond_has
+    const-string v0, ""
+    return-object v0
+    :cond_has
+    check-cast v0, Ljava/lang/String;
     return-object v0
 .end method
 

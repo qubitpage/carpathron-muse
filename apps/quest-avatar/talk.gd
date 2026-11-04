@@ -30,6 +30,13 @@ var _play_t := 0.0
 var _deaf_until := 0
 var noise := 0.004                            # background level (adapts)
 var test_wav := PackedByteArray()             # automated test: what "the user says"
+# 1.6 standalone: the brain on the headset (Meta API key) and the headset's own speech engine
+var local: Node = null                        # brain_local.gd
+var brain_fn: Callable                        # -> "pc" / "headset"
+var ctx_fn: Callable                          # (text) -> {real, objects, jpg} for the headset brain
+var speech: Object = null                     # Android plugin CarpathronRoomCam (ttsSay / ttsState)
+var speech_rate := 1.0
+var _tts_wait := {}                           # {id, path, since} while a sentence is being made
 
 func _ready() -> void:
 	mix_rate = AudioServer.get_mix_rate()
@@ -54,6 +61,7 @@ func ptt(down: bool) -> void:
 
 func interrupt() -> void:
 	_queue.clear()
+	_tts_wait = {}
 	if player and player.playing:
 		player.stop()
 	if muse and muse.companion_busy:
@@ -78,13 +86,37 @@ func _finish_rec() -> void:
 	send_wav(_to_wav(_rec))
 	_rec = PackedFloat32Array()
 
+func _brain() -> String:
+	return brain_fn.call() if brain_fn.is_valid() else "pc"
+
 func send_wav(wav: PackedByteArray) -> void:
 	set_state("thinking")
+	if _brain() == "headset" and local != null:
+		local.transcribe(wav, func(text: String, err: String):
+			if state != "thinking":
+				return
+			if err != "":
+				_on_reply({"heard": "", "say": "I couldn't hear you through Meta (" + err + ").", "action": "none", "mood": "sorry", "error": err})
+			elif text == "":
+				_on_reply({"heard": "", "say": "Sorry, I didn't catch that.", "action": "none", "mood": "sorry"})
+			else:
+				_local_turn(text))
+		return
 	muse.companion(wav, "", mode_fn.call() if mode_fn.is_valid() else "demo", _on_reply)
 
 func send_text(text: String) -> void:
 	set_state("thinking")
+	if _brain() == "headset" and local != null:
+		_local_turn(text)
+		return
 	muse.companion(PackedByteArray(), text, mode_fn.call() if mode_fn.is_valid() else "demo", _on_reply)
+
+func _local_turn(text: String) -> void:
+	var ctx: Dictionary = ctx_fn.call(text) if ctx_fn.is_valid() else {}
+	local.turn(text, ctx, func(j: Dictionary):
+		j["heard"] = text
+		j["local"] = true
+		_on_reply(j))
 
 func _on_reply(j: Dictionary) -> void:
 	if state != "thinking":
@@ -92,6 +124,20 @@ func _on_reply(j: Dictionary) -> void:
 	replied.emit(j)
 	var au = j.get("audio", [])
 	_queue = (au as Array).duplicate() if typeof(au) == TYPE_ARRAY else []
+	# no voice files from the PC: the headset's own speech engine says it, sentence by sentence
+	if _queue.is_empty() and speech != null and str(speech.ttsStatus()) == "ready" and str(j.get("say", "")) != "":
+		var parts: Array = []
+		var rx := RegEx.create_from_string("[^.!?…]+[.!?…]*")
+		for m in rx.search_all(str(j["say"])):
+			var sn := m.get_string().strip_edges()
+			if sn == "":
+				continue
+			if not parts.is_empty() and (str(parts[-1]) + " " + sn).length() < 80:
+				parts[-1] = str(parts[-1]) + " " + sn
+			else:
+				parts.append(sn)
+		for p in parts:
+			_queue.append({"tts": p})
 	if _queue.is_empty():
 		set_state("idle")
 		_deaf_until = Time.get_ticks_msec() + 300
@@ -104,7 +150,15 @@ func _next_sentence() -> void:
 		set_state("idle")
 		_deaf_until = Time.get_ticks_msec() + 450
 		return
-	var url: String = _queue.pop_front()
+	var item = _queue.pop_front()
+	if typeof(item) == TYPE_DICTIONARY:
+		var id := "s%d" % Time.get_ticks_usec()
+		var path := str(speech.ttsSay(str(item["tts"]), id, speech_rate))
+		if path == "":
+			_next_sentence(); return
+		_tts_wait = {"id": id, "path": path, "since": Time.get_ticks_msec()}
+		return
+	var url: String = item
 	muse.fetch_audio(url, func(b: PackedByteArray):
 		if state != "speaking":
 			return
@@ -153,7 +207,26 @@ func wav_stream(b: PackedByteArray) -> AudioStreamWAV:
 		k += step
 	return st
 
+func _play_bytes(b: PackedByteArray) -> void:
+	var st := wav_stream(b)
+	if st == null:
+		_next_sentence(); return
+	player.stream = st
+	player.play()
+	_play_t = 0.0
+
 func _process(delta: float) -> void:
+	# the headset's speech engine finished a sentence file
+	if not _tts_wait.is_empty() and speech != null:
+		var stt := str(speech.ttsState(_tts_wait["id"]))
+		if stt == "done" or stt == "error" or Time.get_ticks_msec() - int(_tts_wait["since"]) > 15000:
+			var path: String = _tts_wait["path"]
+			_tts_wait = {}
+			if state == "speaking" and stt == "done":
+				_play_bytes(FileAccess.get_file_as_bytes(path))
+				DirAccess.remove_absolute(path)
+			elif state == "speaking":
+				_next_sentence()
 	# speaking: next sentence when this one ends, loudness for the mouth
 	if state == "speaking" and player:
 		if player.playing:

@@ -32,6 +32,7 @@ var _last_px := Vector2(-1, -1)
 var _first: Control = null
 var _focus_key := ""
 var _pending := false
+var fields := {}                # 1.6: text typed into fields (e.g. the Meta API key), by field name
 
 func _ready() -> void:
 	vp = SubViewport.new()
@@ -99,6 +100,8 @@ func back() -> void:
 func refresh() -> void:
 	if not is_open or _pending:
 		return
+	if vp.gui_get_focus_owner() is LineEdit:
+		return   # never rebuild under your fingers while you type
 	_pending = true
 	_rebuild.call_deferred()
 
@@ -260,6 +263,44 @@ func _row(it: Dictionary) -> Button:
 		b.add_child(holder)
 	return b
 
+## a text field: point + trigger opens the Quest keyboard; the text is kept in fields[name]
+func _field(it: Dictionary) -> Control:
+	var name := str(it["field"])
+	var box := Panel.new()
+	box.custom_minimum_size = Vector2(0, 112)
+	box.add_theme_stylebox_override("panel", _box(C_CARD, 24, 2, Color(1, 1, 1, 0.05)))
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var l := _label(str(it.get("label", "")), 27, C_SUB)
+	l.position = Vector2(28, 10)
+	box.add_child(l)
+	var le := LineEdit.new()
+	le.set_meta("key", "field|" + name)
+	le.position = Vector2(24, 46)
+	le.size = Vector2(PX - 112 - 48, 56)
+	le.add_theme_font_size_override("font_size", 30)
+	le.placeholder_text = str(it.get("placeholder", "Point here and pull the trigger to type"))
+	le.secret = bool(it.get("secret", false))
+	le.text = str(fields.get(name, it.get("value", "")))
+	le.virtual_keyboard_enabled = true
+	le.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_PASSWORD if le.secret else LineEdit.KEYBOARD_TYPE_DEFAULT
+	le.add_theme_stylebox_override("normal", _box(Color(0.05, 0.06, 0.08), 16, 2, Color(1, 1, 1, 0.08)))
+	le.add_theme_stylebox_override("focus", _box(Color(0.05, 0.06, 0.08), 16, 3, C_ACCENT))
+	le.text_changed.connect(func(t): fields[name] = t)
+	le.text_submitted.connect(func(t):
+		fields[name] = t
+		chosen.emit("field", name))
+	le.mouse_entered.connect(func(): le.grab_focus())
+	box.add_child(le)
+	if _first == null:
+		_first = le
+	return box
+
+## the Quest keyboard types into the main window: pass the keys on to the menu (where the text field is)
+func _input(event: InputEvent) -> void:
+	if is_open and event is InputEventKey and vp.gui_get_focus_owner() is LineEdit:
+		vp.push_input(event)
+		get_viewport().set_input_as_handled()
+
 func _list(items: Array, area: Rect2) -> void:
 	var sc := ScrollContainer.new()
 	sc.position = area.position
@@ -277,6 +318,9 @@ func _list(items: Array, area: Rect2) -> void:
 			var s := _label(str(it["section"]).to_upper(), 22, C_SUB)
 			s.custom_minimum_size = Vector2(0, 34)
 			vb.add_child(s)
+			continue
+		if it.has("field"):
+			vb.add_child(_field(it))
 			continue
 		vb.add_child(_row(it))
 

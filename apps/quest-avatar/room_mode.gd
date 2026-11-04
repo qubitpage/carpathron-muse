@@ -8,6 +8,7 @@ extends Node3D
 ## With a real robot car connected, the car does the tasks for real and this Carpathron is its voice and face.
 
 signal note(text: String)
+signal car_action(action: String, amount: float)   # 1.6: the real car moves when the headset is the brain
 
 const RobotModel = preload("res://robot_model.gd")
 const Talk = preload("res://talk.gd")
@@ -64,6 +65,10 @@ var highlight: Node3D = null
 var shadow: MeshInstance3D
 var car_anchor := Vector3.ZERO   # real car: where his voice and words are (under the camera window)
 var man_v := 0.0
+var brain: Node = null            # 1.6: brain_local.gd (standalone)
+var brain_fn: Callable            # -> "pc" / "headset"
+var local_room := {}              # the room objects found by the headset brain: {seen, at, frame}
+var _last_jpg := PackedByteArray()
 # ---- guided driving of the real car (the headset sees the car and the goal, Muse/the car only gets wheel commands)
 const CAR_TURN_MS360 := 2400.0   # full turn at speed 70 (same calibration as the rest of the app)
 var car_speed := 0.30            # m/s at speed 60 — learned while driving
@@ -248,7 +253,8 @@ func _update_view_tex() -> void:
 
 func _send_eyes() -> void:
 	var now := Time.get_ticks_msec()
-	if now < next_eyes or muse == null or muse.state != "linked":
+	var standalone_ok: bool = brain != null and brain_fn.is_valid() and brain_fn.call() == "headset" and brain.has_key()
+	if now < next_eyes or muse == null or (muse.state != "linked" and not standalone_ok):
 		return
 	next_eyes = now + (700 if not nav.is_empty() else 1100)
 	var jpg := PackedByteArray()
@@ -261,14 +267,26 @@ func _send_eyes() -> void:
 		jpg = FileAccess.get_file_as_bytes(room_image)
 	if jpg.size() < 200:
 		return
+	_last_jpg = jpg
 	frame_id += 1
-	if muse.post_eyes(jpg, frame_id):
+	var fid := frame_id
+	var standalone: bool = brain != null and brain_fn.is_valid() and brain_fn.call() == "headset"
+	if standalone:
+		# the headset brain looks at the room itself (Meta API), no PC
+		if not brain.vision_busy:
+			poses[fid] = cam.global_transform
+			poses.erase(fid - 40)
+			brain.room_vision(jpg, func(seen: Array, err: String):
+				print("CARPATHRON_VISION ", JSON.stringify({"objects": seen.size(), "error": err}))
+				if err == "":
+					local_room = {"seen": seen, "at": Time.get_ticks_msec(), "frame": fid})
+	elif muse.post_eyes(jpg, frame_id):
 		poses[frame_id] = cam.global_transform
 		poses.erase(frame_id - 40)
 
 ## what Muse recognised in a headset picture -> markers in the room where those things are
 func _update_anchors() -> void:
-	var rv = muse.state_data.get("room", null)
+	var rv = local_room if not local_room.is_empty() and brain_fn.is_valid() and brain_fn.call() == "headset" else muse.state_data.get("room", null)
 	if typeof(rv) != TYPE_DICTIONARY:
 		return
 	var at := int(rv.get("at", 0))
@@ -370,6 +388,22 @@ func _marker(label: String, kind: String) -> Node3D:
 	n.add_child(tag)
 	return n
 
+## what the headset brain gets with what you said: the room's objects (newest first) and, for visual questions,
+## the newest headset camera picture
+func local_ctx(text: String) -> Dictionary:
+	var keys := anchors.keys()
+	keys.sort_custom(func(a, b): return int(anchors[a]["at"]) > int(anchors[b]["at"]))
+	var objs: Array = []
+	var now := Time.get_ticks_msec()
+	for k in keys.slice(0, 18):
+		var a = anchors[k]
+		var d := _floor(cam.global_position).distance_to(_floor(a["pos"]))
+		objs.append("%s (~%.1f m from you%s)" % [k, d, ", in view" if now - int(a["at"]) < 6000 else ""])
+	var c := {"real": real, "objects": objs}
+	if get_parent().has_method("_visual") and get_parent()._visual(text) and _last_jpg.size() > 0:
+		c["jpg"] = _last_jpg
+	return c
+
 func find_anchor(name: String) -> Variant:
 	var q := name.to_lower().strip_edges()
 	if q == "":
@@ -441,6 +475,9 @@ func do_action(a: String, tgt: String, amount: float, j := {}) -> void:
 			note.emit("Baby Carpathron is looking for the " + tgt + " with his camera")
 			return
 		nav_start(tgt_p, tgt if a == "goto" else "you", a == "follow")
+		return
+	if real and a not in ["none", "look", "outline"] and bool(j.get("local", false)):
+		car_action.emit(a, amount)
 		return
 	if real and a not in ["none", "look", "outline", "wave"]:
 		model.nod()

@@ -286,6 +286,22 @@ func has_companion() -> bool:
 	var p := version.split(".")
 	return p.size() >= 2 and (int(p[0]) > 2 or (int(p[0]) == 2 and int(p[1]) >= 3))
 
+## 1.6: copy the Meta API key saved in Muse Carpathron on the PC into the headset (the headset is linked = allowed)
+func get_key(done: Callable) -> void:
+	if state != "linked":
+		done.call("", "not linked"); return
+	var r := _mk(8.0)
+	r.request_completed.connect(func(result, code, _h, b):
+		r.queue_free()
+		var j = JSON.parse_string(b.get_string_from_utf8()) if result == HTTPRequest.RESULT_SUCCESS else null
+		if code == 200 and typeof(j) == TYPE_DICTIONARY and str(j.get("key", "")) != "":
+			done.call(str(j["key"]), "")
+		elif code == 404:
+			done.call("", "update Muse Carpathron to 2.3.2")
+		else:
+			done.call("", str(j.get("error", "no key in Muse")) if typeof(j) == TYPE_DICTIONARY else "PC not reachable"))
+	r.request(_base() + "/avatar/apikey", ["x-avatar-token: " + token])
+
 func cancel_companion() -> void:
 	if companion_busy:
 		_comp_req.cancel_request()

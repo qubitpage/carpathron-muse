@@ -334,6 +334,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   companion.onSay = companionSay;
   // 2.3.9: one companion turn (from the headset's microphone, or from this PC's microphone): answer + his voice files
   let lastHeadset = { mode: 'demo', guide: false, at: 0 };
+  let pcMicAt = 0;   // Muse is listening with this PC's microphone (the page says so every 2 s)
   const companionReply = async (text, mode, guide, t0) => {
     const sttMs = Date.now() - t0;
     if (voice.voiceToCommand(text) === '/robot stop') { roommap.stop('Quest'); missions.stop('Quest'); robot.stop('Quest'); }
@@ -888,6 +889,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
     }
     // 2.3.9: talk to Carpathron with THIS PC's microphone (e.g. a USB headset): the answer is spoken in the Quest
     // (the headset picks it up like anything he says by himself) and the car / 3D Carpathron does the action
+    if (p === '/api/avatar/pcmic' && m === 'POST') { pcMicAt = Date.now(); return send(res, 200, { ok: true }); }
     if (p === '/api/avatar/talk' && m === 'POST') {
       const t0 = Date.now();
       const raw = await readBody(req, 12 * 1024 * 1024);
@@ -1444,6 +1446,11 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
             const out = await companionReply(text, mode, guide, t0);
             return send(res, 200, { heard: text, ...out });
           }
+          // 2.3.10: the right grip in the headset = push-to-talk on the PC's microphone (when Muse listens with it)
+          if (url.pathname === '/avatar/ptt' && req.method === 'POST') {
+            emit('pc_ptt', { down: url.searchParams.get('down') === '1' });
+            return send(res, 200, { ok: true, pcMic: Date.now() - pcMicAt < 5000 });
+          }
           if (url.pathname.startsWith('/avatar/speech/') && req.method === 'GET') {
             const nm = url.pathname.slice('/avatar/speech/'.length), job = speechJobs.get(nm.replace(/\.wav$/, ''));
             if (job) await Promise.race([job, new Promise((r) => setTimeout(r, 30000))]);
@@ -1477,6 +1484,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
               seen: liveVision.seen, seenAt: liveVision.at, seenAgoMs: liveVision.at ? Date.now() - liveVision.at : -1, seenSrc: 'car',
               room: { seen: roomVision.seen, at: roomVision.at, frame: roomVision.frame, agoMs: roomVision.at ? Date.now() - roomVision.at : -1, ms: roomVision.ms || 0 },
               companion: { busy: companion.busy, task: companion.task, say: companionSayMsg && Date.now() - companionSayMsg.id < 30000 ? companionSayMsg : null },
+              pcMic: Date.now() - pcMicAt < 5000,
               car: store.settings.robot.carIp ? { ip: String(store.settings.robot.carIp), name: (robot.info && robot.info.name) || 'Baby Carpathron', online: robot.state === 'online' } : null,
               targets: [...v.places.map((p) => ({ name: p.name, kind: 'place' })), ...v.objects.map((o) => ({ name: o.name, kind: 'object' }))].filter((t, i, l) => l.findIndex((q) => q.name.toLowerCase() === t.name.toLowerCase()) === i) });
           }

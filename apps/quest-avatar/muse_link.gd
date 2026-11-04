@@ -214,6 +214,20 @@ func scan_room() -> void:
 	_call("/avatar/scan", {}, "application/json", func(_j): pass)
 
 ## a mission for the car, run by Muse on the PC: "explore", "scan", "measure", "find" (with name) or "stop"
+## 1.6.10: Muse listens with the PC's microphone (USB / Logitech headset): the right grip is push-to-talk there
+func pc_mic() -> bool:
+	return state == "linked" and bool(state_data.get("pcMic", false))
+
+func pc_ptt(down: bool) -> void:
+	if state != "linked":
+		return
+	var r := HTTPRequest.new()
+	r.timeout = 4.0
+	r.set_tls_options(_tls)
+	add_child(r)
+	r.request_completed.connect(func(_a, _b, _c, _d): r.queue_free())
+	r.request(_base() + "/avatar/ptt?down=" + ("1" if down else "0"), ["x-avatar-token: " + token], HTTPClient.METHOD_POST, "")
+
 func mission(action: String, name := "") -> void:
 	if state != "linked":
 		last_answer = "Missions need Muse Carpathron on the PC (link the headset first)"

@@ -59,6 +59,18 @@ func set_state(s: String) -> void:
 
 ## grip pressed: interrupt Carpathron and listen; released: send what you said
 func ptt(down: bool) -> void:
+	# 1.6.10: Muse is listening with the PC's microphone: the grip records THERE (the headset microphone is not used)
+	if muse and muse.has_method("pc_mic") and muse.pc_mic():
+		if down and not _pc_held:
+			_pc_held = true
+			interrupt()
+			muse.pc_ptt(true)
+			set_state("listening")
+		elif not down and _pc_held:
+			_pc_held = false
+			muse.pc_ptt(false)
+			set_state("idle")
+		return
 	if down and not _ptt:
 		_ptt = true
 		interrupt()
@@ -178,6 +190,7 @@ func _missed() -> void:
 
 var _misses := 0
 var _zero_ms := 0.0
+var _pc_held := false
 var _mic_tries := 0
 
 ## 1.6.8: the headset's microphone input can go dead (only zeros) after the app plays sound: notice it and ask for a
@@ -410,7 +423,8 @@ func _process(delta: float) -> void:
 		_pre = _pre.slice(_pre.size() - keep)
 	if state == "idle":
 		noise = lerpf(noise, minf(rms, 0.05), 0.02)
-		if hands_free and Time.get_ticks_msec() > _deaf_until and rms > noise * 2.5 + 0.005:
+		var pcm: bool = muse != null and muse.has_method("pc_mic") and muse.pc_mic()
+		if hands_free and not pcm and Time.get_ticks_msec() > _deaf_until and rms > noise * 2.5 + 0.005:
 			_voice_ms += ms
 			if _voice_ms > 120.0:
 				_start_rec()

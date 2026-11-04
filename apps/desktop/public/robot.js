@@ -288,6 +288,7 @@
       const rms = Math.sqrt(s2 / x.length), ms = x.length / pc.sr * 1000;
       if (meter) meter.style.width = `${Math.min(100, rms * 400)}%`;
       if (pc.busy) return;
+      if (pc.held) { pc.buf.push(x); return; }   // the headset's grip is held: record until it is released
       if (!pc.rec) {
         pc.pre.push(x); while (pc.pre.length > Math.ceil(400 / ms)) pc.pre.shift();
         if (rms < pc.noise * 2) pc.noise = pc.noise * 0.98 + Math.min(rms, 0.05) * 0.02;
@@ -311,6 +312,13 @@
     pc.stream = null; talkBtn.textContent = '🎤 Talk to Carpathron with this PC\'s microphone'; talkBtn.classList.remove('recording');
   }
   if (talkBtn) talkBtn.onclick = () => (pc.on ? pcStop() : pcStart());
+  // the headset tells Muse that this microphone is in use, so its right grip becomes push-to-talk here
+  setInterval(() => { if (pc.on) fetch('/api/avatar/pcmic', { method: 'POST', credentials: 'same-origin' }).catch(() => {}); }, 2000);
+  window.MCpcPtt = (d) => {
+    if (!pc.on) return;
+    if (d.down) { pc.busy = false; pc.held = true; pc.rec = false; pc.buf = pc.pre.slice(); talkState.textContent = '🎤 listening (grip held)…'; }
+    else if (pc.held) { pc.held = false; const chunks = pc.buf; pc.buf = []; pc.voiceMs = 0; if (chunks.length > 4) pcSend(chunks); else talkState.textContent = '🎤 listening'; }
+  };
   $('#btnQuestFull').onclick = () => { const w = $('#questVideo'); (w.requestFullscreen || w.webkitRequestFullscreen || (() => {})).call(w); };
   let ledT;
   $('#carLed').oninput = (e) => { clearTimeout(ledT); ledT = setTimeout(() => window.MCapi('/api/robot/led', { body: { v: Number(e.target.value) } }).catch(() => {}), 120); };
@@ -529,6 +537,7 @@
   window.MCRobot = {
     onCompanion,
     onCompanionVoice,
+    onPcPtt: (d) => window.MCpcPtt && window.MCpcPtt(d),
     onPhoto: (d) => showPhoto(d.path, d.source),
     show: async (S) => {
       visible = true;

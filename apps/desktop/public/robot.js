@@ -211,7 +211,7 @@
     const mix = ctx.createMediaStreamDestination();
     try { ctx.createMediaStreamSource(voiceDest.stream).connect(mix); } catch (_) {}
     if ($('#questRecMic').checked) {
-      try { rec.mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); ctx.createMediaStreamSource(rec.mic).connect(mix); }
+      try { const dev = window.MCpcMic ? window.MCpcMic() : ''; rec.mic = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: dev ? { exact: dev } : undefined, echoCancellation: true, noiseSuppression: true } }); ctx.createMediaStreamSource(rec.mic).connect(mix); }
       catch (e) { recState.textContent = `Microphone not available (${e.message}) — recording without your voice.`; rec.mic = null; }
     }
     for (const t of mix.stream.getAudioTracks()) stream.addTrack(t);
@@ -233,6 +233,84 @@
     recBtn.textContent = '⏺ Record'; recBtn.classList.remove('recording');
   }
   if (recBtn) { recBtn.onclick = () => (rec.on ? recStop() : recStart()); listRecordings(); }
+  // 2.3.9: 🎤 talk to Carpathron with THIS PC's microphone (a USB / Logitech headset): hands-free — it starts when you
+  // speak and sends when you stop; the answer is spoken in the Quest and he does the action
+  const micSel = $('#pcMicSel'), talkBtn = $('#btnPcTalk'), talkState = $('#pcTalkState');
+  const pc = { on: false, stream: null, ctx: null, node: null, src: null, buf: [], pre: [], voiceMs: 0, quietMs: 0, noise: 0.004, rec: false, busy: false, sr: 48000 };
+  async function fillMics() {
+    try {
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
+      let want = ''; try { want = localStorage.getItem('mc.pcMic') || ''; } catch (_) {}
+      micSel.innerHTML = '';
+      for (const d of devs) { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || 'Microphone'; micSel.append(o); }
+      const lg = devs.find((d) => /logitech|headset|usb/i.test(d.label));
+      micSel.value = devs.some((d) => d.deviceId === want) ? want : (lg ? lg.deviceId : (devs[0] && devs[0].deviceId) || '');
+    } catch (_) {}
+  }
+  window.MCpcMic = () => (micSel && micSel.value) || '';
+  if (micSel) { micSel.onchange = () => { try { localStorage.setItem('mc.pcMic', micSel.value); } catch (_) {} if (pc.on) { pcStop(); pcStart(); } }; fillMics(); }
+  function toWav16(chunks, sr) {
+    let n = 0; for (const c of chunks) n += c.length;
+    const all = new Float32Array(n); let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
+    let mean = 0; for (let i = 0; i < n; i++) mean += all[i]; mean /= Math.max(1, n);
+    const ratio = sr / 16000, m = Math.floor(n / ratio);
+    let pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(all[i] - mean));
+    const g = Math.min(8, Math.max(1, 0.9 / Math.max(pk, 1e-4)));
+    const b = new DataView(new ArrayBuffer(44 + m * 2));
+    const w = (off, str) => { for (let i = 0; i < 4; i++) b.setUint8(off + i, str.charCodeAt(i)); };
+    w(0, 'RIFF'); b.setUint32(4, 36 + m * 2, true); w(8, 'WAVE'); w(12, 'fmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+    b.setUint32(24, 16000, true); b.setUint32(28, 32000, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, 'data'); b.setUint32(40, m * 2, true);
+    for (let i = 0; i < m; i++) { const a = Math.floor(i * ratio), z = Math.min(n, Math.floor((i + 1) * ratio)); let v = 0; for (let j = a; j < z; j++) v += all[j]; v = (v / Math.max(1, z - a) - mean) * g; b.setInt16(44 + i * 2, Math.max(-1, Math.min(1, v)) * 32767, true); }
+    return new Blob([b.buffer], { type: 'audio/wav' });
+  }
+  async function pcSend(chunks) {
+    pc.busy = true; talkState.textContent = '💭 Carpathron is thinking…';
+    try {
+      const r = await fetch('/api/avatar/talk', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'audio/wav' }, body: toWav16(chunks, pc.sr) }).then((x) => x.json());
+      if (r.error) talkState.textContent = `⚠ ${r.error}`;
+      else if (r.missed) talkState.textContent = '🎤 (didn\'t get that — say it again)';
+      else talkState.textContent = `You: ${r.heard}  →  Carpathron: ${r.say || ''}${r.action && r.action !== 'none' ? `  [${r.action}${r.target ? ' ' + r.target : ''}]` : ''}`;
+    } catch (e) { talkState.textContent = `⚠ ${e.message}`; }
+    setTimeout(() => { pc.busy = false; if (pc.on && !/⚠/.test(talkState.textContent)) talkState.textContent += '   ·   🎤 listening'; }, 1200);
+  }
+  async function pcStart() {
+    try {
+      pc.stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: micSel.value ? { exact: micSel.value } : undefined, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    } catch (e) { talkState.textContent = `⚠ Microphone not available: ${e.message}`; return; }
+    fillMics();
+    pc.ctx = new (window.AudioContext || window.webkitAudioContext)(); pc.sr = pc.ctx.sampleRate;
+    pc.src = pc.ctx.createMediaStreamSource(pc.stream);
+    pc.node = pc.ctx.createScriptProcessor(2048, 1, 1);
+    const meter = $('#pcMicMeter span');
+    pc.node.onaudioprocess = (e) => {
+      const x = new Float32Array(e.inputBuffer.getChannelData(0));
+      let s2 = 0; for (let i = 0; i < x.length; i++) s2 += x[i] * x[i];
+      const rms = Math.sqrt(s2 / x.length), ms = x.length / pc.sr * 1000;
+      if (meter) meter.style.width = `${Math.min(100, rms * 400)}%`;
+      if (pc.busy) return;
+      if (!pc.rec) {
+        pc.pre.push(x); while (pc.pre.length > Math.ceil(400 / ms)) pc.pre.shift();
+        if (rms < pc.noise * 2) pc.noise = pc.noise * 0.98 + Math.min(rms, 0.05) * 0.02;
+        if (rms > Math.max(0.015, pc.noise * 3)) { pc.voiceMs += ms; if (pc.voiceMs > 120) { pc.rec = true; pc.buf = pc.pre.slice(); pc.quietMs = 0; talkState.textContent = '🎤 listening… (stop talking to send)'; } }
+        else pc.voiceMs = 0;
+        return;
+      }
+      pc.buf.push(x);
+      if (rms > Math.max(0.012, pc.noise * 2.5)) pc.quietMs = 0; else pc.quietMs += ms;
+      const len = pc.buf.length * ms;
+      if (pc.quietMs > 900 || len > 15000) { pc.rec = false; pc.voiceMs = 0; const chunks = pc.buf; pc.buf = []; if (len - pc.quietMs > 350) pcSend(chunks); else talkState.textContent = '🎤 listening'; }
+    };
+    pc.src.connect(pc.node); pc.node.connect(pc.ctx.destination);
+    pc.on = true; talkBtn.textContent = '⏹ Stop talking with the PC microphone'; talkBtn.classList.add('recording');
+    talkState.textContent = '🎤 listening — just talk to Carpathron';
+  }
+  function pcStop() {
+    pc.on = false; pc.rec = false;
+    try { pc.node && pc.node.disconnect(); pc.src && pc.src.disconnect(); pc.ctx && pc.ctx.close(); } catch (_) {}
+    if (pc.stream) pc.stream.getTracks().forEach((t) => t.stop());
+    pc.stream = null; talkBtn.textContent = '🎤 Talk to Carpathron with this PC\'s microphone'; talkBtn.classList.remove('recording');
+  }
+  if (talkBtn) talkBtn.onclick = () => (pc.on ? pcStop() : pcStart());
   $('#btnQuestFull').onclick = () => { const w = $('#questVideo'); (w.requestFullscreen || w.webkitRequestFullscreen || (() => {})).call(w); };
   let ledT;
   $('#carLed').oninput = (e) => { clearTimeout(ledT); ledT = setTimeout(() => window.MCapi('/api/robot/led', { body: { v: Number(e.target.value) } }).catch(() => {}), 120); };

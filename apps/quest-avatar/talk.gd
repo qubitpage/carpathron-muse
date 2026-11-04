@@ -178,14 +178,18 @@ func _missed() -> void:
 
 var _misses := 0
 var _zero_ms := 0.0
+var _mic_tries := 0
 
 ## 1.6.8: the headset's microphone input can go dead (only zeros) after the app plays sound: notice it and ask for a
 ## restart (main.gd recreates the microphone), at most every 3 s
 func _mic_watch(ms: float, zero: bool) -> void:
 	if not active:
 		return
+	if not zero:
+		_mic_tries = 0
 	_zero_ms = _zero_ms + ms if zero else minf(_zero_ms, 0.0)
-	if _zero_ms > 800.0:
+	if _zero_ms > 800.0 and _mic_tries < 3:
+		_mic_tries += 1
 		print("CARPATHRON_TALK microphone silent for %d ms: restarting it" % int(_zero_ms))
 		_zero_ms = -3000.0
 		mic_silent.emit()
@@ -320,14 +324,17 @@ func say_now(j: Dictionary) -> void:
 	_on_reply(j)
 
 func _process(delta: float) -> void:
-	if active and muse and state == "idle":
+	if active and muse and state in ["idle", "listening"]:
 		var cs = muse.state_data.get("companion", {})
 		var said = cs.get("say", null) if typeof(cs) == TYPE_DICTIONARY else null
 		if typeof(said) == TYPE_DICTIONARY and int(said.get("id", 0)) > _said_id:
 			var first := _said_id == 0 and Time.get_ticks_msec() < 15000
 			_said_id = int(said["id"])
 			if not first and _brain() == "pc":
-				say_now({"say": str(said.get("text", "")), "audio": said.get("audio", []), "action": "none", "mood": "excited", "heard": ""})
+				# 1.6.9: also what you said with the PC's microphone (Muse): his answer + the action to do
+				if state == "listening":
+					_rt_stop(); _rec = PackedFloat32Array(); set_state("idle")
+				say_now({"say": str(said.get("text", "")), "audio": said.get("audio", []), "action": str(said.get("action", "none")), "target": str(said.get("target", "")), "amount": float(said.get("amount", 0)) if typeof(said.get("amount", 0)) in [TYPE_INT, TYPE_FLOAT] else 0.0, "mood": str(said.get("mood", "excited")), "heard": str(said.get("heard", "")), "boxes": said.get("boxes", []), "doing": str(said.get("doing", ""))})
 	# the headset's speech engine finished a sentence file
 	if not _tts_wait.is_empty() and speech != null:
 		var stt := str(speech.ttsState(_tts_wait["id"]))

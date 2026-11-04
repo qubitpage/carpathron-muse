@@ -733,3 +733,9 @@ button.chip { cursor: pointer; }
 .companion-feed .cf-you { align-self: flex-end; background: var(--accent-soft, rgba(80, 140, 255, .18)); }
 .companion-feed .cf-bot { align-self: flex-start; background: rgba(255, 140, 40, .14); border: 1px solid rgba(255, 140, 40, .3); }
 #questVideo:fullscreen { width: 100vw; height: 100vh; object-fit: contain; background: #000; border: 0; border-radius: 0; margin: 0; }
+
+.pctalk { align-items: center; gap: 8px; flex-wrap: wrap; }
+.pctalk select { max-width: 260px; }
+.pctalk .vmeter { display: inline-block; width: 90px; height: 8px; background: rgba(255,255,255,.08); border-radius: 4px; overflow: hidden; }
+.pctalk .vmeter span { display: block; height: 100%; width: 0; background: #2fbf71; transition: width .08s; }
+#btnPcTalk.recording { background: #d93025; color: #fff; }

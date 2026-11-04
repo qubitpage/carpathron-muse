@@ -332,6 +332,39 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   };
   const companion = new Companion({ agent, store, tts, robot, mapper, roommap, missions, liveVision, roomVision, roomEyes, log: logFn, emit });
   companion.onSay = companionSay;
+  // 2.3.9: one companion turn (from the headset's microphone, or from this PC's microphone): answer + his voice files
+  let lastHeadset = { mode: 'demo', guide: false, at: 0 };
+  const companionReply = async (text, mode, guide, t0) => {
+    const sttMs = Date.now() - t0;
+    if (voice.voiceToCommand(text) === '/robot stop') { roommap.stop('Quest'); missions.stop('Quest'); robot.stop('Quest'); }
+    // the companion's natural voice; the first sentence is made while the model is still writing the rest
+    const cv = tts && (tts.ready(tts.companionVoiceId(), true) ? tts.companionVoiceId() : tts.voiceId());
+    const canSpeak = !!(tts && tts.ready(cv, true));
+    // a new turn: the rest of the previous answer is not spoken any more (it would delay this one)
+    const gen = ++companionGen;
+    const say1 = (t, id) => (gen === companionGen ? tts.speak(t, { voice: cv, id, fast: true, rate: 1.05 }) : Promise.resolve());
+    const newId = () => require('crypto').randomBytes(6).toString('hex');
+    let first = null;
+    const onFirst = canSpeak ? (t) => { const id = newId(); const job = say1(t, id).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, job); setTimeout(() => speechJobs.delete(id), 120000).unref(); first = { text: t, id, job }; } : null;
+    const out = await companion.turn({ text, mode, guide, onFirst });
+    const pk = `${cv}|${out.say}`, cached = out.quick && phraseCache.get(pk);
+    if (cached && tts.file(`${cached}.wav`)) { fs.utimesSync(tts.file(`${cached}.wav`), new Date(), new Date()); out.audio = [`/avatar/speech/${cached}.wav`]; }
+    else if (canSpeak && out.say) {
+      let rest = String(out.say), ids = [];
+      if (first && rest.startsWith(first.text)) { ids.push(first.id); rest = rest.slice(first.text.length).trim(); }
+      const parts = [];
+      for (const sn of rest ? rest.split(/(?<=[.!?…])\s+/) : []) { if (parts.length && (parts[parts.length - 1] + ' ' + sn).length < 80) parts[parts.length - 1] += ' ' + sn; else parts.push(sn); }
+      let chain = ids.length ? first.job : Promise.resolve();
+      for (const part of parts) { const id = newId(); ids.push(id); chain = chain.then(() => say1(part, id)).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, chain); setTimeout(() => speechJobs.delete(id), 120000).unref(); }
+      await speechJobs.get(ids[0]);
+      if (tts.file(`${ids[0]}.wav`)) { out.audio = ids.map((id) => `/avatar/speech/${id}.wav`); if (out.quick && ids.length === 1) phraseCache.set(pk, ids[0]); }
+    }
+    if (out.audio && out.audio.length) emit('companion_voice', { say: out.say, audio: out.audio });
+    out.ms = { ...(out.ms || {}), stt: sttMs, total: Date.now() - t0 };
+    logFn(`Companion timing: heard ${sttMs} ms, thought ${out.ms.llm || 0} ms${out.ms.picture ? ' (with picture)' : ''}, first words ready ${out.ms.total} ms, voice ${canSpeak ? cv : 'headset (no PC voice ready)'}`);
+    return { heard: text, ...out };
+  };
+
   companion.carEyes = carEyes;
   missions.roommap = roommap;
   agent.mapper = mapper;
@@ -852,6 +885,20 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       let files = [];
       try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.webm')).map((f) => ({ name: f, file: path.join(dir, f), bytes: fs.statSync(path.join(dir, f)).size, at: fs.statSync(path.join(dir, f)).mtimeMs })).sort((a, b) => b.at - a.at).slice(0, 12); } catch {}
       return send(res, 200, { dir, files });
+    }
+    // 2.3.9: talk to Carpathron with THIS PC's microphone (e.g. a USB headset): the answer is spoken in the Quest
+    // (the headset picks it up like anything he says by himself) and the car / 3D Carpathron does the action
+    if (p === '/api/avatar/talk' && m === 'POST') {
+      const t0 = Date.now();
+      const raw = await readBody(req, 12 * 1024 * 1024);
+      const s2 = store.settings;
+      let text = '';
+      try { text = await voice.transcribe(raw, { apiKey: s2.apiKey, apiBase: s2.apiBase, mime: 'audio/wav' }); } catch (e) { return send(res, 200, { error: e.message }); }
+      if (!text) return send(res, 200, { heard: '', missed: true });
+      const real = Date.now() - (companion.realAt || 0) < 20000 || (Date.now() - lastHeadset.at < 600000 && lastHeadset.mode === 'real');
+      const out = await companionReply(text, real ? 'real' : 'demo', real, t0);
+      companionSayMsg = { id: Date.now(), text: String(out.say || '').slice(0, 600), audio: out.audio || [], action: out.action, target: out.target, amount: out.amount, mood: out.mood, heard: text, boxes: out.boxes, doing: out.doing, pc: true };
+      return send(res, 200, out);
     }
     if (p.startsWith('/api/avatar/speech/') && m === 'GET') {
       // 2.3.5: Carpathron's voice on this PC too (so a PC screen recording of the Quest view has his voice)
@@ -1393,33 +1440,8 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
               // catch that" was heard again by the headset microphone and made an endless loop
               if (!text) { logFn('Companion: the transcription was empty (no words in the recording)'); return send(res, 200, { heard: '', say: '', action: 'none', mood: 'curious', missed: true }); }
             } else text = String((await readJson(req)).text || '');
-            const sttMs = Date.now() - t0;
-            if (voice.voiceToCommand(text) === '/robot stop') { roommap.stop('Quest'); missions.stop('Quest'); robot.stop('Quest'); }
-            // the companion's natural voice; the first sentence is made while the model is still writing the rest
-            const cv = tts && (tts.ready(tts.companionVoiceId(), true) ? tts.companionVoiceId() : tts.voiceId());
-            const canSpeak = !!(tts && tts.ready(cv, true));
-            // a new turn: the rest of the previous answer is not spoken any more (it would delay this one)
-            const gen = ++companionGen;
-            const say1 = (t, id) => (gen === companionGen ? tts.speak(t, { voice: cv, id, fast: true, rate: 1.05 }) : Promise.resolve());
-            const newId = () => require('crypto').randomBytes(6).toString('hex');
-            let first = null;
-            const onFirst = canSpeak ? (t) => { const id = newId(); const job = say1(t, id).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, job); setTimeout(() => speechJobs.delete(id), 120000).unref(); first = { text: t, id, job }; } : null;
-            const out = await companion.turn({ text, mode, guide, onFirst });
-            const pk = `${cv}|${out.say}`, cached = out.quick && phraseCache.get(pk);
-            if (cached && tts.file(`${cached}.wav`)) { fs.utimesSync(tts.file(`${cached}.wav`), new Date(), new Date()); out.audio = [`/avatar/speech/${cached}.wav`]; }
-            else if (canSpeak && out.say) {
-              let rest = String(out.say), ids = [];
-              if (first && rest.startsWith(first.text)) { ids.push(first.id); rest = rest.slice(first.text.length).trim(); }
-              const parts = [];
-              for (const sn of rest ? rest.split(/(?<=[.!?…])\s+/) : []) { if (parts.length && (parts[parts.length - 1] + ' ' + sn).length < 80) parts[parts.length - 1] += ' ' + sn; else parts.push(sn); }
-              let chain = ids.length ? first.job : Promise.resolve();
-              for (const part of parts) { const id = newId(); ids.push(id); chain = chain.then(() => say1(part, id)).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, chain); setTimeout(() => speechJobs.delete(id), 120000).unref(); }
-              await speechJobs.get(ids[0]);
-              if (tts.file(`${ids[0]}.wav`)) { out.audio = ids.map((id) => `/avatar/speech/${id}.wav`); if (out.quick && ids.length === 1) phraseCache.set(pk, ids[0]); }
-            }
-            if (out.audio && out.audio.length) emit('companion_voice', { say: out.say, audio: out.audio });
-            out.ms = { ...(out.ms || {}), stt: sttMs, total: Date.now() - t0 };
-            logFn(`Companion timing: heard ${sttMs} ms, thought ${out.ms.llm || 0} ms${out.ms.picture ? ' (with picture)' : ''}, first words ready ${out.ms.total} ms, voice ${canSpeak ? cv : 'headset (no PC voice ready)'}`);
+            lastHeadset = { mode, guide, at: Date.now() };
+            const out = await companionReply(text, mode, guide, t0);
             return send(res, 200, { heard: text, ...out });
           }
           if (url.pathname.startsWith('/avatar/speech/') && req.method === 'GET') {

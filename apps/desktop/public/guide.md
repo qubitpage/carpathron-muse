@@ -27,6 +27,10 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.9:** **🎤 Talk to Carpathron with this PC's microphone** (Robots → Control → Meta Quest view): pick your USB /
+> Logitech headset microphone and just talk — he answers in the Quest and does it (walks, drives the car, looks).
+> ⏺ Record uses the same microphone for your voice. Carpathron Avatar 1.6.9 plays those answers and, when the Quest's own
+> microphone stops delivering sound, tries to reopen it (3 times) instead of sending silence.
 > **2.3.8:** a small turn is a small turn again: the PC stops a gyro turn that runs too long (a 20° turn spun 2-3 full
 > circles when the Mega hub's heading lagged) and then uses timed turns for 10 minutes. When nothing was understood
 > he stays quiet instead of saying "Sorry, I didn't catch that" — that sentence was heard again by the headset and made

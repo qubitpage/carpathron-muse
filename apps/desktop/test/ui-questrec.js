@@ -6,7 +6,8 @@ const { chromium } = require('playwright');
   const { startServer } = require('../backend/server');
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-rec-'));
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-recd-'));
-  fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ port: 18995, workspace: ws }));
+  const fake = require('./fake-meta.js'); await fake.start(18996);
+  fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({ port: 18995, workspace: ws, apiKey: 'test-key', apiBase: 'http://127.0.0.1:18996/v1' }));
   const srv = await startServer({ dataDir, log: () => {} });
   const H = { 'x-mc-token': srv.token, 'Content-Type': 'application/json' };
   // a "headset" links (Allow on the PC) and sends its view
@@ -33,6 +34,18 @@ const { chromium } = require('playwright');
   assert.ok(files.length === 1 && /^quest-.*\.webm$/.test(files[0]) && fs.statSync(path.join(ws, 'recordings', files[0])).size > 20000, `file: ${files} ${saved}`);
   assert.ok(/Saved/.test(saved), saved);
   assert.ok((await p.textContent('#questRecList')).includes(files[0]), 'listed');
+  // 2.3.9: talk to Carpathron with the PC microphone (Chromium's fake microphone beeps = "speech")
+  await p.click('#btnPcTalk');
+  let st = null;
+  for (let i = 0; i < 40; i++) {
+    await p.waitForTimeout(500);
+    st = await (await fetch('https://localhost:18995/avatar/state', { headers: { 'x-avatar-token': token } })).json().catch(() => null);
+    if (st && st.companion && st.companion.say && st.companion.say.pc) break;
+  }
+  const said = st && st.companion && st.companion.say;
+  console.log('PC microphone ->', await p.textContent('#pcTalkState'));
+  assert.ok(said && said.heard === 'Look left' && said.pc, 'PC mic talk reaches the headset: ' + JSON.stringify(said));
+  await p.click('#btnPcTalk');
   console.log('page errors:', errs);
   assert.strictEqual(errs.length, 0);
   console.log(`Quest recorder: OK — ${files[0]} ${fs.statSync(path.join(ws, 'recordings', files[0])).size} bytes`);

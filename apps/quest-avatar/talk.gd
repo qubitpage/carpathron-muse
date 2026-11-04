@@ -189,7 +189,7 @@ func _process(delta: float) -> void:
 				_quiet_ms = 0.0; _voice_ms += ms
 			else:
 				_quiet_ms += ms
-			if (_quiet_ms > 800.0 and _voice_ms > 250.0) or _rec.size() > mix_rate * 12.0:
+			if (_quiet_ms > 650.0 and _voice_ms > 250.0) or _rec.size() > mix_rate * 12.0:
 				_finish_rec()
 			elif _quiet_ms > 2500.0 and _voice_ms <= 250.0:
 				set_state("idle")

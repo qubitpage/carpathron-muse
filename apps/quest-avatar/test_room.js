@@ -25,7 +25,7 @@ const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
   await new Promise((r) => ws.on('open', r));
   const img = process.env.ROOM_IMAGE || path.join(DESKTOP, 'test', 'sample.jpg');
   const shot = process.env.ROOM_SHOT || '';
-  const out = await new Promise((resolve) => execFile('xvfb-run', ['-a', GODOT, '--path', __dirname, '--resolution', '1280x800', '--', '--room-test', '--test-muse=127.0.0.1:18744', '--test-car=127.0.0.1:18742', `--room-image=${img}`, ...(shot ? [`--room-shot=${shot}`] : [])], { timeout: 150000, maxBuffer: 1 << 24 }, (_e, so, se) => resolve(String(so) + String(se))));
+  const out = await new Promise((resolve) => execFile('xvfb-run', ['-a', GODOT, '--path', __dirname, '--resolution', '1280x800', '--', '--room-test', '--nav-sim', '--test-muse=127.0.0.1:18744', '--test-car=127.0.0.1:18742', `--room-image=${img}`, ...(shot ? [`--room-shot=${shot}`] : [])], { timeout: 150000, maxBuffer: 1 << 24 }, (_e, so, se) => resolve(String(so) + String(se))));
   const line = out.split('\n').find((l) => l.startsWith('ROOM_TEST '));
   if (!line) { console.log(out.split('\n').filter((l) => /ERROR|SCRIPT/.test(l)).slice(0, 20).join('\n')); console.log('ROOM TEST: FAILED (no result)'); process.exit(1); }
   const r = JSON.parse(line.slice(10));
@@ -47,6 +47,7 @@ const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
     'room picture behind the 3D for the PC view': r.view_bg,
     'PC view live (mode room)': !!view.live && view.mode === 'room',
     'companion events in Muse': events.includes('companion'),
+    'guided driving: the headset brings the car to the chair (unknown heading, learns its speed)': r.nav_dist < 0.5 && Math.abs(r.nav_speed_learned - 0.42) < 0.12,
     'Baby Carpathron picked: mixed reality + camera window, no 3D robot': r.real && r.car_online && r.car_window,
     'talking to Baby Carpathron drives the real car': /forward/i.test(r.real_say) && car.log.some((d) => /l=[1-9]|ws:[1-9]/.test(d)),
     ...(process.env.MC_TEST_KOKORO ? { 'spoke in the headset (natural voice)': r.states.includes('speaking') } : {}),

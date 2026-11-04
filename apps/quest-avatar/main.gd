@@ -844,11 +844,11 @@ func _vision_update() -> void:
 		muse.vision_src = "room"
 		vision.clear()
 		return
-	muse.vision_src = "car"
+	muse.vision_src = "both" if room != null else "car"   # with the real car in "my room": its camera AND the room
 	var on: bool = cfg.get_value("ui", "vision", true) and demo == null and link.online and muse.state == "linked"
 	if room != null:
 		room.car_anchor = screen.global_position + screen.global_basis.y.normalized() * -0.36
-	muse.want_vision = on
+	muse.want_vision = on or room != null
 	var st: Dictionary = muse.state_data
 	var fresh: bool = on and st.has("seen") and str(st.get("seenSrc", "car")) == "car" and int(st.get("seenAgoMs", -1)) >= 0 and int(st.get("seenAgoMs", -1)) < 7000
 	if not fresh:
@@ -1095,6 +1095,7 @@ func _process(delta: float) -> void:
 				demo.event("stop")
 			if room != null:
 				room.do_action("stop", "", 0.0)
+				room.nav_stop("STOP")
 				room.talk.interrupt()
 			link.note = "STOP"; _refresh_panel()
 			if xr_on:
@@ -1106,6 +1107,13 @@ func _process(delta: float) -> void:
 			demo.drive(int(round(l)), int(round(r2)))
 	elif room != null and not room.real:
 		room.manual((l + r2) / 200.0, (r2 - l) / 200.0)
+	elif room != null and room.nav_active():
+		if absf(l) > 5 or absf(r2) > 5:
+			room.nav_stop("you took the sticks")
+			link.drive(int(round(l)), int(round(r2)))
+		else:
+			var wv: Vector2 = room.nav_wheels()
+			link.drive(int(wv.x), int(wv.y))
 	else:
 		link.drive(int(round(l)), int(round(r2)))
 	robot_talk.capture = capture if room == null and demo == null and link.host != "" else null
@@ -1194,6 +1202,21 @@ func _room_test_run() -> void:
 	r["quick_say"] = room.bubble.text
 	await get_tree().create_timer(1.5).timeout
 	r["view_bg"] = room.view_tex != null
+	# guided driving (simulated car seen by the headset): unknown heading, real speed 0.42 m/s (not the guess 0.30)
+	if OS.get_cmdline_user_args().has("--nav-sim"):
+		room.real = true
+		room.sim_car = {"pos": Vector3(0.8, 0, -1.6), "yaw": 2.2, "speed": 0.42, "next": 0}
+		var goal := Vector3(-0.9, 0, -2.4)
+		room.nav_start(goal, "chair")
+		var t0 := Time.get_ticks_msec()
+		while room.nav_active() and Time.get_ticks_msec() - t0 < 40000:
+			await get_tree().create_timer(0.1).timeout
+		r["nav_dist"] = (room.sim_car["pos"] as Vector3).distance_to(goal)
+		r["nav_secs"] = (Time.get_ticks_msec() - t0) / 1000.0
+		r["nav_speed_learned"] = room.car_speed
+		r["nav_say"] = room.bubble.text
+		room.sim_car = {}
+		room.real = false
 	# with the real car (--test-car=IP:PORT): pick it -> mixed reality with its camera window; talk -> it drives
 	for a in OS.get_cmdline_user_args():
 		if str(a).begins_with("--test-car="):

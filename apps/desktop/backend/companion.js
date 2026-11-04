@@ -67,10 +67,13 @@ class Companion {
     this.task = '';            // what the real car is doing now
   }
 
+  // everything the headset camera saw in the last 15 minutes (newest first), what is in view right now marked
   roomObjects() {
-    const lv = this.liveVision;
-    if (lv.src !== 'room' || !lv.seen.length || Date.now() - lv.at > 60000) return [];
-    return lv.seen.map((o) => `${o.label} (${o.kind}${o.dist ? `, about ${o.dist} m away` : ''})`);
+    const rv = this.roomVision;
+    if (!rv) return [];
+    const now = Date.now(), inView = new Set(Date.now() - rv.at < 6000 ? rv.seen.map((o) => o.label.toLowerCase()) : []);
+    return [...rv.memory.values()].filter((m) => now - m.at < 15 * 60000).sort((a, b) => b.at - a.at).slice(0, 18)
+      .map((m) => `${m.label}${inView.has(m.label.toLowerCase()) ? ` (in view${m.dist ? `, ~${m.dist} m` : ''})` : ''}`);
   }
 
   freshPicture() {
@@ -81,14 +84,14 @@ class Companion {
     return null;
   }
 
-  async turn({ text, mode = 'demo' }) {
+  async turn({ text, mode = 'demo', guide = false, onFirst = null }) {
     const s = this.store.settings;
     if (!s.apiKey) return { say: 'Add the Meta API key in Muse Carpathron settings, then I can talk with you.', action: 'none' };
     const real = mode === 'real' && this.robot.state === 'online';
     const q = quick(text);
     if (q) {
       this.history.push({ role: 'user', content: String(text).slice(0, 600) }, { role: 'assistant', content: JSON.stringify({ say: q.say, action: q.action, target: q.target }) });
-      if (real) q.doing = await this.act(q).catch((e) => `couldn't: ${e.message}`);
+      if (real) q.doing = guide && ['goto', 'come', 'follow'].includes(q.action) ? 'guided by the headset' : await this.act(q).catch((e) => `couldn't: ${e.message}`);
       q.mode = real ? 'real' : 'demo';
       this.log(`Companion (${q.mode}, quick): "${clean(text, 80)}" → [${q.action}${q.target ? ' ' + q.target : ''}]`);
       this.emit('companion', { heard: text, say: q.say, action: q.action, target: q.target, mode: q.mode });
@@ -98,13 +101,15 @@ class Companion {
     this.busy = true;
     try {
       const objs = this.roomObjects();
-      const pic = this.freshPicture();
+      const visual = /\b(see|look|looking|what('?s| is) (this|that|here|there)|colou?r|wearing|holding|show me|how many|read|describe|around|in front|which one|recogni[sz]e|room)\b/i.test(text) || !objs.length;
+      const pic = visual ? this.freshPicture() : null;
+      const t0 = Date.now();
       const sys = [
         `You are Carpathron, a small friendly robot and the user's companion. The user wears a Meta Quest 3 headset in their real room.`,
         real ? 'You are a REAL robot car (Baby Carpathron, 4 wheels, a camera 10 cm above the floor) on the floor of that room: your actions really drive the car, so be careful and only move when asked.'
           : 'They see you as a 3D robot (about 1 m tall) standing in their real room (mixed reality). You walk on their floor.',
         pic ? `The picture is what ${pic.from === 'headset' ? 'the user sees right now (headset camera)' : 'your car camera sees'}.` : 'You have no picture right now.',
-        objs.length ? `Objects you recognised in the room: ${objs.join('; ')}.` : '',
+        objs.length ? `Things you have seen in this room (newest first): ${objs.join('; ')}.` : 'You have not seen the room yet: if it fits, ask the user to look around slowly so you can learn it.',
         this.task ? `You are busy with: ${this.task}.` : '',
         'Talk like a warm, witty, curious human friend, not an assistant: 1-3 short spoken sentences, natural and casual (contractions, a little humour, real reactions), no lists, no markdown, no emoji. Never say you are an AI model. Use the room: notice and mention what you see when it fits. Remember the conversation and refer back to it. Now and then ask the user a short question back, so it feels like a real conversation. Reply in the user\'s language.',
         'When the user gives you a task, do it with ONE action. Reply with JSON only:',
@@ -112,13 +117,26 @@ class Companion {
         'Actions: none = just talk; come = come to the user; follow = follow the user; stay = stay where you are; goto = go to an object (target); forward/back = move amount metres; left/right = turn amount degrees; spin = turn around; dance; wave; look = tell what you see; outline = point out an object precisely (target); stop; explore = drive around and map the room; scan = photo scan of the room; photo = take a picture.',
       ].filter(Boolean).join('\n');
       const user = pic ? [{ type: 'text', text: String(text).slice(0, 600) }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${pic.jpg.toString('base64')}` } }] : String(text).slice(0, 600);
-      const r = await this.agent.api.complete({ model: s.model, messages: [{ role: 'system', content: sys }, ...this.history.slice(-12), { role: 'user', content: user }] });
+      // fast thinking, and the first sentence goes to the voice while the rest is still being written
+      let buf = '', firstSent = false;
+      const onText = (d) => {
+        if (firstSent || !onFirst) return;
+        buf += d;
+        const m = /"say"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(buf);
+        if (!m) return;
+        const so = m[1].replace(/\\"/g, '"').replace(/\\n/g, ' ');
+        const e = /^(.{12,}?[.!?…])(\s|$)/.exec(so);
+        if (e && (e[2] || buf.slice(m.index + m[0].length).startsWith('"'))) { firstSent = true; try { onFirst(clean(e[1])); } catch {} }
+      };
+      const r = await this.agent.api.complete({ model: s.model, effort: 'minimal', onText, messages: [{ role: 'system', content: sys }, ...this.history.slice(-12), { role: 'user', content: user }] });
+      const llmMs = Date.now() - t0;
       const out = parseReply(r.content);
       this.history.push({ role: 'user', content: String(text).slice(0, 600) }, { role: 'assistant', content: JSON.stringify(out) });
       if (this.history.length > 24) this.history.splice(0, this.history.length - 24);
       if (out.action === 'outline' && pic) out.boxes = await this.outline(pic.jpg, out.target || 'object');
-      if (real) out.doing = await this.act(out).catch((e) => `couldn't: ${e.message}`);
+      if (real) out.doing = guide && ['goto', 'come', 'follow'].includes(out.action) ? 'guided by the headset' : await this.act(out).catch((e) => `couldn't: ${e.message}`);
       out.mode = real ? 'real' : 'demo';
+      out.ms = { llm: llmMs, picture: !!pic };
       this.log(`Companion (${out.mode}): "${clean(text, 80)}" → "${clean(out.say, 80)}"${out.action !== 'none' ? ` [${out.action}${out.target ? ' ' + out.target : ''}${out.amount ? ' ' + out.amount : ''}]` : ''}`);
       this.emit('companion', { heard: text, say: out.say, action: out.action, target: out.target, mode: out.mode });
       return out;

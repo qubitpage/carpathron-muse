@@ -22,21 +22,15 @@ const step = async (n, f) => { try { await f(); console.log('ok  ', n); } catch 
   const jpg = fs.readFileSync(path.join(__dirname, 'sample.jpg'));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  await step('headset camera picture accepted, room vision + SAM 3.1 contours', async () => {
+  await step('headset camera picture accepted, room vision (fast, remembered)', async () => {
     assert.ok((await post('/avatar/eyes?id=7', jpg, 'image/jpeg')).ok);
-    await get('/avatar/state?vision=room');
     let st;
-    for (let i = 0; i < 20; i++) { await sleep(500); await post('/avatar/eyes?id=7', jpg, 'image/jpeg'); st = await get('/avatar/state?vision=room'); if (st.seenSrc === 'room' && st.seen.length) break; }
-    assert.strictEqual(st.seenSrc, 'room'); assert.strictEqual(st.seenFrame, 7);
-    const labels = st.seen.map((o) => o.label);
-    assert.deepStrictEqual(labels, ['person', 'chair', 'plant']);
-    assert.ok(st.seen.every((o) => Array.isArray(o.poly) && o.poly.length >= 12 && o.poly.every((v) => v >= 0 && v <= 1)), 'every object has a contour');
-    assert.strictEqual(st.seen[1].dist, 1.4);
-    // contour inside its (SAM-refined, tighter) box
-    const o = st.seen[1], xs = o.poly.filter((_, i) => i % 2 === 0);
-    assert.ok(Math.min(...xs) >= o.box[0] - 0.01 && Math.max(...xs) <= o.box[0] + o.box[2] + 0.01, 'contour on the chair');
-    assert.ok(o.box[2] < 0.25, 'SAM tightened the box');
-    console.log('      room:', st.seen.map((x) => `${x.label} ${x.poly.length / 2} pts ${x.dist} m`).join(' | '));
+    for (let i = 0; i < 20; i++) { await sleep(500); await post('/avatar/eyes?id=7', jpg, 'image/jpeg'); st = await get('/avatar/state?vision=room'); if (st.room && st.room.seen.length) break; }
+    assert.strictEqual(st.room.frame, 7);
+    assert.deepStrictEqual(st.room.seen.map((o) => o.label), ['person', 'chair', 'plant']);
+    assert.strictEqual(st.room.seen[1].dist, 1.4);
+    assert.ok(st.room.seen.every((o) => o.box.length === 4), 'boxes');
+    console.log('      room:', st.room.seen.map((x) => `${x.label} ${x.dist} m`).join(' | '), `(${st.room.ms} ms)`);
   });
 
   await step('companion talks about the room, remembers, speaks', async () => {

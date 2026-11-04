@@ -64,6 +64,10 @@ var highlight: Node3D = null
 var shadow: MeshInstance3D
 var car_anchor := Vector3.ZERO   # real car: where his voice and words are (under the camera window)
 var man_v := 0.0
+# ---- guided driving of the real car (the headset sees the car and the goal, Muse/the car only gets wheel commands)
+const CAR_TURN_MS360 := 2400.0   # full turn at speed 70 (same calibration as the rest of the app)
+var car_speed := 0.30            # m/s at speed 60 — learned while driving
+var nav := {}
 var last_reply := {}
 var _warned_old := false
 var man_w := 0.0
@@ -105,7 +109,7 @@ func _ready() -> void:
 	p.position = Vector3(0, 0.62, 0)
 	body.add_child(p)
 	talk.player = p
-	talk.mode_fn = func(): return "real" if real else "demo"
+	talk.mode_fn = func(): return "real&guide=1" if real else "demo"
 	talk.state_changed.connect(_on_talk_state)
 	talk.replied.connect(_on_reply)
 	talk.level.connect(func(v): talk_level = v)
@@ -127,7 +131,7 @@ func begin(muse_link: Node, head: Node3D, capture: AudioEffectCapture, hands_fre
 	if real:
 		_say("Hi, I'm Baby Carpathron! " + ("Talk to me any time" if hands_free else "Hold the right grip and talk to me") + " — tell me where to go.\nSticks drive me, A / X stops me.", "happy", 9.0)
 	else:
-		_say("Hi, I'm Carpathron! " + ("Talk to me any time." if hands_free else "Hold the right grip and talk to me.") + "\nPoint at the floor + trigger: I walk there.", "happy", 9.0)
+		_say("Hi, I'm Carpathron! Look around your room slowly so I can learn it. " + ("Then just talk to me." if hands_free else "Hold the right grip and talk to me."), "happy", 9.0)
 	_start_camera()
 
 func end() -> void:
@@ -246,7 +250,7 @@ func _send_eyes() -> void:
 	var now := Time.get_ticks_msec()
 	if now < next_eyes or muse == null or muse.state != "linked":
 		return
-	next_eyes = now + 1500
+	next_eyes = now + (700 if not nav.is_empty() else 1100)
 	var jpg := PackedByteArray()
 	if cam_plugin:
 		cam_status = cam_plugin.status()
@@ -264,28 +268,42 @@ func _send_eyes() -> void:
 
 ## what Muse recognised in a headset picture -> markers in the room where those things are
 func _update_anchors() -> void:
-	var st: Dictionary = muse.state_data
-	if str(st.get("seenSrc", "")) != "room":
+	var rv = muse.state_data.get("room", null)
+	if typeof(rv) != TYPE_DICTIONARY:
 		return
-	var at := int(st.get("seenAt", 0))
+	var at := int(rv.get("at", 0))
 	if at == last_seen:
 		return
 	last_seen = at
-	var pose = poses.get(int(st.get("seenFrame", -1)))
+	var fid := int(rv.get("frame", -1))
+	var pose = poses.get(fid)
 	if pose == null:
 		return
+	var tf: Transform3D = pose
 	var th := tan(deg_to_rad(HFOV / 2.0))
 	var tv := th * 0.75
-	for o in st.get("seen", []):
+	for o in rv.get("seen", []):
 		var b: Array = o.get("box", [0, 0, 0, 0])
+		var label := str(o.get("label", "thing"))
+		var kind := str(o.get("kind", "item"))
 		var u := float(b[0]) + float(b[2]) / 2.0
 		var v := float(b[1]) + float(b[3]) / 2.0
 		var d := clampf(float(o.get("dist", 1.5)), 0.3, 6.0)
-		var dir := Vector3((u - 0.5) * 2.0 * th, -(v - 0.5) * 2.0 * tv, -1.0).normalized()
-		var p: Vector3 = (pose as Transform3D).origin + (pose as Transform3D).basis * dir * d
-		_anchor(str(o.get("label", "thing")), str(o.get("kind", "item")), p, float(o.get("dist", 0)))
+		var dir := tf.basis * Vector3((u - 0.5) * 2.0 * th, -(v - 0.5) * 2.0 * tv, -1.0).normalized()
+		var p: Vector3 = tf.origin + dir * d
+		# things standing on the floor: where the bottom of the box meets the floor is much more exact
+		var on_floor := kind in ["human", "animal", "obstacle", "furniture", "door"] or "car" in label.to_lower() or "robot" in label.to_lower()
+		if on_floor:
+			var vb := float(b[1]) + float(b[3])
+			var db := tf.basis * Vector3((u - 0.5) * 2.0 * th, -(vb - 0.5) * 2.0 * tv, -1.0).normalized()
+			if db.y < -0.05:
+				var t := -tf.origin.y / db.y
+				if t > 0.2 and t < 7.0:
+					var fp := tf.origin + db * t
+					p = Vector3(fp.x, p.y if kind != "obstacle" and not ("car" in label.to_lower()) else 0.05, fp.z) if kind in ["human", "furniture", "door"] else Vector3(fp.x, 0.05, fp.z)
+		_anchor(label, kind, p, float(o.get("dist", 0)), fid)
 
-func _anchor(label: String, kind: String, p: Vector3, dist: float) -> void:
+func _anchor(label: String, kind: String, p: Vector3, dist: float, frame := 0) -> void:
 	var key := label.to_lower()
 	var a = anchors.get(key)
 	if a != null and (a["pos"] as Vector3).distance_to(p) < 1.3:
@@ -306,6 +324,9 @@ func _anchor(label: String, kind: String, p: Vector3, dist: float) -> void:
 		anchors[key] = a
 	a["at"] = Time.get_ticks_msec()
 	a["dist"] = dist
+	a["frame"] = frame
+	if _is_car(key):
+		a["pos"] = p    # the car moves: always the newest place
 	(a["node"] as Node3D).global_position = a["pos"]
 
 ## a marker in the room: a small glowing dot, a hair-thin stem and a name tag above it
@@ -403,6 +424,24 @@ func _say(text: String, m: String, secs: float) -> void:
 
 ## the actions the companion brain chose (demo: this 3D Carpathron does them; real: the car does, he reacts)
 func do_action(a: String, tgt: String, amount: float, j := {}) -> void:
+	if real and a in ["goto", "come", "follow"]:
+		var tgt_p = null
+		if a == "come" or a == "follow":
+			tgt_p = _in_front_of_user(0.55)
+		elif tgt == "there":
+			tgt_p = _gaze_floor(3.0)
+		else:
+			var an = find_anchor(tgt)
+			if an != null:
+				tgt_p = _floor(an["pos"])
+				_highlight(an)
+		if tgt_p == null:
+			# the headset has not seen it: the car looks for it with its own camera (Muse mission)
+			muse.mission("find", tgt)
+			note.emit("Baby Carpathron is looking for the " + tgt + " with his camera")
+			return
+		nav_start(tgt_p, tgt if a == "goto" else "you", a == "follow")
+		return
 	if real and a not in ["none", "look", "outline", "wave"]:
 		model.nod()
 		if str(j.get("doing", "")) != "":
@@ -448,6 +487,8 @@ func do_action(a: String, tgt: String, amount: float, j := {}) -> void:
 				_highlight(an2)
 				_face(an2["pos"], false)
 			model.nod()
+		"none":
+			pass   # just talking: no nodding on every answer
 		_:
 			model.nod()
 
@@ -519,27 +560,29 @@ func _process(delta: float) -> void:
 		return
 	model.visible = not real
 	shadow.visible = not real
+	_send_eyes()
+	_update_view_tex()
+	_camera_watchdog()
+	if muse:
+		_update_anchors()
 	if real:
-		# Baby Carpathron (the real car) is the companion: no 3D robot, his words and voice at his camera window
-		body.global_position = car_anchor
+		_sim_car_step(delta)
+		_nav_step(delta)
+		# Baby Carpathron (the real car) is the companion: no 3D robot; his words and voice above the real car when
+		# the headset sees him, otherwise at his camera window
+		var car = _car()
+		body.global_position = (car["pos"] as Vector3) + Vector3(0, 0.32, 0) if car != null else car_anchor
 		var to := _flat(cam.global_position - body.global_position)
 		if to.length() > 0.05:
 			body.rotation.y = atan2(-to.x, -to.z)
 		bubble.position = Vector3(0, 0.02, 0)
 		mic_icon.position = Vector3(0, -0.08, 0)
-		for k in anchors:
-			(anchors[k]["node"] as Node3D).visible = false
 		if bubble_t > 0.0:
 			bubble_t -= delta
 			bubble.alpha = clampf(bubble_t / 0.6, 0.0, 1.0)
 		return
 	bubble.position = Vector3(0, 0.98, 0)
 	mic_icon.position = Vector3(0, 0.86, 0)
-	for k in anchors:
-		(anchors[k]["node"] as Node3D).visible = true
-	_send_eyes()
-	_update_view_tex()
-	_camera_watchdog()
 	if muse and muse.state == "linked" and not muse.has_companion() and not _warned_old:
 		_warned_old = true
 		_say("Please install Muse Carpathron 2.3.0 on your PC — then I can hear you, talk and see your room.", "sorry", 12.0)
@@ -547,7 +590,6 @@ func _process(delta: float) -> void:
 	if muse:
 		muse.want_vision = true
 		muse.vision_src = "room"
-		_update_anchors()
 	var v := 0.0
 	var w := 0.0
 	var me := _floor(body.global_position)
@@ -647,3 +689,140 @@ func _step_to(p: Vector3, delta: float, backwards := false) -> float:
 	var step := minf(d, sp * delta)
 	body.global_position += to.normalized() * step
 	return (sp / SPEED) * (-1.0 if backwards else 1.0)
+
+
+# ---------------------------------------------------------------- guided driving (real Baby Carpathron)
+func _is_car(key: String) -> bool:
+	return key == "robot car" or ("robot" in key and "car" in key) or key == "baby carpathron"
+
+## the real car as the headset sees it (fresh: seen in the last 12 s)
+func _car() -> Variant:
+	for k in anchors:
+		if _is_car(k) and Time.get_ticks_msec() - int(anchors[k]["at"]) < 12000:
+			return anchors[k]
+	return null
+
+func nav_active() -> bool:
+	return not nav.is_empty()
+
+func nav_wheels() -> Vector2:
+	if nav.is_empty() or Time.get_ticks_msec() > int(nav.get("until", 0)):
+		return Vector2.ZERO
+	return nav.get("wheels", Vector2.ZERO)
+
+func nav_stop(why := "") -> void:
+	if nav.is_empty():
+		return
+	nav = {}
+	if why != "":
+		note.emit("Guided driving stopped (" + why + ")")
+
+func nav_start(goal: Vector3, what: String, follow := false) -> void:
+	nav = {"goal": _floor(goal), "what": what, "follow": follow, "phase": "find", "t": Time.get_ticks_msec(), "steps": 0, "heading": null}
+	note.emit("Driving Baby Carpathron to the " + what + ": the headset guides him")
+	print("CARPATHRON_NAV ", JSON.stringify({"start": what, "goal": [goal.x, goal.z]}))
+
+func _wheels(l: int, r: int, ms: float) -> void:
+	nav["wheels"] = Vector2(l, r)
+	nav["until"] = Time.get_ticks_msec() + int(ms)
+
+## a new sighting of the car taken after the last move ended
+func _car_after(frame: int) -> Variant:
+	var c = _car()
+	if c != null and int(c.get("frame", 0)) > frame:
+		return c
+	return null
+
+func _nav_step(_delta: float) -> void:
+	if nav.is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	if now < int(nav.get("until", 0)) + 250:
+		return   # wheels still turning (plus a short settle)
+	if nav.has("until"):
+		# a move just ended: wait for a picture taken after it
+		nav.erase("until")
+		nav["after_frame"] = frame_id
+		nav["wait_since"] = now
+		return
+	if nav["follow"]:
+		nav["goal"] = _in_front_of_user(0.55)
+	var waiting := nav.has("after_frame")
+	var c = _car_after(int(nav.get("after_frame", -1))) if waiting else _car()
+	if c == null:
+		var since := now - int(nav.get("wait_since", nav["t"]))
+		if since > 9000:
+			nav_stop("can't see Baby Carpathron — look at him so the headset finds him")
+			_say("I can't see myself from your headset. Look at me for a moment and ask again.", "sorry", 6.0)
+		return
+	nav.erase("after_frame")
+	var p: Vector3 = _floor(c["pos"])
+	var goal: Vector3 = nav["goal"]
+	var to := goal - p
+	var dist := to.length()
+	# where he faces: from the last forward move
+	if nav.has("p_before") and nav.get("moved_fwd", false):
+		var mv: Vector3 = p - (nav["p_before"] as Vector3)
+		if mv.length() > 0.06:
+			nav["heading"] = mv.normalized()
+			var secs := float(nav.get("fwd_ms", 600)) / 1000.0
+			car_speed = clampf(lerpf(car_speed, mv.length() / maxf(0.2, secs), 0.5), 0.1, 0.8)
+	nav["moved_fwd"] = false
+	print("CARPATHRON_NAV ", JSON.stringify({"car": [p.x, p.z], "dist": snappedf(dist, 0.01), "heading": nav.get("heading") != null, "speed": snappedf(car_speed, 0.01), "steps": nav["steps"]}))
+	if dist < 0.45:
+		var what: String = nav["what"]
+		var follow: bool = nav["follow"]
+		if follow:
+			nav["wait_since"] = now; nav["t"] = now; nav["steps"] = 0
+			return
+		nav_stop()
+		_say("Here I am!" if what == "you" else "I'm at the " + what + "!", "happy", 4.0)
+		return
+	nav["steps"] = int(nav["steps"]) + 1
+	if int(nav["steps"]) > 9:
+		nav_stop("too many tries")
+		return
+	nav["p_before"] = p
+	if nav.get("heading") == null:
+		# don't know where he faces yet: a short drive forward shows it
+		nav["moved_fwd"] = true
+		nav["fwd_ms"] = 700.0
+		_wheels(60, 60, 700)
+		return
+	var h: Vector3 = nav["heading"]
+	var ang := atan2(h.cross(to).y, h.dot(to))      # + = the goal is on his left
+	if absf(ang) > deg_to_rad(18):
+		var ms := absf(ang) / TAU * CAR_TURN_MS360
+		if ang > 0:
+			_wheels(-70, 70, ms)
+		else:
+			_wheels(70, -70, ms)
+		nav["heading"] = h.rotated(Vector3.UP, ang)
+		nav["p_before"] = null
+		nav.erase("p_before")
+		return
+	var go := clampf(dist - 0.3, 0.1, 1.2)
+	var fms := go / car_speed * 1000.0
+	nav["moved_fwd"] = true
+	nav["fwd_ms"] = fms
+	_wheels(60, 60, fms)
+
+
+# ---------------------------------------------------------------- test: a simulated car seen by the "headset"
+var sim_car := {}   # {pos, yaw, speed(m/s at 60), next} — moves with the wheel commands, reported like the camera does
+
+func _sim_car_step(delta: float) -> void:
+	if sim_car.is_empty():
+		return
+	var wv := nav_wheels()
+	var lin := (wv.x + wv.y) / 2.0 / 60.0 * float(sim_car["speed"])
+	var rot := (wv.y - wv.x) / 140.0 * TAU / (CAR_TURN_MS360 / 1000.0)
+	sim_car["yaw"] = float(sim_car["yaw"]) + rot * delta
+	var f := Vector3(-sin(sim_car["yaw"]), 0, -cos(sim_car["yaw"]))
+	sim_car["pos"] = (sim_car["pos"] as Vector3) + f * lin * delta
+	var now := Time.get_ticks_msec()
+	if now >= int(sim_car["next"]):
+		sim_car["next"] = now + 700
+		frame_id += 1
+		var noise := Vector3(randf_range(-0.04, 0.04), 0, randf_range(-0.04, 0.04))
+		_anchor("robot car", "obstacle", (sim_car["pos"] as Vector3) + noise, 1.0, frame_id)

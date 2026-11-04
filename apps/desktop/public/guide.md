@@ -27,6 +27,10 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.1:** the companion thinks much faster (quick reasoning, the room picture only for "what do you see" questions,
+> the first sentence is spoken while the rest is still being written) and remembers everything the headset saw in the
+> room. The room is looked at every 1.5 s. With the real Baby Carpathron, the Quest headset sees the car and the goal and
+> guides him there ("come here", "go to the chair", "go there").
 > **2.3.0:** **Carpathron, the companion (Meta Quest 3 mixed reality)**: in Carpathron Avatar 1.5 choose *Carpathron in my
 > room* — he stands on your real floor, sees your room through the headset camera, knows the objects in it (Muse names
 > them, SAM 3.1 outlines them) and talks with you like a friend in a natural voice. Give him tasks by voice ("come here",

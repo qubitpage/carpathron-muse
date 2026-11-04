@@ -315,7 +315,7 @@ func _process(_dt: float) -> void:
 	if state == "linked":
 		if now >= _next_state and _state_req.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
 			_next_state = now + 600
-			_state_req.request(_base() + "/avatar/state" + (("?vision=" + ("room" if vision_src == "room" else "1")) if want_vision else ""), ["x-avatar-token: " + token])
+			_state_req.request(_base() + "/avatar/state" + (("?vision=" + ({"car": "1"}.get(vision_src, vision_src))) if want_vision else ""), ["x-avatar-token: " + token])
 		if now >= _next_map and _map_req.get_http_client_status() == HTTPClient.STATUS_DISCONNECTED:
 			_next_map = now + 2500
 			_map_req.request(_base() + "/avatar/map", ["x-avatar-token: " + token])

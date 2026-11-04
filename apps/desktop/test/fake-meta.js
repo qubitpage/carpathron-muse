@@ -12,7 +12,7 @@ function plan(body) {
   if (/You are Carpathron, a small friendly robot and the user's companion/.test(sys)) {
     const u = Array.isArray(last.content) ? String(last.content[0].text || '') : String(last.content);
     const pic = Array.isArray(last.content) ? 'picture' : 'no picture';
-    const room = /Objects you recognised in the room: ([^\n]*)/.exec(sys);
+    const room = /Things you have seen in this room \(newest first\): ([^\n]*)/.exec(sys);
     if (/chair/i.test(u)) return { text: JSON.stringify({ say: `Off to the chair! (${pic})`, action: 'goto', target: 'chair' }) };
     if (/dance/i.test(u)) return { text: JSON.stringify({ say: 'Watch my moves!', action: 'dance' }) };
     if (/plant/i.test(u)) return { text: JSON.stringify({ say: 'That green one, there.', action: 'outline', target: 'plant' }) };

@@ -150,58 +150,64 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   // 2.2.5: smart vision for the headset — while Carpathron Avatar asks for it (and the car's video flows through this
   // PC), Muse looks at the newest camera picture every few seconds and names people, animals, obstacles and room
   // items with a box around each. The headset draws them on the robot's picture.
-  const liveVision = { wantedAt: 0, busy: false, seen: [], at: 0, src: 'car', frame: 0 };
-  // 2.3: the Quest 3 headset camera (mixed reality): the newest room picture and its number (the headset keeps
-  // where it looked for each number, so the names land on the right things in the room)
+  // 2.3: two independent smart-vision loops — the car camera (with SAM 3.1 outlines) and the Quest 3 headset camera
+  // (the room: quick, fast reasoning, every object remembered with when it was last seen)
+  const liveVision = { wantedAt: 0, busy: false, seen: [], at: 0, frame: 0 };
+  const roomVision = { wantedAt: 0, busy: false, seen: [], at: 0, frame: 0, memory: new Map() };
+  // the newest headset camera picture and its number (the headset keeps where it looked for each number, so the
+  // names land on the right things in the room)
   const roomEyes = { last: null, at: 0, id: 0 };
   const KINDS = ['human', 'animal', 'obstacle', 'furniture', 'item', 'door'];
-  setInterval(async () => {
-    if (liveVision.busy || Date.now() - liveVision.wantedAt > 8000) return;
-    const s = store.settings;
-    const hub = robot._hub;
-    const room = liveVision.src === 'room';
+  const ROOM_PROMPT = 'You are the eyes of Carpathron, a friendly robot companion. The picture comes from the camera of a VR headset, at the eye height of the person wearing it, in their room. Find people, animals (pets), furniture, doors, obstacles on the floor and notable items. A small robot car (white or grey body, yellow wheels, round eyes) is "robot car" — always list it when you see it. Reply with JSON only, no text: {"objects":[{"label":"short name","kind":"human|animal|obstacle|furniture|item|door","box":[x,y,w,h],"dist":metres,"near":true|false}]} where box is the bounding box in fractions of the picture (0..1, x,y = top-left) and dist your best estimate of the distance from the camera in metres. At most 10 objects, the most interesting first. near = closer than about 1 m.';
+  const CAR_PROMPT = 'You are the eyes of a small robot car; the camera is about 10 cm above the floor. Find what matters for driving and for a person watching: people, animals (pets), obstacles in the way, furniture, doors and notable items. Reply with JSON only, no text: {"objects":[{"label":"short name","kind":"human|animal|obstacle|furniture|item|door","box":[x,y,w,h],"near":true|false}]} where box is the bounding box in fractions of the picture (0..1, x,y = top-left). At most 8 objects, the most important first. near = closer than about 50 cm or blocking the way.';
+  const visionTick = async (V, room) => {
+    if (V.busy || Date.now() - V.wantedAt > 8000) return;
+    const s = store.settings, hub = robot._hub;
     if (!s.apiKey) return;
     if (room ? (!roomEyes.last || Date.now() - roomEyes.at > 4000) : (!hub || !hub.last || Date.now() - hub.lastAt > 2500)) return;
-    liveVision.busy = true;
+    V.busy = true;
     try {
-      const jpg = room ? roomEyes.last : hub.last, frame = room ? roomEyes.id : 0;
-      const r = await agent.api.complete({ model: s.model, messages: room ? [
-        { role: 'system', content: 'You are the eyes of Carpathron, a friendly robot companion. The picture comes from the camera of a VR headset, at the eye height of the person wearing it, in their room. Find people, animals (pets), furniture, doors, obstacles on the floor and notable items. Reply with JSON only, no text: {"objects":[{"label":"short name","kind":"human|animal|obstacle|furniture|item|door","box":[x,y,w,h],"dist":metres,"near":true|false}]} where box is the bounding box in fractions of the picture (0..1, x,y = top-left) and dist your best estimate of the distance from the camera in metres. At most 10 objects, the most interesting first. near = closer than about 1 m.' },
-        { role: 'user', content: [{ type: 'text', text: 'What is in this room?' }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpg.toString('base64')}` } }] },
-      ] : [
-        { role: 'system', content: 'You are the eyes of a small robot car; the camera is about 10 cm above the floor. Find what matters for driving and for a person watching: people, animals (pets), obstacles in the way, furniture, doors and notable items. Reply with JSON only, no text: {"objects":[{"label":"short name","kind":"human|animal|obstacle|furniture|item|door","box":[x,y,w,h],"near":true|false}]} where box is the bounding box in fractions of the picture (0..1, x,y = top-left). At most 8 objects, the most important first. near = closer than about 50 cm or blocking the way.' },
-        { role: 'user', content: [{ type: 'text', text: 'What is in this picture?' }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpg.toString('base64')}` } }] },
+      const jpg = room ? roomEyes.last : hub.last, frame = room ? roomEyes.id : 0, t0 = Date.now();
+      const r = await agent.api.complete({ model: s.model, effort: 'minimal', messages: [
+        { role: 'system', content: room ? ROOM_PROMPT : CAR_PROMPT },
+        { role: 'user', content: [{ type: 'text', text: room ? 'What is in this room?' : 'What is in this picture?' }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpg.toString('base64')}` } }] },
       ] });
       const txt = String(r.content || ''), a = txt.indexOf('{'), b = txt.lastIndexOf('}');
       const j = a >= 0 && b > a ? JSON.parse(txt.slice(a, b + 1)) : { objects: [] };
       const num = (v) => Math.max(0, Math.min(1, Number(v) || 0));
-      liveVision.seen = (Array.isArray(j.objects) ? j.objects : []).slice(0, room ? 10 : 8).map((o) => {
+      const seen = (Array.isArray(j.objects) ? j.objects : []).slice(0, room ? 10 : 8).map((o) => {
         const bx = Array.isArray(o.box) ? o.box.map(num) : [0, 0, 0, 0];
         const d = Number(o.dist);
         return { label: String(o.label || 'object').slice(0, 30), kind: KINDS.includes(o.kind) ? o.kind : 'item', box: [bx[0], bx[1], Math.min(1 - bx[0], bx[2]), Math.min(1 - bx[1], bx[3])], near: !!o.near, ...(room && d > 0 ? { dist: Math.round(Math.min(8, d) * 10) / 10 } : {}) };
       }).filter((o) => o.box[2] > 0.01 && o.box[3] > 0.01);
-      // 2.3: SAM 3.1 cuts out every object it was given a box for: an exact outline (contour) instead of a box
-      if (liveVision.seen.length && s.samOutlines !== false && Date.now() > (liveVision.samOffUntil || 0)) {
-        const t0 = Date.now(), sz = samc.jpegSize(jpg) || { w: 640, h: 480 };
+      V.ms = Date.now() - t0;
+      // SAM 3.1 cuts out every object of the car camera: an exact outline (contour) instead of a box
+      if (!room && seen.length && s.samOutlines !== false && Date.now() > (V.samOffUntil || 0)) {
+        const t1 = Date.now(), sz = samc.jpegSize(jpg) || { w: 640, h: 480 };
         const file = path.join(os.tmpdir(), `muse-live-${process.pid}.jpg`);
         try {
           fs.writeFileSync(file, jpg);
-          const r = await agent.media.segment({ file, prompt: samc.objectPrompt(liveVision.seen.map((o) => o.box), sz.w, sz.h) });
-          const recs = samc.parseRecords(r.raw);
-          let n = 0;
-          for (const rec of recs) {
-            const o = liveVision.seen[rec.id], sh = o && samc.recordShape(rec, sz.w, sz.h);
+          const rs = await agent.media.segment({ file, prompt: samc.objectPrompt(seen.map((o) => o.box), sz.w, sz.h) });
+          for (const rec of samc.parseRecords(rs.raw)) {
+            const o = seen[rec.id], sh = o && samc.recordShape(rec, sz.w, sz.h);
             if (!sh || sh.box[2] < 0.01) continue;
             o.box = sh.box.map((v) => Math.round(v * 1000) / 1000);
-            if (sh.poly.length >= 6) { o.poly = sh.poly; n++; }
+            if (sh.poly.length >= 6) o.poly = sh.poly;
           }
-          liveVision.samMs = Date.now() - t0; liveVision.samN = n;
-        } catch (e) { liveVision.samOffUntil = Date.now() + 60000; logFn(`Smart vision: SAM 3.1 outlines unavailable (${e.message}) — boxes for a minute`); }
+          V.samMs = Date.now() - t1;
+        } catch (e) { V.samOffUntil = Date.now() + 60000; logFn(`Smart vision: SAM 3.1 outlines unavailable (${e.message}) — boxes for a minute`); }
       }
-      liveVision.at = Date.now(); liveVision.seenSrc = room ? 'room' : 'car'; liveVision.frame = frame;
-    } catch (e) { logFn(`Smart vision: ${e.message}`); }
-    liveVision.busy = false;
-  }, 3000).unref();
+      if (room) for (const o of seen) {
+        const k = o.label.toLowerCase(), m = V.memory.get(k) || { label: o.label, kind: o.kind, n: 0 };
+        Object.assign(m, { at: Date.now(), dist: o.dist, n: m.n + 1 }); V.memory.set(k, m);
+        if (V.memory.size > 60) V.memory.delete([...V.memory.entries()].sort((x, y) => x[1].at - y[1].at)[0][0]);
+      }
+      Object.assign(V, { seen, at: Date.now(), frame });
+    } catch (e) { logFn(`Smart vision${room ? ' (room)' : ''}: ${e.message}`); }
+    V.busy = false;
+  };
+  setInterval(() => visionTick(liveVision, false), 3000).unref();
+  setInterval(() => visionTick(roomVision, true), 1500).unref();
   const robot = new Robot({ getCfg: () => store.settings.robot || {}, getIp: () => store.settings.robot.carIp, emit: (e, d) => (e === 'log' ? logFn(d) : emit(e, d)) });
   const mcp = new McpManager({ log: logFn, dataDir });
   // First run with this version: set up the built-in MCP servers (they need nothing installed).
@@ -293,7 +299,7 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
   missions = new Missions({ robot, mapper, camera, emit, log: logFn, getSettings: () => store.settings });
   const phraseCache = new Map();  // quick answers ("Coming!") are made once per voice
   const speechJobs = new Map();   // companion sentence id -> promise (its WAV is being made)
-  const companion = new Companion({ agent, store, tts, robot, mapper, roommap, missions, liveVision, roomEyes, log: logFn, emit });
+  const companion = new Companion({ agent, store, tts, robot, mapper, roommap, missions, liveVision, roomVision, roomEyes, log: logFn, emit });
   missions.roommap = roommap;
   agent.mapper = mapper;
   const shield = new Shield({ store, remote, log: logFn, emit, dataDir });
@@ -1299,29 +1305,38 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
           }
           if (url.pathname === '/avatar/companion' && req.method === 'POST') {
             const mode = url.searchParams.get('mode') === 'real' ? 'real' : 'demo';
+            const guide = url.searchParams.get('guide') === '1';
+            const t0 = Date.now();
             let text = '';
             if (String(req.headers['content-type'] || '').startsWith('audio/')) {
               const raw = await readBody(req, 12 * 1024 * 1024);
               const s = store.settings;
               text = await voice.transcribe(raw, { apiKey: s.apiKey, apiBase: s.apiBase, mime: 'audio/wav' });
-              if (!text) return send(res, 200, { heard: '', say: 'Sorry, I did not catch that. Hold the grip and talk to me.', action: 'none' });
+              if (!text) return send(res, 200, { heard: '', say: "Sorry, I didn't catch that.", action: 'none', mood: 'sorry' });
             } else text = String((await readJson(req)).text || '');
+            const sttMs = Date.now() - t0;
             if (voice.voiceToCommand(text) === '/robot stop') { roommap.stop('Quest'); missions.stop('Quest'); robot.stop('Quest'); }
-            const out = await companion.turn({ text, mode });
-            // spoken sentence by sentence: the answer comes back as soon as the first sentence is ready, the headset
-            // fetches the next ones while the first one plays (each request waits until its sentence is made)
+            // the companion's natural voice; the first sentence is made while the model is still writing the rest
             const cv = tts && (tts.ready(tts.companionVoiceId()) ? tts.companionVoiceId() : tts.voiceId());
+            const canSpeak = !!(tts && tts.ready(cv));
+            const newId = () => require('crypto').randomBytes(6).toString('hex');
+            let first = null;
+            const onFirst = canSpeak ? (t) => { const id = newId(); const job = tts.speak(t, { voice: cv, id }).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, job); setTimeout(() => speechJobs.delete(id), 120000).unref(); first = { text: t, id, job }; } : null;
+            const out = await companion.turn({ text, mode, guide, onFirst });
             const pk = `${cv}|${out.say}`, cached = out.quick && phraseCache.get(pk);
             if (cached && tts.file(`${cached}.wav`)) { fs.utimesSync(tts.file(`${cached}.wav`), new Date(), new Date()); out.audio = [`/avatar/speech/${cached}.wav`]; }
-            else if (tts && tts.ready(cv) && out.say) {
+            else if (canSpeak && out.say) {
+              let rest = String(out.say), ids = [];
+              if (first && rest.startsWith(first.text)) { ids.push(first.id); rest = rest.slice(first.text.length).trim(); }
               const parts = [];
-              for (const sn of String(out.say).split(/(?<=[.!?…])\s+/)) { if (parts.length && (parts[parts.length - 1] + ' ' + sn).length < 70) parts[parts.length - 1] += ' ' + sn; else parts.push(sn); }
-              const ids = parts.map(() => require('crypto').randomBytes(6).toString('hex'));
-              let chain = Promise.resolve();
-              ids.forEach((id, i) => { chain = chain.then(() => tts.speak(parts[i], { voice: cv, id })).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, chain); setTimeout(() => speechJobs.delete(id), 120000).unref(); });
+              for (const sn of rest ? rest.split(/(?<=[.!?…])\s+/) : []) { if (parts.length && (parts[parts.length - 1] + ' ' + sn).length < 80) parts[parts.length - 1] += ' ' + sn; else parts.push(sn); }
+              let chain = ids.length ? first.job : Promise.resolve();
+              for (const part of parts) { const id = newId(); ids.push(id); chain = chain.then(() => tts.speak(part, { voice: cv, id })).catch((e) => { logFn(`Companion voice: ${e.message}`); }); speechJobs.set(id, chain); setTimeout(() => speechJobs.delete(id), 120000).unref(); }
               await speechJobs.get(ids[0]);
               if (tts.file(`${ids[0]}.wav`)) { out.audio = ids.map((id) => `/avatar/speech/${id}.wav`); if (out.quick && ids.length === 1) phraseCache.set(pk, ids[0]); }
             }
+            out.ms = { ...(out.ms || {}), stt: sttMs, total: Date.now() - t0 };
+            logFn(`Companion timing: heard ${sttMs} ms, thought ${out.ms.llm || 0} ms${out.ms.picture ? ' (with picture)' : ''}, first words ready ${out.ms.total} ms`);
             return send(res, 200, { heard: text, ...out });
           }
           if (url.pathname.startsWith('/avatar/speech/') && req.method === 'GET') {
@@ -1349,11 +1364,13 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
           // ---- Carpathron Avatar 1.2: the room map, the car's state and missions from the headset
           if (url.pathname === '/avatar/state' && req.method === 'GET') {
             const wv = url.searchParams.get('vision');
-            if (wv === '1' || wv === 'room') { liveVision.wantedAt = Date.now(); liveVision.src = wv === 'room' ? 'room' : 'car'; }
+            if (wv === '1' || wv === 'both') liveVision.wantedAt = Date.now();
+            if (wv === 'room' || wv === 'both') roomVision.wantedAt = Date.now();
             const v = roommap.view();
             return send(res, 200, { pose: robot.pose, busy: v.busy || (mapper.busy ? 'scanning with photos' : null), news: mapNews.text, newsAt: mapNews.at, sensors: (robot.info && robot.info.sensors) || null,
               // 2.2.5: the car this PC drives, so the headset can list it even when its own Wi-Fi search misses it
-              seen: liveVision.seen, seenAt: liveVision.at, seenAgoMs: liveVision.at ? Date.now() - liveVision.at : -1, seenSrc: liveVision.seenSrc || 'car', seenFrame: liveVision.frame,
+              seen: liveVision.seen, seenAt: liveVision.at, seenAgoMs: liveVision.at ? Date.now() - liveVision.at : -1, seenSrc: 'car',
+              room: { seen: roomVision.seen, at: roomVision.at, frame: roomVision.frame, agoMs: roomVision.at ? Date.now() - roomVision.at : -1, ms: roomVision.ms || 0 },
               companion: { busy: companion.busy, task: companion.task },
               car: store.settings.robot.carIp ? { ip: String(store.settings.robot.carIp), name: (robot.info && robot.info.name) || 'Baby Carpathron', online: robot.state === 'online' } : null,
               targets: [...v.places.map((p) => ({ name: p.name, kind: 'place' })), ...v.objects.map((o) => ({ name: o.name, kind: 'object' }))].filter((t, i, l) => l.findIndex((q) => q.name.toLowerCase() === t.name.toLowerCase()) === i) });

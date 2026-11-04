@@ -51,6 +51,7 @@ var demo: Node3D = null   # virtual robot when no real robot is on the Wi-Fi
 var demo_test := 0
 var shots_dir := ""   # --shots=DIR: store screenshots of the demo (desktop render)
 var shots_t0 := 0
+var film := false     # --film: a scripted run for the presentation video (desktop render with --write-movie)
 var rec_effect: AudioEffectRecord
 var recording := false
 var mic: AudioStreamPlayer = null
@@ -120,6 +121,8 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args() + OS.get_cmdline_args():
 		if str(a).begins_with("--shots="):
 			shots_dir = str(a).substr(8)
+		if str(a) == "--film":
+			film = true
 		if str(a) == "--test-demo":
 			demo_test = Time.get_ticks_msec()
 		if str(a).begins_with("--test-muse="):
@@ -140,6 +143,8 @@ func _ready() -> void:
 	_refresh_panel()
 	if shots_dir != "":
 		_shots_run()
+	if film:
+		_film_run()
 	for a2 in OS.get_cmdline_user_args():
 		if str(a2).begins_with("--shot-cockpit="):   # desktop preview: the cockpit with a saved map / state / sensors
 			_cockpit_shot(str(a2).substr(15))
@@ -735,6 +740,7 @@ func _process(delta: float) -> void:
 		welcome_pending = false
 		menu3d.open_at(cam, "welcome")
 	_background(delta)
+	info.visible = not menu3d.is_open   # the tour / robot text never shows through an open menu
 	var ls := Vector2.ZERO
 	var rs := Vector2.ZERO
 	var stop := false
@@ -896,7 +902,7 @@ func _process(delta: float) -> void:
 		return
 	prev["STOP"] = false
 	if demo != null:
-		if shots_dir == "":
+		if shots_dir == "" and not film:
 			demo.drive(int(round(l)), int(round(r2)))
 	else:
 		link.drive(int(round(l)), int(round(r2)))
@@ -1017,6 +1023,83 @@ func _shots_run() -> void:
 	await _snap("5")                       # tour complete
 	get_tree().quit()
 
+## presentation video: welcome screen -> virtual tour -> driving through the cones -> through the robot's eyes ->
+## the menu -> goodbye. Run: godot --path . --write-movie film.avi --fixed-fps 30 --resolution 1920x1080 -- --film
+func _film_cam(pos: Vector3, look: Vector3, k := 1.0) -> void:
+	var t := Transform3D(Basis(), pos).looking_at(look, Vector3.UP)
+	cam.global_transform = cam.global_transform.interpolate_with(t, k)
+
+func _film_run() -> void:
+	if demo:
+		demo._enter(0)
+	(cam as Camera3D).fov = 68
+	cam.position = Vector3(0, 1.6, 0)
+	await _wait(0.4)
+	# 1. welcome screen, focus moves over the choices
+	_film_cam(Vector3(0, 1.5, -0.3), Vector3(0, 1.42, -1.35))
+	await _wait(1.6)
+	for a in ["ui_right", "ui_down", "ui_left"]:
+		menu3d.nav(a)
+		await _wait(0.9)
+	# 2. the virtual tour: the robot waves hello
+	_on_menu("tour", "")
+	demo.model.wave(3.0)
+	await _wait(2.8)
+	# 3. driving through the cones to the orange crate (seen from where you stand)
+	demo._enter(8)
+	var t0 := 0
+	while t0 < 270 and demo.step == 8:
+		_steer_to(demo.TARGET, 80.0)
+		var bp: Vector3 = demo.body.global_position
+		_film_cam(Vector3(bp.x * 0.4, 1.35, bp.z + 2.2), bp + Vector3(0, 0.4, 0), 0.08)
+		await get_tree().process_frame
+		t0 += 1
+	demo.drive(0, 0)
+	# 4. through the robot's eyes: what its camera sees while it drives around the room
+	(cam as Camera3D).cull_mask = 1
+	(cam as Camera3D).fov = 62
+	var pts := [Vector2(-1.5, -2.6), Vector2(-2.6, 0.4), Vector2(0.4, 1.4), Vector2(2.6, -0.6)]
+	for target in pts:
+		var t1 := 0
+		while t1 < 96:
+			if _steer_to(target, 75.0) < 0.5:
+				break
+			cam.global_transform = demo.cam.global_transform
+			await get_tree().process_frame
+			t1 += 1
+	demo.drive(0, 0)
+	(cam as Camera3D).cull_mask = 0xFFFFF
+	(cam as Camera3D).fov = 68
+	# 5. the menu: missions, your robots, settings
+	cam.global_transform = Transform3D(Basis(), Vector3(0, 1.6, 0))
+	_film_cam(Vector3(0, 1.5, -0.3), Vector3(0, 1.42, -1.35))
+	menu3d.open_at(cam, "main")
+	await _wait(1.4)
+	for a in ["ui_down", "ui_down", "ui_down"]:
+		menu3d.nav(a)
+		await _wait(0.6)
+	menu3d.show_page("settings")
+	await _wait(2.4)
+	menu3d.close()
+	# 6. goodbye: the robot comes back and waves
+	var t2 := 0
+	while t2 < 120:
+		if _steer_to(Vector2(0, 1.25), 70.0) < 0.35:
+			break
+		await get_tree().process_frame
+		t2 += 1
+	var t3 := 0
+	while t3 < 45:
+		_steer_to(Vector2(0, 2.6), 0.0)
+		await get_tree().process_frame
+		t3 += 1
+	demo.drive(0, 0)
+	demo.model.wave(3.0)
+	var rp: Vector3 = demo.body.global_position
+	_film_cam(rp + (cam.global_position - rp).normalized() * 1.3 + Vector3(0, -0.4, 0), rp + Vector3(0, 0.75, 0))
+	await _wait(3.0)
+	get_tree().quit()
+
 func _cockpit_shot(spec: String) -> void:
 	var parts := spec.split(",")   # json,png[,vr|flat|menu|robots|missions]
 	var mode := parts[2] if parts.size() > 2 else "vr"
@@ -1031,7 +1114,8 @@ func _cockpit_shot(spec: String) -> void:
 	cockpit.set_map(j["map"]); cockpit.set_state(j["state"])
 	link.sensors = j["sensors"]
 	cockpit.update_dash(j["sensors"], true)
-	cockpit.flash("bump")
+	if mode in ["vr", "flat"]:
+		cockpit.flash("bump")
 	link.found = [{"host": "192.168.1.131", "name": "Baby Carpathron", "key": "192.168.1.131"}, {"host": "192.168.1.140", "name": "Carpathron Brain", "key": "192.168.1.140"}]
 	link.note = "Connected to Baby Carpathron"
 	view_mode = "flat" if mode == "flat" else "vr"
@@ -1043,7 +1127,7 @@ func _cockpit_shot(spec: String) -> void:
 		vision.show_seen(seen, 1, func(u, v): return Vector3((u - 0.5) * 3.2, (0.5 - v) * 2.4, 0.03), screen)
 	_refresh_panel()
 	cam.position = Vector3(0, 1.6, 0)
-	(cam as Camera3D).fov = 100
+	(cam as Camera3D).fov = 100 if mode in ["vr", "flat"] else 66
 	if mode in ["menu", "robots", "missions", "settings", "welcome"]:
 		menu3d.open_at(cam, "main" if mode == "menu" else mode)
 	if mode == "welcome":

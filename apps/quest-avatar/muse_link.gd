@@ -282,8 +282,8 @@ func companion(wav: PackedByteArray, text: String, mode: String, done: Callable)
 			state = "not found"; token = ""; find([pc]); changed.emit()
 		if code == 404:
 			done.call({"say": "Muse Carpathron on your PC is too old to talk with me. Please install Muse Carpathron 2.3.0.", "action": "none", "mood": "sorry", "error": "old muse"})
-		elif typeof(j) == TYPE_DICTIONARY and str(j.get("say", "")) != "":
-			done.call(j)
+		elif typeof(j) == TYPE_DICTIONARY and (str(j.get("say", "")) != "" or bool(j.get("missed", false))):
+			done.call(j)   # 1.6.11: "missed" = Muse heard no words (not "can't reach Muse")
 		else:
 			done.call({"say": "I can't reach Muse Carpathron on your PC right now." + ((" (" + str(j.get("error", "")) + ")") if typeof(j) == TYPE_DICTIONARY else ""), "action": "none", "mood": "sorry", "error": "PC not reachable"})
 	, CONNECT_ONE_SHOT)

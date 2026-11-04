@@ -15,9 +15,9 @@ Download all files of that folder into one folder and double-click **`Install.ba
 
 SHA-256 of `Muse-Carpathron-Setup.exe`: `9e286e6ccd6408215d86ddca79222429ca752102f9ffdb04ad7eb75d412c4d7b`
 
-## 🥽 Carpathron Avatar — Meta Quest 3 / 3S / Pro / 2 (v1.6.10)
+## 🥽 Carpathron Avatar — Meta Quest 3 / 3S / Pro / 2 (v1.6.11)
 
-**[⬇️ Download CarpathronAvatar-1.6.10.apk (29 MB)](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.6.10.apk)**
+**[⬇️ Download CarpathronAvatar-1.6.11.apk (29 MB)](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.6.11.apk)**
 
 1. Turn on Developer Mode for the headset (Meta Horizon phone app → Devices → Developer Mode).
 2. Connect the Quest by USB, open **Meta Quest Developer Hub** → Device manager → **Add build** → pick the APK.

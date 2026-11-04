@@ -586,6 +586,7 @@ func _wire_talk(t: Node, ctx: Callable) -> void:
 		t.mic_silent.connect(_mic_restart)
 	t.local = brain
 	t.brain_fn = _brain_now
+	t.menu_open_fn = func(): return menu3d != null and menu3d.is_open
 	t.ctx_fn = ctx
 	t.speech = speech
 	t.rt_fn = _rt_cfg
@@ -1269,9 +1270,11 @@ func _process(delta: float) -> void:
 	_car_eyes()
 	if room != null and room.real and screen.top_level:
 		_cam_win_follow()
-	robot_talk.active = room == null
+	# 1.6.12: he only speaks (by himself, or answers from the PC microphone) where you talk with him: in your room or
+	# while you drive the real robot — never on the welcome screen, in the virtual tour, or while the menu is open
+	robot_talk.active = room == null and demo == null and link.host != "" and not menu3d.is_open and not welcome_pending
 	if room != null:
-		room.talk.active = true
+		room.talk.active = not menu3d.is_open
 	info.visible = not menu3d.is_open   # the tour / robot text never shows through an open menu
 	var ls := Vector2.ZERO
 	var rs := Vector2.ZERO

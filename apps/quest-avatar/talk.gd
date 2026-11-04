@@ -191,6 +191,7 @@ func _missed() -> void:
 var _misses := 0
 var _zero_ms := 0.0
 var _pc_held := false
+var menu_open_fn: Callable
 var _mic_tries := 0
 
 ## 1.6.8: the headset's microphone input can go dead (only zeros) after the app plays sound: notice it and ask for a
@@ -333,17 +334,20 @@ func _play_bytes(b: PackedByteArray) -> void:
 func say_now(j: Dictionary) -> void:
 	if state != "idle" or not active:
 		return
+	if menu_open_fn.is_valid() and bool(menu_open_fn.call()):
+		return
 	set_state("thinking")
 	_on_reply(j)
 
 func _process(delta: float) -> void:
-	if active and muse and state in ["idle", "listening"]:
+	if muse:
 		var cs = muse.state_data.get("companion", {})
 		var said = cs.get("say", null) if typeof(cs) == TYPE_DICTIONARY else null
 		if typeof(said) == TYPE_DICTIONARY and int(said.get("id", 0)) > _said_id:
 			var first := _said_id == 0 and Time.get_ticks_msec() < 15000
-			_said_id = int(said["id"])
-			if not first and _brain() == "pc":
+			_said_id = int(said["id"])   # 1.6.12: used up even when he may not speak now (no old message later)
+			var can: bool = active and state in ["idle", "listening"] and not (menu_open_fn.is_valid() and bool(menu_open_fn.call()))
+			if can and not first and _brain() == "pc":
 				# 1.6.9: also what you said with the PC's microphone (Muse): his answer + the action to do
 				if state == "listening":
 					_rt_stop(); _rec = PackedFloat32Array(); set_state("idle")

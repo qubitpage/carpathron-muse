@@ -17,6 +17,8 @@ const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
   const { startServer } = require(path.join(DESKTOP, 'backend', 'server.js'));
   const srv = await startServer({ dataDir, log: () => {} });
   const ws = new WebSocket(`wss://localhost:18744/ws?t=${srv.token}`, { rejectUnauthorized: false });
+  // Muse shows the headset view (the box in Robots → Control): the headset sends it only then
+  const wantIv = setInterval(() => fetch('https://localhost:18744/api/avatar/wantview', { method: 'POST', headers: { 'x-mc-token': srv.token } }).catch(() => {}), 1500);
   const events = [];
   ws.on('message', async (m) => {
     const e = JSON.parse(m); events.push(e.event);
@@ -56,5 +58,5 @@ const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
   let ok = true;
   for (const [k, v] of Object.entries(checks)) { console.log(v ? 'ok  ' : 'FAIL', k); if (!v) ok = false; }
   console.log(ok ? 'ROOM TEST: OK' : 'ROOM TEST: FAILED');
-  ws.close(); car.close(); await srv.close(); process.exit(ok ? 0 : 1);
+  clearInterval(wantIv); ws.close(); car.close(); process.exit(ok ? 0 : 1);
 })().catch((e) => { console.error(e); process.exit(1); });

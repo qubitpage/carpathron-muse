@@ -145,6 +145,8 @@
     } catch (_) {}
   }
   setInterval(questPoll, 2000); setTimeout(questPoll, 0);
+  // 2.3.11: the headset sends its view only while it is wanted here (the box is ticked, or a recording runs)
+  setInterval(() => { const sv = $('#questShowView'); if ((sv && sv.checked) || (typeof rec !== 'undefined' && rec.on)) fetch('/api/avatar/wantview', { method: 'POST', credentials: 'same-origin' }).catch(() => {}); }, 2000);
   // 2.3: what you say to Carpathron in the headset and what he answers (shown under the Quest view)
   const feed = [];
   function onCompanion(d) {
@@ -200,6 +202,7 @@
     } catch (_) {}
   }
   async function recStart() {
+    const sv = $('#questShowView'); if (sv && !sv.checked) { sv.checked = true; fetch('/api/avatar/wantview', { method: 'POST', credentials: 'same-origin' }).catch(() => {}); recState.textContent = 'Starting the headset view…'; await new Promise((r) => setTimeout(r, 3500)); }
     const img = $('#questVideo');
     if (!questOn || !img.naturalWidth) { recState.textContent = 'No headset view yet.'; return; }
     const cv = document.createElement('canvas'); cv.width = img.naturalWidth || 854; cv.height = img.naturalHeight || 480;
@@ -289,6 +292,8 @@
       if (meter) meter.style.width = `${Math.min(100, rms * 400)}%`;
       if (pc.busy) return;
       if (pc.held) { pc.buf.push(x); return; }   // the headset's grip is held: record until it is released
+      // 2.3.11: by default only the grip sends (hands-free cut you off at every pause and he talked over you)
+      const gripOnly = $('#pcGripOnly'); if (gripOnly && gripOnly.checked) { pc.pre.push(x); while (pc.pre.length > Math.ceil(400 / ms)) pc.pre.shift(); return; }
       if (!pc.rec) {
         pc.pre.push(x); while (pc.pre.length > Math.ceil(400 / ms)) pc.pre.shift();
         if (rms < pc.noise * 2) pc.noise = pc.noise * 0.98 + Math.min(rms, 0.05) * 0.02;
@@ -303,7 +308,7 @@
     };
     pc.src.connect(pc.node); pc.node.connect(pc.ctx.destination);
     pc.on = true; talkBtn.textContent = '⏹ Stop talking with the PC microphone'; talkBtn.classList.add('recording');
-    talkState.textContent = '🎤 listening — just talk to Carpathron';
+    talkState.textContent = $('#pcGripOnly') && $('#pcGripOnly').checked ? '🎤 ready — hold the right grip in the headset while you talk, release to send' : '🎤 listening — just talk to Carpathron';
   }
   function pcStop() {
     pc.on = false; pc.rec = false;

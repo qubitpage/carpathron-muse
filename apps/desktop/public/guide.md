@@ -27,6 +27,10 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.11:** talking with the PC microphone sends **only while you hold the right grip** in the headset (untick it
+> for hands-free) — he no longer answers in the middle of your sentence. The headset view is sent to Muse only while
+> **📺 Show the headset view here** is ticked or ⏺ Record runs (it cost the headset speed). Carpathron Avatar 1.6.12
+> speaks only in your room or while you drive the real robot — never in the menu, on the welcome screen or in the tour.
 > **2.3.9:** **🎤 Talk to Carpathron with this PC's microphone** (Robots → Control → Meta Quest view): pick your USB /
 > Logitech headset microphone and just talk — he answers in the Quest and does it (walks, drives the car, looks).
 > ⏺ Record uses the same microphone for your voice. Carpathron Avatar 1.6.9 plays those answers and, when the Quest's own

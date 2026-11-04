@@ -35,6 +35,7 @@ const { chromium } = require('playwright');
   assert.ok(/Saved/.test(saved), saved);
   assert.ok((await p.textContent('#questRecList')).includes(files[0]), 'listed');
   // 2.3.9: talk to Carpathron with the PC microphone (Chromium's fake microphone beeps = "speech")
+  await p.uncheck('#pcGripOnly');   // hands-free for this test (the default is: only while the grip is held)
   await p.click('#btnPcTalk');
   let st = null;
   for (let i = 0; i < 40; i++) {

@@ -42,6 +42,9 @@ func _ready() -> void:
 func _process(_dt: float) -> void:
 	if not enabled or src == null or muse == null or muse.state != "linked" or _pending:
 		return
+	# 1.6.12: only while Muse shows the view (the box in Muse, or a recording): rendering it costs the headset frames
+	if not bool(muse.state_data.get("wantView", false)):
+		return
 	var now := Time.get_ticks_msec()
 	if now < _next or muse.view_busy():
 		return

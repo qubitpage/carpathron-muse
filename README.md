@@ -34,13 +34,13 @@ Muse Carpathron is the open-source hackathon edition. Two more apps from the sam
 
 <p align="center">
   <a href="https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe"><img src="https://img.shields.io/badge/Windows-Download_Muse--Carpathron--Setup.exe_v2.3.10-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
-  <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.6.11.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.6.11.apk_(29_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
+  <a href="https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.6.12.apk"><img src="https://img.shields.io/badge/Meta_Quest-Download_CarpathronAvatar--1.6.12.apk_(29_MB)-0866FF?style=for-the-badge&logo=meta&logoColor=white" alt="Download for Meta Quest"></a>
 </p>
 
 | App | Download | How to install |
 |---|---|---|
 | 🧠 **Muse Carpathron** – Windows 10 / 11 / Server 2016+ (v2.3.10) | [**Muse-Carpathron-Setup.exe**](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe) | Double-click it. If SmartScreen appears: *More info → Run anyway*. This hackathon edition does not update itself: install a newer build over the old one (chats and settings are kept). |
-| 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.6.10) | [**CarpathronAvatar-1.6.11.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.6.11.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. |
+| 🥽 **Carpathron Avatar** – Meta Quest 3 / 3S / Pro / 2 (v1.6.10) | [**CarpathronAvatar-1.6.12.apk**](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.6.12.apk) | Developer Mode on the headset → Meta Quest Developer Hub → *Device manager → Add build* → open it from *Library → Unknown Sources*. |
 | 🚗 **Baby Carpathron** – ESP32-CAM car firmware 2.3 + Arduino Mega hub | [`firmware/carpathron_car`](firmware/carpathron_car) · [`firmware/carpathron_mega`](firmware/carpathron_mega) (both built into the app: Robot → ⚙ Setup → ⬆ Car firmware / 🔌 Flash the Mega) | Arduino IDE, esp32 core 2.0.x, board *AI Thinker ESP32-CAM* – see [CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md). |
 | 🖥 **Carpathron Remote** – the remote desktop app on its own (Windows, Linux) | [Microsoft Store](https://apps.microsoft.com/detail/9nlwqs658xwx) · [qubitpage.com/remote](https://qubitpage.com/remote/) | For PCs you want to reach or help that do not run Muse Carpathron. Same IDs and passwords. |
 
@@ -298,7 +298,7 @@ sees your room through the headset camera, names what is in it, answers by voice
 1. **Car:** assemble the kit, flash [`firmware/carpathron_car`](firmware/carpathron_car) with Arduino IDE (esp32 core **2.0.12**), put it on your Wi-Fi ([CAR-SETUP](firmware/carpathron_car/CAR-SETUP.md)).
 2. **PC:** install Muse Carpathron ([Muse-Carpathron-Setup.exe](https://github.com/qubitpage/carpathron-muse/releases/latest/download/Muse-Carpathron-Setup.exe), or build: `cd apps/desktop && npm ci && npm run dist`). Add your Meta Model API key or sign in with Muse Code. Robot page → **Find my car**.
 3. **Phone:** Settings → WhatsApp → scan the QR. Send `/help` or a voice note.
-4. **Quest 3S:** sideload [`CarpathronAvatar-1.6.11.apk`](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.6.11.apk) (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
+4. **Quest 3S:** sideload [`CarpathronAvatar-1.6.12.apk`](https://github.com/qubitpage/carpathron-muse/raw/main/downloads/quest/CarpathronAvatar-1.6.12.apk) (Developer Mode + Meta Quest Developer Hub), open it from **Library → Unknown Sources**, click **Allow** on the PC once.
 
 The full walk-through is in the **[A-to-Z guide](docs/GUIDE.md)**.
 

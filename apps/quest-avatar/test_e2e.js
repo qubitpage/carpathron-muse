@@ -16,6 +16,7 @@ const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
   const { startServer } = require(path.join(DESKTOP, 'backend', 'server.js'));
   const srv = await startServer({ dataDir, log: () => {} });
   const ws = new WebSocket(`wss://localhost:18714/ws?t=${srv.token}`, { rejectUnauthorized: false });
+  const wantIv = setInterval(() => fetch('https://localhost:18714/api/avatar/wantview', { method: 'POST', headers: { 'x-mc-token': srv.token } }).catch(() => {}), 1500);
   let linked = 0;
   ws.on('message', async (m) => {
     const e = JSON.parse(m);
@@ -44,5 +45,5 @@ const { WebSocket } = require(path.join(DESKTOP, 'node_modules', 'ws'));
   console.log('smart vision:', visionOk ? 'OK' : 'FAILED', r.seen, r.vision_labels, 'labels');
   const ok = visionOk && r.relay && (!RENDER || !!view.at) && cockpitOk && r.frames > 5 && r.online && r.muse === 'linked' && /I can see the photo/.test(r.answer) && /Look left/.test(r.voice) && /Looking left/.test(r.voice) && linked === 1 && drives.some((d) => /l=-70&r=70|ws:-70,70/.test(d));
   console.log(ok ? 'AVATAR E2E: OK' : 'AVATAR E2E: FAILED');
-  ws.close(); car.close(); await srv.close(); process.exit(ok ? 0 : 1);
+  clearInterval(wantIv); ws.close(); car.close(); process.exit(ok ? 0 : 1);
 })().catch((e) => { console.error(e); process.exit(1); });

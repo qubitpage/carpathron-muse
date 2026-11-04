@@ -27,6 +27,11 @@ This guide starts from zero (installing the app) and then explains every menu, b
 > version is shown at the bottom of the sidebar.
 > **1.9.6:** no automatic updates any more (this is the hackathon edition); dependency security update — no known
 > vulnerabilities in the app's libraries.
+> **2.3.7:** Baby Carpathron no longer talks over you: he mentions a person or a pet he sees at most once every 5
+> minutes (the same dog was announced every 25 s under a new name), and never in the minute after you spoke to him.
+> Carpathron Avatar 1.6.5: listening uses the proven recording upload again (*Settings → Fast listening (beta)* turns
+> the realtime one on; if it hears nothing it now falls back to the recording instead of giving up), and his own voice
+> from the headset speakers no longer starts a recording.
 > **2.3.6:** **⏺ Record** in *Robots → Control → Meta Quest view*: records what you see in the headset together with
 > Carpathron's voice and (tick it) your own voice from the PC microphone, over Wi-Fi, into *MuseCarpathron\recordings*
 > as a .webm video (plays in Chrome, Edge, VLC). Carpathron Avatar 1.6.4: the microphone is never switched off again

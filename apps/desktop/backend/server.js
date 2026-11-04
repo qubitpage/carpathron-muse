@@ -210,9 +210,11 @@ async function startServer({ dataDir, log = console.log, version = '1.0.0', port
       if (!room && companion && Date.now() - (companion.realAt || 0) < 60000) {
         const nowT = Date.now();
         V.noticed = V.noticed || new Map();
+        // 2.3.7: once per KIND (a person / an animal) every 5 minutes — the same dog came back every 25 s under a new
+        // name ("small dark pet", "black dog in crate"…) and talked over the user; never right after the user spoke
         for (const o of seen) {
-          const k = o.label.toLowerCase();
-          if ((o.kind === 'human' || o.kind === 'animal') && nowT - (V.noticed.get(k) || 0) > 90000 && nowT - (V.lastNotice || 0) > 25000) {
+          const k = o.kind;
+          if ((o.kind === 'human' || o.kind === 'animal') && nowT - (V.noticed.get(k) || 0) > 300000 && nowT - (V.lastNotice || 0) > 120000 && nowT - (companion.lastTurnAt || 0) > (Number(process.env.CARPATHRON_QUIET_MS) || 60000) && !companion.busy) {
             V.noticed.set(k, nowT); V.lastNotice = nowT;
             companionSay(o.kind === 'human' ? `Oh, hello! I can see a ${o.label} in front of me.` : `Hey, look! There's a ${o.label} right here.`);
             break;

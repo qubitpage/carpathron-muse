@@ -118,11 +118,9 @@ func _finish_rec() -> void:
 		rt.finish(func(text: String, err: String):
 			if state != "thinking":
 				return
-			if err != "":
-				print("CARPATHRON_RT_ASR fallback (", err, "): sending the recording")
+			if err != "" or text == "":
+				print("CARPATHRON_RT_ASR fallback (", err if err != "" else "empty", "): sending the recording")
 				send_wav(_to_wav(rec))
-			elif text == "":
-				_missed()
 			else:
 				send_text(text))
 		return
@@ -207,7 +205,7 @@ func _on_reply(j: Dictionary) -> void:
 func _next_sentence() -> void:
 	if _queue.is_empty():
 		set_state("idle")
-		_deaf_until = Time.get_ticks_msec() + 450
+		_deaf_until = Time.get_ticks_msec() + 1200
 		return
 	var item = _queue.pop_front()
 	if typeof(item) == TYPE_DICTIONARY:

@@ -108,6 +108,7 @@ class Companion {
   }
 
   async turn({ text, mode = 'demo', guide = false, onFirst = null }) {
+    this.lastTurnAt = Date.now();
     const s = this.store.settings;
     if (!s.apiKey) return { say: 'Add the Meta API key in Muse Carpathron settings, then I can talk with you.', action: 'none' };
     // 2.3.3: "real" = the headset is connected to Baby Carpathron: HE is the companion (his camera, his voice, his

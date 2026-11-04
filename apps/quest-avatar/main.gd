@@ -586,6 +586,9 @@ func _wire_talk(t: Node, ctx: Callable) -> void:
 
 ## realtime speech to text: straight to Meta with the headset's key, or through Muse 2.3.3+ (its key)
 func _rt_cfg() -> Dictionary:
+	# 1.6.5: off unless switched on in Settings (it is not proven on the headset yet; the recording upload is)
+	if not bool(cfg.get_value("ui", "fast_listen", false)):
+		return {}
 	if _brain_now() == "headset" and brain.has_key():
 		var u: String = brain.base.replace("https://", "wss://").replace("http://", "ws://") + "/asr/realtime"
 		return {"url": u, "key": brain.key, "headers": PackedStringArray(), "tls": null}
@@ -607,6 +610,7 @@ func _rt_test(r: Dictionary) -> void:
 	var t: Node = room.talk
 	while t.state != "idle":
 		await get_tree().create_timer(0.1).timeout
+	cfg.set_value("ui", "fast_listen", true)
 	r["rt_cfg"] = not _rt_cfg().is_empty()
 	var got := {}
 	t.replied.connect(func(j): got["j"] = j, CONNECT_ONE_SHOT)
@@ -977,6 +981,7 @@ func _menu_items(p: String) -> Dictionary:
 			its.append({"id": "head", "arg": "", "icon": "◎", "color": C_ORANGE, "label": "Head steering", "sub": "the robot turns where you look", "value": "On" if head_steer else "Off"})
 			its.append({"id": "hints", "arg": "", "icon": "?", "color": C_GREY, "label": "Button labels on the controllers", "sub": "shown when you look at your controllers", "value": "On" if cfg.get_value("ui", "hints", true) else "Off"})
 			its.append({"id": "handsfree", "arg": "", "icon": "🎤", "color": C_ORANGE, "label": "Talk without buttons", "sub": "On: Carpathron listens when you speak.   Off: hold the right grip while you talk", "value": "On" if hands_free else "Off"})
+			its.append({"id": "fastlisten", "arg": "", "icon": "⚡", "color": C_GREY, "label": "Fast listening (beta)", "sub": "your words go to Meta while you talk — test it; if he stops understanding you, switch it off", "value": "On" if bool(cfg.get_value("ui", "fast_listen", false)) else "Off"})
 			its.append({"id": "vision", "arg": "", "icon": "◈", "color": C_ORANGE, "label": "Smart vision", "sub": "Muse marks people, animals, obstacles and items on the robot's picture", "value": "On" if cfg.get_value("ui", "vision", true) else "Off"})
 			its.append({"id": "share", "arg": "", "icon": "⇪", "color": C_BLUE, "label": "Show my view on the PC", "sub": "Muse Carpathron > Robots > Live shows what you see (to record it)", "value": "On" if spectator.enabled else "Off"})
 			its.append({"id": "recenter", "arg": "", "icon": "⊙", "color": C_GREY, "label": "Bring the screen in front of me"})
@@ -1055,6 +1060,9 @@ func _on_menu(action: String, arg: String) -> void:
 			if room != null and room.real:
 				screen.scale = Vector3(CAM_WIN[cam_win], CAM_WIN[cam_win], 1)
 				_cam_win_follow(true)
+			menu3d.refresh()
+		"fastlisten":
+			cfg.set_value("ui", "fast_listen", not bool(cfg.get_value("ui", "fast_listen", false))); cfg.save("user://avatar.cfg")
 			menu3d.refresh()
 		"handsfree":
 			hands_free = not hands_free

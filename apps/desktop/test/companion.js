@@ -1,3 +1,4 @@
+process.env.CARPATHRON_QUIET_MS = process.env.CARPATHRON_QUIET_MS || '1000';
 // Muse 2.3 companion + room vision: the Quest posts its camera picture (/avatar/eyes), smart vision names the room's
 // objects and SAM 3.1 outlines them (contours, not boxes); talking (/avatar/companion) gets a spoken answer with an
 // action; demo = the 3D robot does it, real = the car really drives; the car camera gets contours too.
